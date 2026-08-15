@@ -1,81 +1,68 @@
 # Persistra integration
 
-Persistra and Trading Engine should remain separate projects with a versioned process and file
-boundary.
+Persistra and Trading Engine remain separate projects behind a strict process and file boundary.
 
-Persistra owns:
+Persistra owns provider data, normalized observations, revisions, point-in-time research,
+portfolio construction, manifests, analysis, and visualization. Trading Engine owns causal event
+sequencing, target sizing, risk, order and fill state, execution simulation, exact accounting, and
+execution audit artifacts.
 
-- Provider acquisition and raw caching
-- Normalized historical observations
-- Retrieval-time and source-native revisions
-- Point-in-time features and labels
-- Portfolio construction and vectorized research backtests
-- Research manifests, analysis, and visualization
+## Handoff
 
-Trading Engine owns:
+The JSON scenario carries:
 
-- Event sequencing and strategy callbacks
-- Target-to-order conversion
-- Pre-trade execution risk
-- Order and fill state
-- Execution simulation
-- Exact cash, position, fee, and P&L accounting
-- Execution audit artifacts
+- Required producer metadata preserved as JSON but ignored by execution
+- One explicit executable-instrument catalog
+- Risk, participation, and fee policies
+- Strictly increasing synchronized market slices
+- Scheduled full-portfolio weight or quantity targets
+- Optional direct orders, cancellations, and metrics
 
-## Prototype handoff
+Persistra should:
 
-The current handoff is the version 1 JSON scenario. A small Persistra-side adapter can:
-
-1. Query normalized bars through Persistra's public store API.
+1. Query normalized raw executable bars through its public store API.
 2. Preserve provider-scoped instrument IDs or apply an explicit catalog mapping.
-3. Supply tick size, lot size, currency, and execution eligibility metadata.
-4. Convert research target weights into scheduled target quantities under an explicit sizing
-   policy.
-5. Record the scenario file hash in the Persistra research manifest.
-6. Validate the scenario through the CLI's `--validate-only` mode.
-7. Run the OCaml CLI as a separate process.
-8. Import orders, fills, valuations, and risk decisions from the audit journal for analysis.
-9. Require the final `run_completed` record before accepting the replay as successful.
+3. Supply tick, lot, currency, availability, and receipt policies.
+4. Group one bar per instrument into each synchronized slice.
+5. Preserve original portfolio weights in `target_weights` instead of pre-sizing them.
+6. Populate `metadata` with dataset, policy, and build provenance.
+7. Validate the scenario through the JSON Schema and `--validate-only`.
+8. Run the CLI as a separate process and import its audit journal.
+9. Verify the same scenario SHA-256 in `run_started` and `run_completed`.
+10. Require the terminal completion record before accepting a replay.
 
 Do not let the engine read Persistra's internal DuckDB tables. Their schema and connection
 lifecycle belong to Persistra.
 
-Use the committed [scenario](../schemas/scenario-v1.schema.json) and
-[journal](../schemas/journal-v1.schema.json) JSON Schemas for producer and consumer contract
-checks. Keep the engine parser authoritative for semantic invariants that JSON Schema cannot
-express.
+Use the committed [scenario](../schemas/scenario.schema.json) and
+[journal](../schemas/journal.schema.json) JSON Schemas for structural checks. The engine parser is
+authoritative for ordering, catalog coverage, causality, tick, lot, risk, and accounting
+invariants that JSON Schema cannot express.
 
 ## Time mapping
 
-Preserve Persistra's temporal distinctions:
-
-- Intraday UTC timestamps map to bar event times.
-- Daily calendar labels require an explicit venue-calendar delivery policy. Do not convert them to
-  midnight UTC silently.
+- Intraday UTC timestamps map to slice event times.
+- Daily labels require an explicit venue-calendar delivery policy.
 - Provider as-of time remains source provenance.
-- Persistra retrieval time remains acquisition provenance. It is not replay availability.
-- Scenario `available_at` states when a strategy may use the completed bar.
-- Scenario `received_at` states when this engine run receives it.
-- An order cannot execute from a completed bar whose `start_at` predates the order's `created_at`.
-- A scheduled target or direct order must arrive no later than the next bar start for its
-  instrument. Contiguous next-open bars require zero delivery delay.
+- Persistra retrieval time remains acquisition provenance, not replay availability.
+- `available_at` states when a strategy may use the complete synchronized slice.
+- `received_at` states when the engine run observes it.
+- A scheduled order-changing intent must arrive no later than the next slice start.
 
-Use raw executable prices for fills. Adjusted values can feed strategy features, but splits and
-dividends need explicit engine events before adjusted histories can support share-and-cash
-accounting.
+Use raw prices for execution. Adjusted values can feed features, but splits and dividends require
+explicit engine events before adjusted histories can support share-and-cash accounting.
 
-## Later columnar handoff
+## Larger artifacts
 
-JSON is intentionally simple for the first vertical slice. Larger bar, quote, or order-book
-histories should move to an immutable run bundle:
+JSON is suitable for small and moderate scenarios. Larger histories can use an immutable bundle:
 
 ```text
 run-bundle/
   manifest.json
   instruments.json
-  market-events.parquet
+  market-slices.parquet
   targets.parquet
 ```
 
-Keep the manifest schema normative and hash every artifact. The OCaml reader can use a narrow
-DuckDB C or Arrow IPC boundary without coupling to Persistra's database tables.
+Keep the manifest normative, hash every artifact, and preserve the same catalog, slice, target,
+and audit semantics. A columnar reader must not couple the engine to Persistra's database tables.

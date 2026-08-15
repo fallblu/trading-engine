@@ -62,17 +62,20 @@ let apply_buy (state : t) (fill : Fill.t) (current : position) =
       match Scalar.Money.add fill.notional fill.fee with
       | Error _ as error -> error
       | Ok acquisition_cost -> (
-          match Scalar.Money.add current.cost_basis acquisition_cost with
-          | Error _ as error -> error
-          | Ok cost_basis -> (
-              match Scalar.Money.subtract state.cash acquisition_cost with
-              | Error _ as error -> error
-              | Ok cash ->
-                  let positions =
-                    update_position state.positions fill.instrument_id
-                      { quantity; cost_basis }
-                  in
-                  apply_fee { state with cash; positions } fill.fee)))
+          if Scalar.Money.compare acquisition_cost state.cash > 0 then
+            Error "buy fill exceeds available cash"
+          else
+            match Scalar.Money.add current.cost_basis acquisition_cost with
+            | Error _ as error -> error
+            | Ok cost_basis -> (
+                match Scalar.Money.subtract state.cash acquisition_cost with
+                | Error _ as error -> error
+                | Ok cash ->
+                    let positions =
+                      update_position state.positions fill.instrument_id
+                        { quantity; cost_basis }
+                    in
+                    apply_fee { state with cash; positions } fill.fee)))
 
 let apply_sell (state : t) (fill : Fill.t) (current : position) =
   if Scalar.Quantity.compare fill.Fill.quantity current.quantity > 0 then
@@ -100,6 +103,9 @@ let apply_sell (state : t) (fill : Fill.t) (current : position) =
             | Ok net_proceeds -> (
                 match Scalar.Money.add state.cash net_proceeds with
                 | Error _ as error -> error
+                | Ok cash when Scalar.Money.compare cash Scalar.Money.zero < 0
+                  ->
+                    Error "sell fill fee exceeds available cash and proceeds"
                 | Ok cash -> (
                     match Scalar.Money.subtract net_proceeds removed_basis with
                     | Error _ as error -> error

@@ -1,54 +1,58 @@
 # Trading Engine
 
-Trading Engine is a deterministic, event-driven OCaml execution-engine prototype. It runs a
-typed strategy through pre-trade risk, order management, completed-bar execution, exact cash and
-position accounting, valuation, and an append-only audit journal.
+Trading Engine is a deterministic, event-driven OCaml execution engine. It runs a typed strategy
+through pre-trade risk, order management, synchronized completed-bar execution, exact accounting,
+valuation, and a hash-bound JSON Lines audit journal.
 
-The prototype is replay-first. Its pure kernel and explicit source, strategy, execution, and
-journal layers establish the boundaries needed for later paper and live adapters without putting
-networking or wall-clock state inside the reducer.
+The engine is replay-first. Its pure kernel and explicit source, strategy, execution, and journal
+layers keep networking, files, and wall-clock state outside the reducer.
 
 ```text
-scenario bars and scheduled intents
-                │
-                ▼
-      deterministic engine reducer
-                │
-     ┌──────────┼──────────┐
-     ▼          ▼          ▼
- strategy  risk + OMS  bar simulator
-     │          │          │
-     └──────────┴──── fills┘
-                │
-                ▼
-      accounting + valuation
-                │
-                ▼
-        JSON Lines journal
+scenario slices and scheduled intents
+                  │
+                  ▼
+        deterministic reducer
+                  │
+       ┌──────────┼──────────┐
+       ▼          ▼          ▼
+   strategy  risk + OMS  slice simulator
+       │          │          │
+       └──────────┴──── fills┘
+                  │
+                  ▼
+        accounting + valuation
+                  │
+                  ▼
+          JSON Lines journal
 ```
 
 ## Implemented scope
 
 - OCaml 5.5 and Dune 3.24 with a repository-local opam switch
-- Opaque IDs and checked fixed-point prices, money, and quantities
-- Completed OHLCV bars with source, availability, receipt, and engine ordering
+- Opaque IDs and canonical checked fixed-point prices, weights, money, and quantities
+- Synchronized market slices with one bar per configured instrument
+- Separate market event, availability, receipt, slice, and engine ordering
 - Pure strategy callbacks with causal, immutable context snapshots
-- Direct market and limit orders
-- Target-position planning with target-order replacement
-- Long-only position and outstanding-sell risk
-- Lot-size and tick-size validation
-- Deterministic FIFO volume participation
-- Partial fills, persistent GTC limits, and one-bar IOC markets
+- Portfolio weight and quantity targets covering the complete instrument catalog
+- Current-equity weight sizing at synchronized closing marks with lot rounding
+- Persistent target reconciliation through bounded market-order attempts
+- Direct market and limit orders, cancellations, and metrics
+- Long-only position, outstanding-sell, lot, tick, and size risk
+- Deterministic sell-first matching, then FIFO within each side
+- Shared per-instrument volume participation, partial fills, and GTC limits
+- One-slice IOC market orders
+- Cash buying power with whole-lot clipping and structured `cash_limited` records
 - Fixed and notional fees with explicit rounding
 - Average-cost accounting, realized and unrealized P&L, and equity reconciliation
-- Idempotent fills with conflicting duplicate detection
-- Strict versioned scenario parsing, JSON Schema artifacts, and stable audit JSON
-- Validation-only CLI mode and a terminal replay-completion record
-- Unit, scenario, golden-contract, and property-based tests
+- Strict scenario parsing, JSON Schema artifacts, and stable audit JSON
+- Scenario SHA-256 binding in `run_started` and `run_completed`
+- Exclusive partial journal creation and atomic no-replace finalization
+- Unit, schema-conformance, scenario, golden-contract, and property tests
 
 ## Quick start
 
-The project uses a local switch and does not modify the existing default switch:
+The project uses a local switch and does not modify the default switch. The complete check also
+uses Python's `jsonschema` package to validate the committed scenario and journal fixtures.
 
 ```sh
 cd ~/trading-engine
@@ -57,10 +61,7 @@ opam install . --deps-only --with-test --locked
 make check
 ```
 
-The committed `trading_engine.opam.locked` captures the verified dependency set. Omit `--locked`
-only when intentionally resolving a newer compatible set.
-
-Validate the included scenario with an in-memory dry replay that does not create a journal:
+Validate the included scenario with an in-memory replay:
 
 ```sh
 opam exec -- dune exec trading-engine -- \
@@ -68,7 +69,7 @@ opam exec -- dune exec trading-engine -- \
   --validate-only
 ```
 
-Run the included replay:
+Run it and create a journal:
 
 ```sh
 opam exec -- dune exec trading-engine -- \
@@ -76,64 +77,54 @@ opam exec -- dune exec trading-engine -- \
   --journal demo.journal.jsonl
 ```
 
-The journal path must not already exist. A successful run prints the order counts and reconciled
-final valuation. Its final journal line is a deterministic `run_completed` record. A missing
-completion record means that the replay did not finish successfully.
+The final and `.partial` journal paths must not already exist. The CLI reads the scenario once,
+hashes those exact bytes, parses the same bytes, and binds the hash into the journal. It writes to
+the partial path and publishes the requested path only after `run_completed` is fully written and
+the partial file is closed. An error preserves the partial artifact for diagnosis.
 
-## Execution rules
+## Execution summary
 
-An order emitted after bar sequence `n` cannot execute on bar `n`. It first becomes eligible on a
-later bar whose start is not earlier than the order creation time.
+An order emitted after slice `n` cannot execute on slice `n`. It first becomes eligible on a later
+slice whose start is not earlier than its creation time.
 
-Because the simulator consumes completed bars, a scheduled order-changing intent must be received
-no later than that instrument's next bar start. Contiguous bars therefore require zero delivery
-delay for next-open research; a positive delay is valid when a real gap remains before the next
-bar starts.
+- Market orders attempt the next eligible open and cancel any remainder after that slice.
+- Persistent portfolio targets submit a new bounded attempt after each miss until reached or
+  superseded.
+- Limit orders use deterministic gap improvement and optimistic intrabar touch rules.
+- Eligible sells consume each instrument's participation capacity before buys. FIFO creation
+  order breaks ties within a side.
+- Sell fills across the slice update cash before any buy affordability check.
+- A buy proposal is clipped to the largest affordable whole-lot quantity at its actual fill price,
+  including fees. Cash never becomes negative.
+- The engine emits exactly one valuation after each complete synchronized slice.
 
-- A market order fills at the next eligible bar's open. Volume can create a partial fill. Any
-  remainder is cancelled after that bar.
-- A buy limit fills at the better opening price when the open is at or below the limit. Otherwise,
-  it fills at the limit when the low touches it.
-- A sell limit uses the symmetric open/high rule.
-- Limit remainders remain active.
-- Eligible orders share volume capacity in accepted-order FIFO order.
-- Participation capacity and fills round down to complete instrument lots.
-- Executable OHLC prices must align with the instrument tick size.
-- Every partial fill incurs the configured fixed and notional fees.
-
-Completed bars do not reveal queue position or intrabar path. A touched limit fill is therefore an
-explicit optimistic approximation, not a claim about exchange execution.
-
-Read [Execution model](docs/execution-model.md) for the complete phase and accounting rules.
+Read [Execution model](docs/execution-model.md) for the full phase, price, fee, cash, and accounting
+rules.
 
 ## Project boundaries
 
-This version intentionally omits:
+The current scope omits:
 
 - Broker and streaming-market-data connectors
 - External execution-report ingestion
 - Exchange calendars and time-zone databases
-- Cash buying-power, margin, leverage, and borrow models
-- Short positions
+- Margin, leverage, borrow, and short-position models
 - Multiple currencies and FX conversion
 - Splits, dividends, and other corporate actions
-- Durable snapshots and broker reconciliation
-- Crash-safe or exactly-once journal guarantees
+- Durable reducer snapshots and broker reconciliation
+- `fsync` and restart recovery for journals
 - Tick, trade, and order-book replay
 
-Cash may become negative after a buy or market gap because this prototype has no buying-power or
-margin policy. Positions cannot become negative. Add a broker-specific cash or margin model before
-using the engine to authorize real orders.
-
-The JSON Lines writer uses exclusive creation, appends in engine order, and flushes every event. It
-does not call `fsync`, so it is an audit artifact rather than a production recovery log.
+The journal writer flushes each record, creates its partial file exclusively, and finalizes with an
+exclusive hard link. It does not call `fsync`, so the journal is an audit artifact rather than a
+production recovery log.
 
 ## Architecture and contracts
 
 - [Architecture](docs/architecture.md)
-- [Scenario version 1](docs/scenario-v1.md)
-- [Scenario version 1 JSON Schema](schemas/scenario-v1.schema.json)
-- [Journal record version 1 JSON Schema](schemas/journal-v1.schema.json)
+- [Scenario contract](docs/scenario.md)
+- [Scenario JSON Schema](schemas/scenario.schema.json)
+- [Journal record JSON Schema](schemas/journal.schema.json)
 - [Execution model](docs/execution-model.md)
 - [Persistra integration](docs/persistra.md)
 - [Contributing](CONTRIBUTING.md)

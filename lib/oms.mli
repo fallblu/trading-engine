@@ -14,7 +14,7 @@ val accept :
   id:Id.Order.t ->
   accepted_sequence:int64 ->
   created_at:Ptime.t ->
-  eligible_after_bar_sequence:int64 ->
+  eligible_after_slice_sequence:int64 ->
   Order.request ->
   (t * Order.t, string) result
 
@@ -23,7 +23,7 @@ val reject :
   id:Id.Order.t ->
   rejected_sequence:int64 ->
   created_at:Ptime.t ->
-  eligible_after_bar_sequence:int64 ->
+  eligible_after_slice_sequence:int64 ->
   Order.request ->
   reason:string ->
   (t * Order.t, string) result

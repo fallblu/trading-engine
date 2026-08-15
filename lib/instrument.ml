@@ -8,8 +8,14 @@ type t = {
 
 let validate_label ~name value =
   if String.length value = 0 then Error (name ^ " must not be empty")
-  else if String.trim value <> value then
-    Error (name ^ " must not have leading or trailing whitespace")
+  else if
+    not
+      (String.for_all
+         (fun character ->
+           let code = Char.code character in
+           code >= 0x21 && code <> 0x7f)
+         value)
+  then Error (name ^ " must not contain whitespace or control characters")
   else Ok ()
 
 let create ~id ~symbol ~quote_currency ~tick_size ~lot_size =

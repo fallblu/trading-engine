@@ -1,8 +1,8 @@
-(** Append-only JSON Lines audit writer. This prototype flushes but does not
-    fsync each event. *)
+(** Append-only JSON Lines writer with atomic successful finalization. *)
 
 type t
 
 val create : string -> (t, string) result
 val append : t -> Audit.t -> (unit, string) result
-val close : t -> unit
+val close_preserving_partial : t -> unit
+val commit : t -> (unit, string) result

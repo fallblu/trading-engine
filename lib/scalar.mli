@@ -35,6 +35,21 @@ module Quantity : sig
   val pp : Format.formatter -> t -> unit
 end
 
+module Weight : sig
+  type t
+
+  val scale : int64
+  val zero : t
+  val one : t
+  val of_decimal_string : string -> (t, string) result
+  val to_micros : t -> int64
+  val to_decimal_string : t -> string
+  val compare : t -> t -> int
+  val equal : t -> t -> bool
+  val add : t -> t -> (t, string) result
+  val pp : Format.formatter -> t -> unit
+end
+
 module Money : sig
   type t
 

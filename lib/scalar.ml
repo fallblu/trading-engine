@@ -116,6 +116,8 @@ module Price = struct
   let of_decimal_string value =
     match parse_scaled ~allow_negative:false value with
     | Error _ as error -> error
+    | Ok parsed when not (String.equal (scaled_to_string parsed) value) ->
+        Error "price must use canonical decimal form"
     | Ok value -> of_micros value
 
   let to_micros value = value
@@ -140,6 +142,8 @@ module Quantity = struct
   let of_string value =
     match Int64.of_string_opt value with
     | None -> Error "quantity must be a whole number"
+    | Some parsed when not (String.equal (Int64.to_string parsed) value) ->
+        Error "quantity must use canonical whole-number form"
     | Some value -> of_int64 value
 
   let to_int64 value = value
@@ -182,13 +186,46 @@ module Quantity = struct
   let pp formatter value = Format.pp_print_string formatter (to_string value)
 end
 
+module Weight = struct
+  type t = int64
+
+  let scale = scale
+  let zero = 0L
+  let one = scale
+
+  let of_decimal_string value =
+    match parse_scaled ~allow_negative:false value with
+    | Error _ as error -> error
+    | Ok parsed when not (String.equal (scaled_to_string parsed) value) ->
+        Error "weight must use canonical decimal form"
+    | Ok value when Int64.compare value scale > 0 ->
+        Error "weight must not exceed one"
+    | Ok value -> Ok value
+
+  let to_micros value = value
+  let to_decimal_string = scaled_to_string
+  let compare = Int64.compare
+  let equal = Int64.equal
+  let add = Checked_int64.add
+
+  let pp formatter value =
+    Format.pp_print_string formatter (to_decimal_string value)
+end
+
 module Money = struct
   type t = int64
 
   let scale = scale
   let zero = 0L
   let of_micros value = value
-  let of_decimal_string value = parse_scaled ~allow_negative:true value
+
+  let of_decimal_string value =
+    match parse_scaled ~allow_negative:true value with
+    | Error _ as error -> error
+    | Ok parsed when not (String.equal (scaled_to_string parsed) value) ->
+        Error "money must use canonical decimal form"
+    | Ok value -> Ok value
+
   let to_micros value = value
   let to_decimal_string = scaled_to_string
   let compare = Int64.compare

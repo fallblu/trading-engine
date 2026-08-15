@@ -6,6 +6,15 @@ Use the repository-local opam switch and install development dependencies:
 opam install . --deps-only --with-test --locked
 ```
 
+The schema conformance tests also require Python 3 and the JSON Schema format
+validators:
+
+```sh
+python3 -m venv .venv-schema
+.venv-schema/bin/python -m pip install 'jsonschema[format-nongpl]==4.26.0'
+export PATH="$PWD/.venv-schema/bin:$PATH"
+```
+
 Run the complete local gate before committing:
 
 ```sh

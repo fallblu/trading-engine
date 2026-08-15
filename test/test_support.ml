@@ -8,12 +8,14 @@ let error = function
 
 let price value = T.Scalar.Price.of_decimal_string value |> ok
 let quantity value = T.Scalar.Quantity.of_string value |> ok
+let weight value = T.Scalar.Weight.of_decimal_string value |> ok
 let money value = T.Scalar.Money.of_decimal_string value |> ok
 let instrument_id value = T.Id.Instrument.of_string_exn value
 let order_id value = T.Id.Order.of_string_exn value
 let fill_id value = T.Id.Fill.of_string_exn value
 let run_id value = T.Id.Run.of_string_exn value
 let timestamp value = T.Codec.ptime_of_string value |> ok
+let scenario_sha256 = String.make 64 '0'
 
 let quantity_testable =
   Alcotest.testable T.Scalar.Quantity.pp T.Scalar.Quantity.equal
@@ -32,8 +34,14 @@ let day sequence = Int64.to_int sequence + 1
 
 let bar ?(instrument = instrument_id "test-equity") ?(open_price = "100")
     ?(high_price = "120") ?(low_price = "80") ?(close_price = "105")
-    ?(volume = Some "100") ?start_at ?end_at ?available_at ?received_at sequence
-    =
+    ?(volume = Some "100") _sequence =
+  let volume = Option.map quantity volume in
+  T.Bar.create ~instrument_id:instrument ~open_price:(price open_price)
+    ~high_price:(price high_price) ~low_price:(price low_price)
+    ~close_price:(price close_price) ~volume
+  |> ok
+
+let market_slice ?bars ?start_at ?end_at ?available_at ?received_at sequence =
   let day = day sequence in
   let start_at =
     Option.value start_at
@@ -51,11 +59,9 @@ let bar ?(instrument = instrument_id "test-equity") ?(open_price = "100")
     Option.value received_at
       ~default:(timestamp (Printf.sprintf "2026-01-%02dT21:00:02Z" day))
   in
-  let volume = Option.map quantity volume in
-  T.Bar.create ~source_sequence:sequence ~instrument_id:instrument ~start_at
-    ~end_at ~available_at ~received_at ~open_price:(price open_price)
-    ~high_price:(price high_price) ~low_price:(price low_price)
-    ~close_price:(price close_price) ~volume
+  let bars = Option.value bars ~default:[ bar sequence ] in
+  T.Market_slice.create ~slice_sequence:sequence ~start_at ~end_at ~available_at
+    ~received_at ~bars
   |> ok
 
 let request ?(instrument = instrument_id "test-equity") ?(side = T.Order.Buy)
@@ -67,25 +73,25 @@ let request ?(instrument = instrument_id "test-equity") ?(side = T.Order.Buy)
 
 let accepted_order ?(id = "order-1") ?(accepted_sequence = 1L)
     ?(created_at = timestamp "2026-01-02T21:00:02Z")
-    ?(eligible_after_bar_sequence = 1L) request =
+    ?(eligible_after_slice_sequence = 1L) request =
   T.Order.accept ~id:(order_id id) ~accepted_sequence ~created_at
-    ~eligible_after_bar_sequence request
+    ~eligible_after_slice_sequence request
   |> ok
 
 let oms_with_order ?(id = "order-1") ?(accepted_sequence = 1L)
     ?(created_at = timestamp "2026-01-02T21:00:02Z")
-    ?(eligible_after_bar_sequence = 1L) request =
+    ?(eligible_after_slice_sequence = 1L) request =
   T.Oms.accept T.Oms.empty ~id:(order_id id) ~accepted_sequence ~created_at
-    ~eligible_after_bar_sequence request
+    ~eligible_after_slice_sequence request
   |> ok
 
 let fill ?(id = "fill-1") ?(price_value = "100") ?(quantity_value = "1")
     ?(fee_value = "0") ?(executed_at = timestamp "2026-01-03T14:30:00Z")
-    ?(bar_sequence = 2L) order =
+    ?(slice_sequence = 2L) order =
   T.Fill.create ~id:(fill_id id) ~order_id:order.T.Order.id
     ~instrument_id:order.request.instrument_id ~side:order.request.side
     ~quantity:(quantity quantity_value) ~price:(price price_value)
-    ~fee:(money fee_value) ~executed_at ~bar_sequence
+    ~fee:(money fee_value) ~executed_at ~slice_sequence
   |> ok
 
 let execution ?(participation_bps = 10_000) ?(fixed_fee = "0") ?(fee_bps = 0) ()

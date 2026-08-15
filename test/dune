@@ -10,10 +10,27 @@
   test_engine)
  (deps
   ../examples/demo.json
-  ../schemas/journal-v1.schema.json
-  ../schemas/scenario-v1.schema.json
+  ../schemas/journal.schema.json
+  ../schemas/scenario.schema.json
   fixtures/demo.journal.jsonl)
  (libraries trading_engine yojson alcotest qcheck-core qcheck-alcotest))
 
 (cram
  (deps ../bin/main.exe ../examples/demo.json))
+
+(rule
+ (alias runtest)
+ (deps
+  validate_schemas.py
+  ../examples/demo.json
+  ../schemas/journal.schema.json
+  ../schemas/scenario.schema.json
+  fixtures/demo.journal.jsonl)
+ (action
+  (run
+   python3
+   %{dep:validate_schemas.py}
+   %{dep:../schemas/scenario.schema.json}
+   %{dep:../schemas/journal.schema.json}
+   %{dep:../examples/demo.json}
+   %{dep:fixtures/demo.journal.jsonl})))

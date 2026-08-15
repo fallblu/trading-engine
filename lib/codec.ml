@@ -9,6 +9,7 @@ let string value = `String value
 let int64 value = `String (Int64.to_string value)
 let price value = string (Scalar.Price.to_decimal_string value)
 let quantity value = string (Scalar.Quantity.to_string value)
+let weight value = string (Scalar.Weight.to_decimal_string value)
 let money value = string (Scalar.Money.to_decimal_string value)
 let timestamp value = string (ptime_to_string value)
 let instrument_id value = string (Id.Instrument.to_string value)
@@ -18,17 +19,23 @@ let fill_id value = string (Id.Fill.to_string value)
 let bar_to_yojson bar =
   `Assoc
     [
-      ("source_sequence", int64 bar.Bar.source_sequence);
-      ("instrument_id", instrument_id bar.instrument_id);
-      ("start_at", timestamp bar.start_at);
-      ("end_at", timestamp bar.end_at);
-      ("available_at", timestamp bar.available_at);
-      ("received_at", timestamp bar.received_at);
+      ("instrument_id", instrument_id bar.Bar.instrument_id);
       ("open", price bar.open_price);
       ("high", price bar.high_price);
       ("low", price bar.low_price);
       ("close", price bar.close_price);
       ("volume", Option.fold ~none:`Null ~some:quantity bar.volume);
+    ]
+
+let market_slice_to_yojson market_slice =
+  `Assoc
+    [
+      ("slice_sequence", int64 market_slice.Market_slice.slice_sequence);
+      ("start_at", timestamp market_slice.start_at);
+      ("end_at", timestamp market_slice.end_at);
+      ("available_at", timestamp market_slice.available_at);
+      ("received_at", timestamp market_slice.received_at);
+      ("bars", `List (List.map bar_to_yojson market_slice.bars));
     ]
 
 let request_fields request =
@@ -57,7 +64,8 @@ let order_to_yojson order =
     @ [
         ("created_sequence", int64 order.created_sequence);
         ("created_at", timestamp order.created_at);
-        ("eligible_after_bar_sequence", int64 order.eligible_after_bar_sequence);
+        ( "eligible_after_slice_sequence",
+          int64 order.eligible_after_slice_sequence );
         ("filled_quantity", quantity order.filled_quantity);
         ("filled_notional", money order.filled_notional);
         ("status", string (Order.status_to_string order.status));
@@ -76,7 +84,7 @@ let fill_to_yojson fill =
       ("notional", money fill.notional);
       ("fee", money fill.fee);
       ("executed_at", timestamp fill.executed_at);
-      ("bar_sequence", int64 fill.bar_sequence);
+      ("slice_sequence", int64 fill.slice_sequence);
     ]
 
 let valuation_to_yojson valuation =
@@ -101,11 +109,27 @@ let order_counts_to_yojson counts =
       ("cancelled", `Int counts.cancelled);
     ]
 
+let requested_target_to_yojson target =
+  `Assoc
+    [
+      ("instrument_id", instrument_id target.Audit.instrument_id);
+      ("weight", Option.fold ~none:`Null ~some:weight target.weight);
+      ("quantity", quantity target.quantity);
+      ( "reference_price",
+        Option.fold ~none:`Null ~some:price target.reference_price );
+    ]
+
 let payload_to_yojson = function
-  | Audit.Bar_received bar -> bar_to_yojson bar
-  | Audit.Target_requested { instrument_id = id; quantity = target } ->
+  | Audit.Run_started { scenario_sha256 } ->
+      `Assoc [ ("scenario_sha256", string scenario_sha256) ]
+  | Audit.Market_slice_received market_slice ->
+      market_slice_to_yojson market_slice
+  | Audit.Target_portfolio_requested { basis; targets } ->
       `Assoc
-        [ ("instrument_id", instrument_id id); ("quantity", quantity target) ]
+        [
+          ("basis", string (Audit.target_basis_to_string basis));
+          ("targets", `List (List.map requested_target_to_yojson targets));
+        ]
   | Audit.Order_accepted order | Audit.Order_rejected order ->
       order_to_yojson order
   | Audit.Order_cancelled { order; reason } ->
@@ -115,13 +139,30 @@ let payload_to_yojson = function
           ("reason", string (Audit.cancellation_reason_to_string reason));
         ]
   | Audit.Fill_applied fill -> fill_to_yojson fill
+  | Audit.Cash_limited
+      {
+        order_id = id;
+        instrument_id = instrument;
+        requested_quantity;
+        affordable_quantity;
+        price = fill_price;
+      } ->
+      `Assoc
+        [
+          ("order_id", order_id id);
+          ("instrument_id", instrument_id instrument);
+          ("requested_quantity", quantity requested_quantity);
+          ("affordable_quantity", quantity affordable_quantity);
+          ("price", price fill_price);
+        ]
   | Audit.Intent_rejected reason -> `Assoc [ ("reason", string reason) ]
   | Audit.Metric_emitted { name; value } ->
       `Assoc [ ("name", string name); ("value", string value) ]
   | Audit.Valuation valuation -> valuation_to_yojson valuation
-  | Audit.Run_completed { valuation; order_counts } ->
+  | Audit.Run_completed { scenario_sha256; valuation; order_counts } ->
       `Assoc
         [
+          ("scenario_sha256", string scenario_sha256);
           ("valuation", valuation_to_yojson valuation);
           ("order_counts", order_counts_to_yojson order_counts);
         ]
@@ -129,8 +170,7 @@ let payload_to_yojson = function
 let audit_to_yojson audit =
   `Assoc
     [
-      ("schema_version", `Int audit.Audit.schema_version);
-      ("engine_sequence", int64 audit.engine_sequence);
+      ("engine_sequence", int64 audit.Audit.engine_sequence);
       ("run_id", string (Id.Run.to_string audit.run_id));
       ("recorded_at", timestamp audit.recorded_at);
       ("event_type", string (Audit.event_name audit.event));

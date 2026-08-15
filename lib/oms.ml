@@ -26,26 +26,26 @@ let ensure_new_id state order_id =
 let insert state order =
   { state with orders = Id.Order.Map.add order.Order.id order state.orders }
 
-let accept state ~id ~accepted_sequence ~created_at ~eligible_after_bar_sequence
-    request =
+let accept state ~id ~accepted_sequence ~created_at
+    ~eligible_after_slice_sequence request =
   match ensure_new_id state id with
   | Error _ as error -> error
   | Ok () -> (
       match
         Order.accept ~id ~accepted_sequence ~created_at
-          ~eligible_after_bar_sequence request
+          ~eligible_after_slice_sequence request
       with
       | Error _ as error -> error
       | Ok order -> Ok (insert state order, order))
 
-let reject state ~id ~rejected_sequence ~created_at ~eligible_after_bar_sequence
-    request ~reason =
+let reject state ~id ~rejected_sequence ~created_at
+    ~eligible_after_slice_sequence request ~reason =
   match ensure_new_id state id with
   | Error _ as error -> error
   | Ok () -> (
       match
         Order.reject ~id ~rejected_sequence ~created_at
-          ~eligible_after_bar_sequence request ~reason
+          ~eligible_after_slice_sequence request ~reason
       with
       | Error _ as error -> error
       | Ok order -> Ok (insert state order, order))

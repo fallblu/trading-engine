@@ -28,22 +28,22 @@ let participation_bps state = state.participation_bps
 let fixed_fee state = state.fixed_fee
 let fee_bps state = state.fee_bps
 
-let execution_price order bar =
+let execution_price order market_slice bar =
   match order.Order.request.kind with
-  | Order.Market -> Some (bar.Bar.open_price, bar.start_at)
+  | Order.Market -> Some (bar.Bar.open_price, market_slice.Market_slice.start_at)
   | Order.Limit limit -> (
       match order.request.side with
       | Order.Buy ->
           if Scalar.Price.compare bar.open_price limit <= 0 then
-            Some (bar.open_price, bar.start_at)
+            Some (bar.open_price, market_slice.start_at)
           else if Scalar.Price.compare bar.low_price limit <= 0 then
-            Some (limit, bar.end_at)
+            Some (limit, market_slice.end_at)
           else None
       | Order.Sell ->
           if Scalar.Price.compare bar.open_price limit >= 0 then
-            Some (bar.open_price, bar.start_at)
+            Some (bar.open_price, market_slice.start_at)
           else if Scalar.Price.compare bar.high_price limit >= 0 then
-            Some (limit, bar.end_at)
+            Some (limit, market_slice.end_at)
           else None)
 
 let available_quantity capacity remaining =
@@ -65,13 +65,10 @@ let initial_capacity state instrument bar =
   | Some volume -> (
       match Scalar.Quantity.bps_floor volume ~bps:state.participation_bps with
       | Error _ as error -> error
-      | Ok capacity -> (
-          match
-            Scalar.Quantity.round_down_to_multiple capacity
-              ~multiple:instrument.Instrument.lot_size
-          with
-          | Error _ as error -> error
-          | Ok capacity -> Ok (Limited capacity)))
+      | Ok capacity ->
+          Scalar.Quantity.round_down_to_multiple capacity
+            ~multiple:instrument.Instrument.lot_size
+          |> Result.map (fun capacity -> Limited capacity))
 
 let validate_bar_prices instrument bar =
   let tick = instrument.Instrument.tick_size in
@@ -84,70 +81,89 @@ let validate_bar_prices instrument bar =
   then Error "bar price is not aligned to the instrument tick size"
   else Ok ()
 
-let match_bar state ~instrument ~oms bar =
-  match validate_bar_prices instrument bar with
-  | Error _ as error -> error
-  | Ok () -> (
-      match initial_capacity state instrument bar with
-      | Error _ as error -> error
-      | Ok initial_capacity -> (
-          let eligible =
-            Oms.active_for_instrument oms bar.Bar.instrument_id
-            |> List.filter (fun order ->
-                Int64.compare order.Order.eligible_after_bar_sequence
-                  bar.source_sequence
-                < 0
-                && Ptime.compare order.created_at bar.start_at <= 0)
-          in
-          let step result order =
-            match result with
-            | Error _ as error -> error
-            | Ok (capacity, fills, market_orders) -> (
-                let market_orders =
-                  if Order.is_market order then order.Order.id :: market_orders
-                  else market_orders
-                in
-                match execution_price order bar with
-                | None -> Ok (capacity, fills, market_orders)
-                | Some (price, executed_at) -> (
-                    let quantity =
-                      available_quantity capacity
-                        (Order.remaining_quantity order)
-                    in
-                    if Scalar.Quantity.is_zero quantity then
-                      Ok (capacity, fills, market_orders)
-                    else
-                      match Scalar.Money.notional price quantity with
-                      | Error _ as error -> error
-                      | Ok notional -> (
-                          match
-                            Scalar.Money.fee ~fixed:state.fixed_fee
-                              ~bps:state.fee_bps ~notional
-                          with
-                          | Error _ as error -> error
-                          | Ok fee -> (
-                              match consume capacity quantity with
-                              | Error _ as error -> error
-                              | Ok capacity ->
-                                  let fill =
-                                    {
-                                      order_id = order.id;
-                                      quantity;
-                                      price;
-                                      fee;
-                                      executed_at;
-                                    }
-                                  in
-                                  Ok (capacity, fill :: fills, market_orders))))
-                )
-          in
-          match
-            List.fold_left step (Ok (initial_capacity, [], [])) eligible
-          with
-          | Error _ as error -> error
-          | Ok (_, fills, market_ioc_orders) ->
-              Ok
-                {
-                  fills = List.rev fills;
-                  market_ioc_orders = List.rev market_ioc_orders;
-                }))
+let compare_execution_order left right =
+  let side_rank = function Order.Sell -> 0 | Order.Buy -> 1 in
+  let side =
+    Int.compare
+      (side_rank left.Order.request.side)
+      (side_rank right.Order.request.side)
+  in
+  if side <> 0 then side
+  else
+    let sequence =
+      Int64.compare left.Order.created_sequence right.Order.created_sequence
+    in
+    if sequence <> 0 then sequence else Id.Order.compare left.id right.id
+
+let match_slice state ~instruments ~oms (market_slice : Market_slice.t) =
+  let ( let* ) result function_ =
+    match result with Ok value -> function_ value | Error _ as error -> error
+  in
+  let instrument_map =
+    List.fold_left
+      (fun result instrument ->
+        Id.Instrument.Map.add instrument.Instrument.id instrument result)
+      Id.Instrument.Map.empty instruments
+  in
+  let prepare result bar =
+    let* capacities = result in
+    match Id.Instrument.Map.find_opt bar.Bar.instrument_id instrument_map with
+    | None -> Error "market slice bar refers to an unknown instrument"
+    | Some instrument ->
+        let* () = validate_bar_prices instrument bar in
+        let* capacity = initial_capacity state instrument bar in
+        Ok (Id.Instrument.Map.add bar.instrument_id capacity capacities)
+  in
+  let* capacities =
+    List.fold_left prepare (Ok Id.Instrument.Map.empty) market_slice.bars
+  in
+  let eligible =
+    Oms.active_orders oms
+    |> List.filter (fun order ->
+        Int64.compare order.Order.eligible_after_slice_sequence
+          market_slice.slice_sequence
+        < 0
+        && Ptime.compare order.created_at market_slice.start_at <= 0)
+    |> List.sort compare_execution_order
+  in
+  let step result order =
+    let* capacities, fills, market_orders = result in
+    let market_orders =
+      if Order.is_market order then order.Order.id :: market_orders
+      else market_orders
+    in
+    let instrument_id = order.Order.request.instrument_id in
+    match
+      ( Market_slice.bar market_slice instrument_id,
+        Id.Instrument.Map.find_opt instrument_id capacities )
+    with
+    | None, _ | _, None ->
+        Error "eligible order has no configured bar in the market slice"
+    | Some bar, Some capacity -> (
+        match execution_price order market_slice bar with
+        | None -> Ok (capacities, fills, market_orders)
+        | Some (price, executed_at) ->
+            let quantity =
+              available_quantity capacity (Order.remaining_quantity order)
+            in
+            if Scalar.Quantity.is_zero quantity then
+              Ok (capacities, fills, market_orders)
+            else
+              let* notional = Scalar.Money.notional price quantity in
+              let* fee =
+                Scalar.Money.fee ~fixed:state.fixed_fee ~bps:state.fee_bps
+                  ~notional
+              in
+              let* capacity = consume capacity quantity in
+              let capacities =
+                Id.Instrument.Map.add instrument_id capacity capacities
+              in
+              let fill =
+                { order_id = order.id; quantity; price; fee; executed_at }
+              in
+              Ok (capacities, fill :: fills, market_orders))
+  in
+  let* _, fills, market_ioc_orders =
+    List.fold_left step (Ok (capacities, [], [])) eligible
+  in
+  Ok { fills = List.rev fills; market_ioc_orders = List.rev market_ioc_orders }

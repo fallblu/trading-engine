@@ -1,4 +1,4 @@
-(** A deterministic strategy driven by intents scheduled after bar sequences. *)
+(** A deterministic strategy driven by intents scheduled after market slices. *)
 
 type state
 

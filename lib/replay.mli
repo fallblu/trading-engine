@@ -8,4 +8,8 @@ type result = private {
   audits : Audit.t list;
 }
 
-val run : ?journal_path:string -> Scenario.t -> (result, string) Stdlib.result
+val run :
+  scenario_sha256:string ->
+  ?journal_path:string ->
+  Scenario.t ->
+  (result, string) Stdlib.result

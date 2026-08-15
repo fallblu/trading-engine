@@ -67,6 +67,31 @@ let sell_cannot_make_position_negative () =
     "naked sell rejected" true
     (Result.is_error (T.Account.apply_fill account sell))
 
+let fills_cannot_make_cash_negative () =
+  let account = T.Account.create ~initial_cash:(money "50") in
+  let buy =
+    request ~quantity_value:"1" ()
+    |> accepted_order
+    |> fill ~quantity_value:"1" ~price_value:"100"
+  in
+  Alcotest.(check bool)
+    "unaffordable buy rejected" true
+    (Result.is_error (T.Account.apply_fill account buy));
+  let funded = T.Account.create ~initial_cash:(money "100") in
+  let funded =
+    apply_trade funded ~id:"fee-position" ~side:T.Order.Buy ~quantity_value:"1"
+      ~price_value:"50" ~fee_value:"0"
+  in
+  let expensive_sell =
+    request ~side:T.Order.Sell ~quantity_value:"1" ()
+    |> accepted_order ~id:"order-expensive-sell"
+    |> fill ~id:"fill-expensive-sell" ~quantity_value:"1" ~price_value:"1"
+         ~fee_value:"52"
+  in
+  Alcotest.(check bool)
+    "sell fee cannot overdraw cash" true
+    (Result.is_error (T.Account.apply_fill funded expensive_sell))
+
 let risk_reserves_working_sells () =
   let account = T.Account.create ~initial_cash:(money "10000") in
   let account =
@@ -143,6 +168,8 @@ let tests =
       exact_cost_basis_and_pnl;
     Alcotest.test_case "sell cannot create negative position" `Quick
       sell_cannot_make_position_negative;
+    Alcotest.test_case "fills cannot create negative cash" `Quick
+      fills_cannot_make_cash_negative;
     Alcotest.test_case "risk reserves working sells" `Quick
       risk_reserves_working_sells;
     QCheck_alcotest.to_alcotest ~speed_level:`Quick accounting_identity_property;

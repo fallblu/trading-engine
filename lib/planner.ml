@@ -1,38 +1,21 @@
-type plan = {
-  cancel_orders : Id.Order.t list;
-  submit_order : Order.request option;
-}
-
-let target_position ~account ~oms ~instrument_id ~target =
-  let active = Oms.active_for_instrument oms instrument_id in
-  let direct =
-    List.filter (fun order -> order.Order.request.origin = Order.Direct) active
-  in
-  if direct <> [] then
-    Error
-      "target position conflicts with an active direct order for the instrument"
+let quantity_from_weight ~equity ~weight ~price ~lot_size =
+  if Scalar.Money.compare equity Scalar.Money.zero < 0 then
+    Error "portfolio equity must be nonnegative"
   else
-    let cancel_orders =
-      active
-      |> List.filter (fun order ->
-          order.Order.request.origin = Order.Target_rebalance)
-      |> List.map (fun order -> order.Order.id)
+    let numerator =
+      Z.mul
+        (Z.of_int64 (Scalar.Money.to_micros equity))
+        (Z.of_int64 (Scalar.Weight.to_micros weight))
     in
-    let current = Account.position_quantity account instrument_id in
-    if Scalar.Quantity.equal current target then
-      Ok { cancel_orders; submit_order = None }
+    let denominator =
+      Z.mul
+        (Z.of_int64 Scalar.Weight.scale)
+        (Z.of_int64 (Scalar.Price.to_micros price))
+    in
+    let quantity = Z.div numerator denominator in
+    if not (Z.fits_int64 quantity) then Error "target quantity overflow"
     else
-      let side, quantity_result =
-        if Scalar.Quantity.compare target current > 0 then
-          (Order.Buy, Scalar.Quantity.subtract target current)
-        else (Order.Sell, Scalar.Quantity.subtract current target)
-      in
-      match quantity_result with
+      match Scalar.Quantity.of_int64 (Z.to_int64 quantity) with
       | Error _ as error -> error
-      | Ok quantity -> (
-          match
-            Order.request ~instrument_id ~side ~quantity ~kind:Order.Market
-              ~origin:Order.Target_rebalance
-          with
-          | Error _ as error -> error
-          | Ok request -> Ok { cancel_orders; submit_order = Some request })
+      | Ok quantity ->
+          Scalar.Quantity.round_down_to_multiple quantity ~multiple:lot_size

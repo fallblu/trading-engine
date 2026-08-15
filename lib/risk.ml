@@ -6,10 +6,16 @@ type t = {
 }
 
 let create ~base_currency ~instruments ~max_order_quantity ~max_position =
-  if
-    String.length base_currency = 0
-    || String.trim base_currency <> base_currency
-  then Error "base currency must be a nonempty trimmed string"
+  if String.length base_currency = 0 then
+    Error "base currency must not be empty"
+  else if
+    not
+      (String.for_all
+         (fun character ->
+           let code = Char.code character in
+           code >= 0x21 && code <> 0x7f)
+         base_currency)
+  then Error "base currency must not contain whitespace or control characters"
   else if
     List.exists
       (fun instrument ->
@@ -20,6 +26,20 @@ let create ~base_currency ~instruments ~max_order_quantity ~max_position =
     Error "maximum order quantity must be positive"
   else if Scalar.Quantity.is_zero max_position then
     Error "maximum position must be positive"
+  else if
+    List.exists
+      (fun instrument ->
+        Scalar.Quantity.compare max_order_quantity
+          instrument.Instrument.lot_size
+        < 0)
+      instruments
+  then Error "maximum order quantity must cover every instrument lot size"
+  else if
+    List.exists
+      (fun instrument ->
+        Scalar.Quantity.compare max_position instrument.Instrument.lot_size < 0)
+      instruments
+  then Error "maximum position must cover every instrument lot size"
   else
     let add result instrument =
       match result with
@@ -41,6 +61,9 @@ let instruments state =
 
 let instrument state instrument_id =
   Id.Instrument.Map.find_opt instrument_id state.instruments
+
+let max_order_quantity state = state.max_order_quantity
+let max_position state = state.max_position
 
 let sum_active_quantity orders side =
   let add result order =

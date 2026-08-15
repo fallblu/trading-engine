@@ -26,7 +26,17 @@ let scalar_decimal_round_trip () =
     (Result.is_error (T.Scalar.Price.of_decimal_string "0"));
   Alcotest.(check bool)
     "excess precision rejected" true
-    (Result.is_error (T.Scalar.Money.of_decimal_string "1.0000001"))
+    (Result.is_error (T.Scalar.Money.of_decimal_string "1.0000001"));
+  List.iter
+    (fun noncanonical ->
+      Alcotest.(check bool)
+        (noncanonical ^ " rejected")
+        true
+        (Result.is_error (T.Scalar.Money.of_decimal_string noncanonical)))
+    [ "01"; "1.0"; "-0" ];
+  Alcotest.(check bool)
+    "leading-zero quantity rejected" true
+    (Result.is_error (T.Scalar.Quantity.of_string "01"))
 
 let scalar_overflow_is_rejected () =
   let maximum = T.Scalar.Money.of_micros Int64.max_int in
@@ -57,20 +67,26 @@ let fee_rounds_up_to_one_micro () =
   Alcotest.check money_testable "fixed plus rounded variable fee"
     (money "0.250001") fee
 
-let bar_validation () =
+let market_slice_validation () =
   let start_at = timestamp "2026-01-02T14:30:00Z" in
   let end_at = timestamp "2026-01-02T21:00:00Z" in
   let available_at = timestamp "2026-01-02T20:59:59Z" in
   let received_at = timestamp "2026-01-02T21:00:01Z" in
   let result =
-    T.Bar.create ~source_sequence:1L
-      ~instrument_id:(instrument_id "test-equity")
-      ~start_at ~end_at ~available_at ~received_at ~open_price:(price "100")
-      ~high_price:(price "110") ~low_price:(price "90")
-      ~close_price:(price "105") ~volume:None
+    T.Market_slice.create ~slice_sequence:1L ~start_at ~end_at ~available_at
+      ~received_at
+      ~bars:[ bar 1L ]
   in
   Alcotest.(check bool)
     "premature availability rejected" true (Result.is_error result)
+
+let sha256_vectors () =
+  Alcotest.(check string)
+    "empty" "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    (T.Sha256.digest_string "");
+  Alcotest.(check string)
+    "abc" "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    (T.Sha256.digest_string "abc")
 
 let oms_partial_fill_and_duplicate () =
   let request = request ~quantity_value:"10" () in
@@ -158,6 +174,19 @@ let risk_enforces_one_currency () =
        (T.Risk.create ~base_currency:"USD" ~instruments
           ~max_order_quantity:(quantity "1000") ~max_position:(quantity "1000")))
 
+let risk_limits_cover_lots () =
+  let configured = instrument ~lot_size:"10" () in
+  Alcotest.(check bool)
+    "order limit smaller than lot rejected" true
+    (Result.is_error
+       (T.Risk.create ~base_currency:"USD" ~instruments:[ configured ]
+          ~max_order_quantity:(quantity "5") ~max_position:(quantity "100")));
+  Alcotest.(check bool)
+    "position limit smaller than lot rejected" true
+    (Result.is_error
+       (T.Risk.create ~base_currency:"USD" ~instruments:[ configured ]
+          ~max_order_quantity:(quantity "100") ~max_position:(quantity "5")))
+
 let tests =
   [
     Alcotest.test_case "identifier validation" `Quick identifier_validation;
@@ -165,7 +194,8 @@ let tests =
       scalar_decimal_round_trip;
     Alcotest.test_case "checked overflow" `Quick scalar_overflow_is_rejected;
     Alcotest.test_case "fee rounds up" `Quick fee_rounds_up_to_one_micro;
-    Alcotest.test_case "bar validation" `Quick bar_validation;
+    Alcotest.test_case "market slice validation" `Quick market_slice_validation;
+    Alcotest.test_case "SHA-256 vectors" `Quick sha256_vectors;
     Alcotest.test_case "OMS partial and duplicate fills" `Quick
       oms_partial_fill_and_duplicate;
     Alcotest.test_case "OMS rejects overfill" `Quick oms_rejects_overfill;
@@ -175,4 +205,5 @@ let tests =
       risk_checks_lot_and_tick_alignment;
     Alcotest.test_case "risk enforces one currency" `Quick
       risk_enforces_one_currency;
+    Alcotest.test_case "risk limits cover lots" `Quick risk_limits_cover_lots;
   ]

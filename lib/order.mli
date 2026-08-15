@@ -24,7 +24,7 @@ type t = private {
   request : request;
   created_sequence : int64;
   created_at : Ptime.t;
-  eligible_after_bar_sequence : int64;
+  eligible_after_slice_sequence : int64;
   filled_quantity : Scalar.Quantity.t;
   filled_notional : Scalar.Money.t;
   status : status;
@@ -42,7 +42,7 @@ val accept :
   id:Id.Order.t ->
   accepted_sequence:int64 ->
   created_at:Ptime.t ->
-  eligible_after_bar_sequence:int64 ->
+  eligible_after_slice_sequence:int64 ->
   request ->
   (t, string) result
 
@@ -50,7 +50,7 @@ val reject :
   id:Id.Order.t ->
   rejected_sequence:int64 ->
   created_at:Ptime.t ->
-  eligible_after_bar_sequence:int64 ->
+  eligible_after_slice_sequence:int64 ->
   request ->
   reason:string ->
   (t, string) result

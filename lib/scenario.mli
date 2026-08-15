@@ -1,7 +1,7 @@
-(** Version 1 replay-scenario input contract. *)
+(** Strict replay scenario input contract. *)
 
 type t = private {
-  schema_version : int;
+  metadata : Yojson.Safe.t;
   run_id : Id.Run.t;
   base_currency : string;
   initial_cash : Scalar.Money.t;
@@ -10,7 +10,7 @@ type t = private {
   execution : Execution.t;
   max_internal_events : int;
   schedule : (int64 * Strategy.intent list) list;
-  bars : Bar.t list;
+  slices : Market_slice.t list;
 }
 
 val of_yojson : Yojson.Safe.t -> (t, string) result

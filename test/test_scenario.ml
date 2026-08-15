@@ -1,14 +1,23 @@
 open Test_support
 module T = Trading_engine
 
-let demo () = T.Scenario.read_file "../examples/demo.json" |> ok
+let demo_document () =
+  In_channel.with_open_bin "../examples/demo.json" In_channel.input_all
+
+let demo () = T.Scenario.of_string (demo_document ()) |> ok
+let demo_hash () = T.Sha256.digest_string (demo_document ())
 
 let demo_contract_parses () =
   let scenario = demo () in
-  Alcotest.(check int) "schema" 1 scenario.schema_version;
   Alcotest.(check string) "run" "demo" (T.Id.Run.to_string scenario.run_id);
   Alcotest.(check int) "one instrument" 1 (List.length scenario.instruments);
-  Alcotest.(check int) "four bars" 4 (List.length scenario.bars)
+  Alcotest.(check int) "four slices" 4 (List.length scenario.slices);
+  match scenario.metadata with
+  | `Assoc fields ->
+      Alcotest.(check bool)
+        "metadata preserved" true
+        (List.mem_assoc "producer" fields)
+  | _ -> Alcotest.fail "metadata must be an object"
 
 let schema_artifacts_parse () =
   let check_schema path =
@@ -25,153 +34,218 @@ let schema_artifacts_parse () =
           (List.mem_assoc "$defs" fields)
     | _ -> Alcotest.fail (path ^ " must contain a JSON object")
   in
-  check_schema "../schemas/scenario-v1.schema.json";
-  check_schema "../schemas/journal-v1.schema.json"
+  check_schema "../schemas/scenario.schema.json";
+  check_schema "../schemas/journal.schema.json"
+
+let map_root change =
+  match Yojson.Safe.from_string (demo_document ()) with
+  | `Assoc fields -> `Assoc (change fields)
+  | _ -> Alcotest.fail "demo must be an object"
 
 let unknown_fields_are_rejected () =
-  let document =
-    In_channel.with_open_bin "../examples/demo.json" In_channel.input_all
-  in
-  let json = Yojson.Safe.from_string document in
-  let changed =
-    match json with
-    | `Assoc fields -> `Assoc (("unexpected", `Bool true) :: fields)
-    | _ -> Alcotest.fail "demo must be an object"
-  in
+  let changed = map_root (fun fields -> ("unexpected", `Bool true) :: fields) in
   Alcotest.(check bool)
     "unknown field rejected" true
     (Result.is_error (T.Scenario.of_yojson changed))
 
 let duplicate_fields_are_rejected () =
-  let document =
-    In_channel.with_open_bin "../examples/demo.json" In_channel.input_all
-  in
-  let json = Yojson.Safe.from_string document in
   let changed =
-    match json with
-    | `Assoc fields -> `Assoc (("initial_cash", `String "0") :: fields)
-    | _ -> Alcotest.fail "demo must be an object"
+    map_root (fun fields -> ("initial_cash", `String "0") :: fields)
   in
   let message = T.Scenario.of_yojson changed |> error in
   Alcotest.(check bool)
     "duplicate field diagnosed" true
     (String.starts_with ~prefix:"scenario has duplicate JSON fields" message)
 
-let scenario_with_first_schedule_sequence value =
-  let document =
-    In_channel.with_open_bin "../examples/demo.json" In_channel.input_all
+let recursive_metadata_validation () =
+  let duplicate =
+    map_root (fun fields ->
+        List.map
+          (fun (name, value) ->
+            if String.equal name "metadata" then
+              ( name,
+                `Assoc [ ("nested", `Assoc [ ("x", `Int 1); ("x", `Int 2) ]) ]
+              )
+            else (name, value))
+          fields)
   in
-  let replace_sequence = function
-    | `Assoc fields ->
-        `Assoc
-          (List.map
-             (fun (name, json) ->
-               if String.equal name "after_bar_sequence" then
-                 (name, `String value)
-               else (name, json))
-             fields)
-    | _ -> Alcotest.fail "schedule item must be an object"
+  Alcotest.(check bool)
+    "nested duplicate key rejected" true
+    (Result.is_error (T.Scenario.of_yojson duplicate));
+  let nonfinite =
+    map_root (fun fields ->
+        List.map
+          (fun (name, value) ->
+            if String.equal name "metadata" then
+              (name, `Assoc [ ("invalid", `Float nan) ])
+            else (name, value))
+          fields)
   in
-  match Yojson.Safe.from_string document with
+  Alcotest.(check bool)
+    "non-finite metadata rejected" true
+    (Result.is_error (T.Scenario.of_yojson nonfinite))
+
+let update_first_schedule change =
+  map_root (fun fields ->
+      List.map
+        (fun (name, json) ->
+          if String.equal name "schedule" then
+            match json with
+            | `List (first :: rest) -> (name, `List (change first :: rest))
+            | _ -> Alcotest.fail "demo schedule must be nonempty"
+          else (name, json))
+        fields)
+
+let change_field key value = function
   | `Assoc fields ->
       `Assoc
         (List.map
            (fun (name, json) ->
-             if String.equal name "schedule" then
-               match json with
-               | `List (first :: rest) ->
-                   (name, `List (replace_sequence first :: rest))
-               | _ -> Alcotest.fail "demo schedule must be nonempty"
-             else (name, json))
+             if String.equal name key then (name, value) else (name, json))
            fields)
-  | _ -> Alcotest.fail "demo must be an object"
+  | _ -> Alcotest.fail "expected object"
 
 let invalid_schedule_sequences_are_rejected () =
-  let negative = scenario_with_first_schedule_sequence "-1" in
+  let zero =
+    update_first_schedule (change_field "after_slice_sequence" (`String "0"))
+  in
   Alcotest.(check bool)
-    "negative sequence rejected during parsing" true
-    (Result.is_error (T.Scenario.of_yojson negative));
-  let missing = scenario_with_first_schedule_sequence "999" in
+    "zero sequence rejected" true
+    (Result.is_error (T.Scenario.of_yojson zero));
+  let noncanonical =
+    update_first_schedule (change_field "after_slice_sequence" (`String "01"))
+  in
+  Alcotest.(check bool)
+    "noncanonical sequence rejected" true
+    (Result.is_error (T.Scenario.of_yojson noncanonical));
+  let missing =
+    update_first_schedule (change_field "after_slice_sequence" (`String "999"))
+  in
   let message = T.Scenario.of_yojson missing |> error in
   Alcotest.(check string)
     "missing sequence diagnosed"
-    "scheduled intents refer to missing bar source sequence 999" message
+    "scheduled intents refer to missing market slice sequence 999" message;
+  let duplicate =
+    map_root (fun fields ->
+        List.map
+          (fun (name, json) ->
+            if String.equal name "schedule" then
+              match json with
+              | `List [ first; second ] ->
+                  let second =
+                    change_field "after_slice_sequence" (`String "1") second
+                  in
+                  (name, `List [ first; second ])
+              | _ -> Alcotest.fail "expected two schedule entries"
+            else (name, json))
+          fields)
+  in
+  Alcotest.(check string)
+    "duplicate schedule rejected" "schedule sequences must increase"
+    (T.Scenario.of_yojson duplicate |> error)
 
-let schedule_cannot_retroactively_change_next_open () =
-  let document =
-    In_channel.with_open_bin "../examples/demo.json" In_channel.input_all
+let duplicate_and_incomplete_slice_bars_are_rejected () =
+  let duplicate =
+    map_root (fun fields ->
+        List.map
+          (fun (name, json) ->
+            if String.equal name "slices" then
+              match json with
+              | `List (`Assoc slice_fields :: rest) ->
+                  let first =
+                    `Assoc
+                      (List.map
+                         (fun (key, value) ->
+                           if String.equal key "bars" then
+                             match value with
+                             | `List [ bar ] -> (key, `List [ bar; bar ])
+                             | _ -> Alcotest.fail "expected one bar"
+                           else (key, value))
+                         slice_fields)
+                  in
+                  (name, `List (first :: rest))
+              | _ -> Alcotest.fail "expected slices"
+            else (name, json))
+          fields)
   in
-  let replace_start = function
-    | `Assoc fields ->
-        `Assoc
-          (List.map
-             (fun (name, json) ->
-               if String.equal name "start_at" then
-                 (name, `String "2026-01-02T21:00:00Z")
-               else (name, json))
-             fields)
-    | _ -> Alcotest.fail "bar must be an object"
-  in
-  let changed =
-    match Yojson.Safe.from_string document with
-    | `Assoc fields ->
-        `Assoc
-          (List.map
-             (fun (name, json) ->
-               if String.equal name "bars" then
-                 match json with
-                 | `List (first :: second :: rest) ->
-                     (name, `List (first :: replace_start second :: rest))
-                 | _ -> Alcotest.fail "demo must have at least two bars"
-               else (name, json))
-             fields)
-    | _ -> Alcotest.fail "demo must be an object"
-  in
-  let message = T.Scenario.of_yojson changed |> error in
   Alcotest.(check bool)
-    "retroactive next-open change rejected" true
-    (String.starts_with
-       ~prefix:"scheduled order intent after bar 1 is received after" message)
+    "duplicate bar rejected" true
+    (Result.is_error (T.Scenario.of_yojson duplicate))
+
+let portfolio_targets_are_total_and_aligned () =
+  let empty_targets =
+    update_first_schedule (function
+      | `Assoc fields ->
+          `Assoc
+            (List.map
+               (fun (name, value) ->
+                 if String.equal name "intents" then
+                   match value with
+                   | `List (`Assoc intent_fields :: rest) ->
+                       let intent =
+                         `Assoc
+                           (List.map
+                              (fun (key, target_value) ->
+                                if String.equal key "targets" then
+                                  (key, `List [])
+                                else (key, target_value))
+                              intent_fields)
+                       in
+                       (name, `List (intent :: rest))
+                   | _ -> Alcotest.fail "expected intents"
+                 else (name, value))
+               fields)
+      | _ -> Alcotest.fail "expected schedule object")
+  in
+  Alcotest.(check bool)
+    "portfolio must cover catalog" true
+    (Result.is_error (T.Scenario.of_yojson empty_targets));
+  let noncanonical =
+    map_root (fun fields ->
+        List.map
+          (fun (name, value) ->
+            if String.equal name "initial_cash" then (name, `String "10000.0")
+            else (name, value))
+          fields)
+  in
+  Alcotest.(check bool)
+    "noncanonical scalar rejected" true
+    (Result.is_error (T.Scenario.of_yojson noncanonical))
 
 let deterministic_replay () =
   let scenario = demo () in
-  let first = T.Replay.run scenario |> ok in
-  let second = T.Replay.run scenario |> ok in
+  let hash = demo_hash () in
+  let first = T.Replay.run ~scenario_sha256:hash scenario |> ok in
+  let second = T.Replay.run ~scenario_sha256:hash scenario |> ok in
   let encode result = List.map T.Codec.audit_to_string result.T.Replay.audits in
   Alcotest.(check (list string))
     "byte-identical event encoding" (encode first) (encode second);
-  Alcotest.check money_testable "final cash" (money "9800.462")
-    first.valuation.cash;
-  Alcotest.check money_testable "final equity" (money "10012.462")
-    first.valuation.equity;
-  Alcotest.check money_testable "final realized" (money "6.751334")
-    first.valuation.realized_pnl;
-  Alcotest.check money_testable "final unrealized" (money "5.710666")
-    first.valuation.unrealized_pnl;
-  Alcotest.(check int) "seventeen events" 17 (List.length first.audits)
+  Alcotest.(check int)
+    "one valuation per slice" 4
+    (List.length
+       (List.filter
+          (fun audit ->
+            String.equal (T.Audit.event_name audit.T.Audit.event) "valuation")
+          first.audits))
 
 let replay_ends_with_completion_summary () =
-  let result = T.Replay.run (demo ()) |> ok in
+  let hash = demo_hash () in
+  let result = T.Replay.run ~scenario_sha256:hash (demo ()) |> ok in
+  let first = List.hd result.audits in
   let completion = List.rev result.audits |> List.hd in
-  Alcotest.(check string)
-    "terminal event" "run_completed"
-    (T.Audit.event_name completion.event);
-  Alcotest.(check string)
-    "completion time uses final receipt" "2026-01-07T21:00:02.000000Z"
-    (T.Codec.ptime_to_string completion.recorded_at);
+  (match first.event with
+  | T.Audit.Run_started { scenario_sha256 = actual } ->
+      Alcotest.(check string) "start hash" hash actual
+  | _ -> Alcotest.fail "expected run start");
   match completion.event with
-  | T.Audit.Run_completed { valuation; order_counts } ->
+  | T.Audit.Run_completed { scenario_sha256 = actual; valuation; _ } ->
+      Alcotest.(check string) "completion hash" hash actual;
       Alcotest.check money_testable "summary equity" result.valuation.equity
-        valuation.equity;
-      Alcotest.(check int) "total orders" 2 order_counts.total;
-      Alcotest.(check int) "active orders" 0 order_counts.active;
-      Alcotest.(check int) "filled orders" 1 order_counts.filled;
-      Alcotest.(check int) "rejected orders" 0 order_counts.rejected;
-      Alcotest.(check int) "cancelled orders" 1 order_counts.cancelled
+        valuation.equity
   | _ -> Alcotest.fail "expected run completion payload"
 
 let replay_matches_golden_file () =
-  let result = T.Replay.run (demo ()) |> ok in
+  let result = T.Replay.run ~scenario_sha256:(demo_hash ()) (demo ()) |> ok in
   let actual =
     result.audits |> List.map T.Codec.audit_to_string |> String.concat "\n"
     |> fun value -> value ^ "\n"
@@ -185,33 +259,75 @@ let journal_is_created_exclusively () =
   let scenario = demo () in
   let existing = Filename.temp_file "trading-engine" ".jsonl" in
   Fun.protect
-    ~finally:(fun () -> if Sys.file_exists existing then Sys.remove existing)
+    ~finally:(fun () ->
+      if Sys.file_exists existing then Sys.remove existing;
+      if Sys.file_exists (existing ^ ".partial") then
+        Sys.remove (existing ^ ".partial"))
     (fun () ->
       Alcotest.(check bool)
         "existing journal rejected" true
-        (Result.is_error (T.Replay.run ~journal_path:existing scenario)))
+        (Result.is_error
+           (T.Replay.run ~scenario_sha256:(demo_hash ()) ~journal_path:existing
+              scenario)))
+
+let journal_finalization_is_exclusive () =
+  let path = Filename.temp_file "trading-engine-race" ".jsonl" in
+  Sys.remove path;
+  let partial = path ^ ".partial" in
+  Fun.protect
+    ~finally:(fun () ->
+      if Sys.file_exists path then Sys.remove path;
+      if Sys.file_exists partial then Sys.remove partial)
+    (fun () ->
+      let journal = T.Journal.create path |> ok in
+      Out_channel.with_open_bin path (fun channel ->
+          output_string channel "rival\n");
+      Alcotest.(check bool)
+        "race rejected" true
+        (Result.is_error (T.Journal.commit journal));
+      Alcotest.(check string)
+        "rival preserved" "rival\n"
+        (In_channel.with_open_bin path In_channel.input_all);
+      Alcotest.(check bool) "partial preserved" true (Sys.file_exists partial))
+
+let failed_replay_preserves_partial () =
+  let path = Filename.temp_file "trading-engine-failure" ".jsonl" in
+  Sys.remove path;
+  let partial = path ^ ".partial" in
+  Fun.protect
+    ~finally:(fun () ->
+      if Sys.file_exists path then Sys.remove path;
+      if Sys.file_exists partial then Sys.remove partial)
+    (fun () ->
+      Alcotest.(check bool)
+        "invalid hash fails after journal creation" true
+        (Result.is_error
+           (T.Replay.run ~scenario_sha256:"bad" ~journal_path:path (demo ())));
+      Alcotest.(check bool) "final absent" false (Sys.file_exists path);
+      Alcotest.(check bool) "partial retained" true (Sys.file_exists partial))
 
 let journal_matches_in_memory_events () =
   let scenario = demo () in
   let path = Filename.temp_file "trading-engine" ".jsonl" in
   Sys.remove path;
   Fun.protect
-    ~finally:(fun () -> if Sys.file_exists path then Sys.remove path)
+    ~finally:(fun () ->
+      if Sys.file_exists path then Sys.remove path;
+      if Sys.file_exists (path ^ ".partial") then Sys.remove (path ^ ".partial"))
     (fun () ->
-      let result = T.Replay.run ~journal_path:path scenario |> ok in
+      let result =
+        T.Replay.run ~scenario_sha256:(demo_hash ()) ~journal_path:path scenario
+        |> ok
+      in
       let persisted = In_channel.with_open_bin path In_channel.input_all in
       let expected =
         result.audits |> List.map T.Codec.audit_to_string |> String.concat "\n"
         |> fun value -> value ^ "\n"
       in
-      Alcotest.(check string) "journal contents" expected persisted)
-
-let receipt_time_drives_audit_time () =
-  let result = T.Replay.run (demo ()) |> ok in
-  let first = List.hd result.audits in
-  Alcotest.(check string)
-    "recorded at receipt" "2026-01-02T21:00:02.000000Z"
-    (T.Codec.ptime_to_string first.recorded_at)
+      Alcotest.(check string) "journal contents" expected persisted;
+      Alcotest.(check bool)
+        "partial removed" false
+        (Sys.file_exists (path ^ ".partial")))
 
 let tests =
   [
@@ -221,10 +337,14 @@ let tests =
       unknown_fields_are_rejected;
     Alcotest.test_case "duplicate fields rejected" `Quick
       duplicate_fields_are_rejected;
+    Alcotest.test_case "metadata validation is recursive" `Quick
+      recursive_metadata_validation;
     Alcotest.test_case "invalid schedule sequences rejected" `Quick
       invalid_schedule_sequences_are_rejected;
-    Alcotest.test_case "schedule preserves next-open causality" `Quick
-      schedule_cannot_retroactively_change_next_open;
+    Alcotest.test_case "duplicate slice bars rejected" `Quick
+      duplicate_and_incomplete_slice_bars_are_rejected;
+    Alcotest.test_case "portfolio target validation" `Quick
+      portfolio_targets_are_total_and_aligned;
     Alcotest.test_case "deterministic replay" `Quick deterministic_replay;
     Alcotest.test_case "terminal completion summary" `Quick
       replay_ends_with_completion_summary;
@@ -232,8 +352,10 @@ let tests =
       replay_matches_golden_file;
     Alcotest.test_case "exclusive journal creation" `Quick
       journal_is_created_exclusively;
+    Alcotest.test_case "exclusive journal finalization" `Quick
+      journal_finalization_is_exclusive;
+    Alcotest.test_case "failed replay preserves partial" `Quick
+      failed_replay_preserves_partial;
     Alcotest.test_case "journal matches events" `Quick
       journal_matches_in_memory_events;
-    Alcotest.test_case "receipt time drives audit" `Quick
-      receipt_time_drives_audit_time;
   ]

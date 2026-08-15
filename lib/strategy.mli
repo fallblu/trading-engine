@@ -3,16 +3,24 @@
 type context
 
 type event =
-  | Bar_closed of Bar.t
+  | Market_slice_closed of Market_slice.t
   | Fill_received of Fill.t
   | Order_updated of Order.t
   | Intent_rejected of string
 
+type weight_target = {
+  instrument_id : Id.Instrument.t;
+  weight : Scalar.Weight.t;
+}
+
+type quantity_target = {
+  instrument_id : Id.Instrument.t;
+  quantity : Scalar.Quantity.t;
+}
+
 type intent =
-  | Target_position of {
-      instrument_id : Id.Instrument.t;
-      quantity : Scalar.Quantity.t;
-    }
+  | Target_weights of weight_target list
+  | Target_quantities of quantity_target list
   | Submit_order of Order.request
   | Cancel_order of Id.Order.t
   | Emit_metric of { name : string; value : string }

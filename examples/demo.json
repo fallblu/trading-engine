@@ -1,5 +1,8 @@
 {
-  "schema_version": 1,
+  "metadata": {
+    "producer": "trading-engine-demo",
+    "purpose": "deterministic conformance fixture"
+  },
   "run_id": "demo",
   "base_currency": "USD",
   "initial_cash": "10000",
@@ -24,83 +27,107 @@
   "max_internal_events": 1000,
   "schedule": [
     {
-      "after_bar_sequence": "1",
+      "after_slice_sequence": "1",
       "intents": [
         {
-          "type": "target_position",
-          "instrument_id": "demo-equity-acme",
-          "quantity": "10"
+          "type": "target_weights",
+          "targets": [
+            {
+              "instrument_id": "demo-equity-acme",
+              "weight": "0.1"
+            }
+          ]
         },
         {
           "type": "emit_metric",
-          "name": "desired_position",
-          "value": "10"
+          "name": "desired_weight",
+          "value": "0.1"
         }
       ]
     },
     {
-      "after_bar_sequence": "3",
+      "after_slice_sequence": "3",
       "intents": [
         {
-          "type": "target_position",
-          "instrument_id": "demo-equity-acme",
-          "quantity": "2"
+          "type": "target_quantities",
+          "targets": [
+            {
+              "instrument_id": "demo-equity-acme",
+              "quantity": "2"
+            }
+          ]
         }
       ]
     }
   ],
-  "bars": [
+  "slices": [
     {
-      "source_sequence": "1",
-      "instrument_id": "demo-equity-acme",
+      "slice_sequence": "1",
       "start_at": "2026-01-02T14:30:00Z",
       "end_at": "2026-01-02T21:00:00Z",
       "available_at": "2026-01-02T21:00:01Z",
       "received_at": "2026-01-02T21:00:02Z",
-      "open": "100",
-      "high": "105",
-      "low": "99",
-      "close": "104",
-      "volume": "100"
+      "bars": [
+        {
+          "instrument_id": "demo-equity-acme",
+          "open": "100",
+          "high": "105",
+          "low": "99",
+          "close": "104",
+          "volume": "100"
+        }
+      ]
     },
     {
-      "source_sequence": "2",
-      "instrument_id": "demo-equity-acme",
+      "slice_sequence": "2",
       "start_at": "2026-01-05T14:30:00Z",
       "end_at": "2026-01-05T21:00:00Z",
       "available_at": "2026-01-05T21:00:01Z",
       "received_at": "2026-01-05T21:00:02Z",
-      "open": "103",
-      "high": "108",
-      "low": "102",
-      "close": "107",
-      "volume": "12"
+      "bars": [
+        {
+          "instrument_id": "demo-equity-acme",
+          "open": "103",
+          "high": "108",
+          "low": "102",
+          "close": "107",
+          "volume": "12"
+        }
+      ]
     },
     {
-      "source_sequence": "3",
-      "instrument_id": "demo-equity-acme",
+      "slice_sequence": "3",
       "start_at": "2026-01-06T14:30:00Z",
       "end_at": "2026-01-06T21:00:00Z",
       "available_at": "2026-01-06T21:00:01Z",
       "received_at": "2026-01-06T21:00:02Z",
-      "open": "107",
-      "high": "109",
-      "low": "104",
-      "close": "105",
-      "volume": "100"
+      "bars": [
+        {
+          "instrument_id": "demo-equity-acme",
+          "open": "107",
+          "high": "109",
+          "low": "104",
+          "close": "105",
+          "volume": "100"
+        }
+      ]
     },
     {
-      "source_sequence": "4",
-      "instrument_id": "demo-equity-acme",
+      "slice_sequence": "4",
       "start_at": "2026-01-07T14:30:00Z",
       "end_at": "2026-01-07T21:00:00Z",
       "available_at": "2026-01-07T21:00:01Z",
       "received_at": "2026-01-07T21:00:02Z",
-      "open": "105",
-      "high": "107",
-      "low": "103",
-      "close": "106",
-      "volume": "100"
+      "bars": [
+        {
+          "instrument_id": "demo-equity-acme",
+          "open": "105",
+          "high": "107",
+          "low": "103",
+          "close": "106",
+          "volume": "100"
+        }
+      ]
     }
   ]
 }

@@ -10,7 +10,7 @@ type t = private {
   notional : Scalar.Money.t;
   fee : Scalar.Money.t;
   executed_at : Ptime.t;
-  bar_sequence : int64;
+  slice_sequence : int64;
 }
 
 val create :
@@ -22,7 +22,7 @@ val create :
   price:Scalar.Price.t ->
   fee:Scalar.Money.t ->
   executed_at:Ptime.t ->
-  bar_sequence:int64 ->
+  slice_sequence:int64 ->
   (t, string) result
 
 val equal : t -> t -> bool

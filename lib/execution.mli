@@ -1,4 +1,4 @@
-(** Deterministic completed-bar execution simulation. *)
+(** Deterministic synchronized-slice execution simulation. *)
 
 type t
 
@@ -25,9 +25,9 @@ val participation_bps : t -> int
 val fixed_fee : t -> Scalar.Money.t
 val fee_bps : t -> int
 
-val match_bar :
+val match_slice :
   t ->
-  instrument:Instrument.t ->
+  instruments:Instrument.t list ->
   oms:Oms.t ->
-  Bar.t ->
+  Market_slice.t ->
   (match_result, string) result
