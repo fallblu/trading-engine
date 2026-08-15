@@ -38,12 +38,28 @@ let schema_artifacts_parse () =
   check_schema "../schemas/journal.schema.json"
 
 let timestamp_precision_is_bounded () =
-  Alcotest.(check bool)
-    "whole seconds accepted" true
-    (Result.is_ok (T.Codec.ptime_of_string "2026-01-02T14:30:00Z"));
-  Alcotest.(check bool)
-    "microseconds accepted" true
-    (Result.is_ok (T.Codec.ptime_of_string "2026-01-02T14:30:00.123456+00:00"));
+  List.iter
+    (fun value ->
+      Alcotest.(check bool)
+        (value ^ " accepted") true
+        (Result.is_ok (T.Codec.ptime_of_string value)))
+    [
+      "2026-01-02T14:30:00Z";
+      "2026-01-02t14:30:00.1z";
+      "2026-01-02T14:30:00.123456+05:30";
+      "2026-01-02T14:30:00-05:00";
+    ];
+  List.iter
+    (fun value ->
+      Alcotest.(check bool)
+        (value ^ " rejected") true
+        (Result.is_error (T.Codec.ptime_of_string value)))
+    [
+      "2026-01-02 14:30:00Z";
+      "2026-01-02T14:30:00+0000";
+      "2026-01-02T14:30:00-05";
+      "2026-01-02T14:30:60Z";
+    ];
   match T.Codec.ptime_of_string "2026-01-02T14:30:00.1234567Z" with
   | Ok _ -> Alcotest.fail "sub-microsecond timestamp accepted"
   | Error message ->

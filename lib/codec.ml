@@ -1,4 +1,14 @@
 let ptime_to_string value = Ptime.to_rfc3339 ~frac_s:6 ~tz_offset_s:0 value
+let is_digit = function '0' .. '9' -> true | _ -> false
+
+let digits value ~at ~count =
+  let rec check index =
+    if index = at + count then true
+    else if index >= String.length value || not (is_digit value.[index]) then
+      false
+    else check (index + 1)
+  in
+  check at
 
 let fractional_second_digits value =
   match String.index_opt value '.' with
@@ -13,9 +23,49 @@ let fractional_second_digits value =
       in
       count (separator + 1)
 
+let valid_zone value at =
+  let length = String.length value in
+  (at + 1 = length && (Char.equal value.[at] 'Z' || Char.equal value.[at] 'z'))
+  || at + 6 = length
+     && (Char.equal value.[at] '+' || Char.equal value.[at] '-')
+     && digits value ~at:(at + 1) ~count:2
+     && Char.equal value.[at + 3] ':'
+     && digits value ~at:(at + 4) ~count:2
+
+let valid_rfc3339_lexeme value =
+  let length = String.length value in
+  let valid_prefix =
+    length >= 20
+    && digits value ~at:0 ~count:4
+    && Char.equal value.[4] '-'
+    && digits value ~at:5 ~count:2
+    && Char.equal value.[7] '-'
+    && digits value ~at:8 ~count:2
+    && (Char.equal value.[10] 'T' || Char.equal value.[10] 't')
+    && digits value ~at:11 ~count:2
+    && Char.equal value.[13] ':'
+    && digits value ~at:14 ~count:2
+    && Char.equal value.[16] ':'
+    && value.[17] >= '0'
+    && value.[17] <= '5'
+    && is_digit value.[18]
+  in
+  if not valid_prefix then false
+  else if Char.equal value.[19] '.' then
+    let rec fraction_end index =
+      if index < length && is_digit value.[index] then fraction_end (index + 1)
+      else index
+    in
+    let zone_at = fraction_end 20 in
+    let fraction_length = zone_at - 20 in
+    fraction_length >= 1 && fraction_length <= 6 && valid_zone value zone_at
+  else valid_zone value 19
+
 let ptime_of_string value =
   if fractional_second_digits value > 6 then
     Error "RFC3339 timestamp must not exceed microsecond precision"
+  else if not (valid_rfc3339_lexeme value) then
+    Error "RFC3339 timestamp must use T/t and Z/z or a colonized offset"
   else
     match Ptime.of_rfc3339 value |> Ptime.rfc3339_error_to_msg with
     | Ok (timestamp, _, _) -> Ok timestamp

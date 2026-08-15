@@ -77,16 +77,33 @@ def main() -> None:
     noncanonical = copy.deepcopy(scenario)
     noncanonical["initial_cash"] = "10000.0"
     expect_invalid(scenario_validator, noncanonical)
-    excessive_scenario_precision = copy.deepcopy(scenario)
-    excessive_scenario_precision["slices"][0]["start_at"] = (
-        "2026-01-02T14:30:00.1234567Z"
-    )
-    expect_invalid(scenario_validator, excessive_scenario_precision)
     first_journal_record = json.loads(
         journal_path.read_text(encoding="utf-8").splitlines()[0]
     )
-    first_journal_record["recorded_at"] = "2026-01-02T14:30:00.1234567Z"
-    expect_invalid(journal_validator, first_journal_record)
+    for timestamp in (
+        "2026-01-02t14:30:00.1z",
+        "2026-01-02T14:30:00.123456+05:30",
+        "2026-01-02T14:30:00-05:00",
+    ):
+        valid_scenario_timestamp = copy.deepcopy(scenario)
+        valid_scenario_timestamp["slices"][0]["start_at"] = timestamp
+        scenario_validator.validate(valid_scenario_timestamp)
+        valid_journal_timestamp = copy.deepcopy(first_journal_record)
+        valid_journal_timestamp["recorded_at"] = timestamp
+        journal_validator.validate(valid_journal_timestamp)
+    for timestamp in (
+        "2026-01-02 14:30:00Z",
+        "2026-01-02T14:30:00+0000",
+        "2026-01-02T14:30:00-05",
+        "2026-01-02T14:30:60Z",
+        "2026-01-02T14:30:00.1234567Z",
+    ):
+        invalid_scenario_timestamp = copy.deepcopy(scenario)
+        invalid_scenario_timestamp["slices"][0]["start_at"] = timestamp
+        expect_invalid(scenario_validator, invalid_scenario_timestamp)
+        invalid_journal_timestamp = copy.deepcopy(first_journal_record)
+        invalid_journal_timestamp["recorded_at"] = timestamp
+        expect_invalid(journal_validator, invalid_journal_timestamp)
     stale_intent = copy.deepcopy(scenario)
     stale_intent["schedule"][0]["intents"][0] = {
         "type": "unsupported_intent",
