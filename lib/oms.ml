@@ -58,6 +58,27 @@ let cancel state order_id =
       | Error _ as error -> error
       | Ok cancelled -> Ok (insert state cancelled, cancelled))
 
+let adjust_for_split state ~instrument_id ~updated_event_ids ~numerator
+    ~denominator =
+  let active = active_for_instrument state instrument_id in
+  if List.length active <> List.length updated_event_ids then
+    Error "split adjustment event IDs must cover every active order"
+  else
+    let step result (order, updated_event_id) =
+      match result with
+      | Error _ as error -> error
+      | Ok (state, adjusted) -> (
+          match
+            Order.adjust_for_split order ~updated_event_id ~numerator
+              ~denominator
+          with
+          | Error _ as error -> error
+          | Ok order -> Ok (insert state order, order :: adjusted))
+    in
+    List.combine active updated_event_ids
+    |> List.fold_left step (Ok (state, []))
+    |> Result.map (fun (state, adjusted) -> (state, List.rev adjusted))
+
 let apply_fill state fill =
   match Id.Fill.Map.find_opt fill.Fill.id state.fills with
   | Some existing when Fill.equal existing fill -> Ok (state, Duplicate)

@@ -15,9 +15,10 @@ The JSON scenario carries:
 - Required producer metadata preserved as JSON but ignored by execution
 - Required compiled execution-model selection
 - One explicit executable-instrument catalog
-- Risk, participation, and fee policies
-- Strictly increasing synchronized market slices
-- Scheduled full-portfolio weight or quantity targets
+- Signed position, exposure, leverage, margin, borrow, participation, and fee policies
+- Strictly increasing synchronized market slices with complete FX marks and corporate actions
+- Explicit initial cash ledgers for every base or quote currency
+- Scheduled full-portfolio signed weight or fractional quantity targets
 - Optional direct orders, cancellations, and metrics
 
 Persistra should:
@@ -36,14 +37,17 @@ Persistra should:
 11. Reject duplicate, unknown, forward, cross-run, or noncanonical causal references.
 12. Verify the same scenario SHA-256 and selected execution model in `run_started`,
     `run_completed`, and the retained manifest.
-13. Reconcile every per-instrument valuation row to the aggregate account values.
-14. Require the terminal completion record before accepting a replay.
+13. Reconcile every native/base position row and currency cash row to the aggregate account,
+    exposure, fee, and margin values.
+14. Reconcile split adjustments, dividends, borrow fees, risk-limited fills, and margin
+    liquidation against scenario and runtime state.
+15. Require the terminal completion record before accepting a replay.
 
 Do not let the engine read Persistra's internal DuckDB tables. Their schema and connection
 lifecycle belong to Persistra.
 
-Use the current v2 [scenario](../contracts/v2/scenario.schema.json) and
-[journal](../contracts/v2/journal.schema.json) JSON Schemas and their adjacent conformance fixtures
+Use the current v3 [scenario](../contracts/v3/scenario.schema.json) and
+[journal](../contracts/v3/journal.schema.json) JSON Schemas and their adjacent conformance fixtures
 for structural checks. The engine parser is authoritative for ordering, catalog coverage,
 causality, tick, lot, risk, and accounting invariants that JSON Schema cannot express.
 

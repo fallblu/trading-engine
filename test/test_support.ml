@@ -7,7 +7,7 @@ let error = function
   | Ok _ -> Alcotest.fail "expected an error"
 
 let price value = T.Scalar.Price.of_decimal_string value |> ok
-let quantity value = T.Scalar.Quantity.of_string value |> ok
+let quantity value = T.Scalar.Quantity.of_decimal_string value |> ok
 let weight value = T.Scalar.Weight.of_decimal_string value |> ok
 let money value = T.Scalar.Money.of_decimal_string value |> ok
 let instrument_id value = T.Id.Instrument.of_string_exn value
@@ -42,7 +42,24 @@ let bar ?(instrument = instrument_id "test-equity") ?(open_price = "100")
     ~close_price:(price close_price) ~volume
   |> ok
 
-let market_slice ?bars ?start_at ?end_at ?available_at ?received_at sequence =
+let fx_mark ?(currency = "USD") ?(rate = "1") () =
+  T.Market_slice.fx_mark ~currency ~rate:(price rate) |> ok
+
+let test_account ?(base_currency = "USD") ?initial_cash () =
+  let initial_cash =
+    Option.value initial_cash ~default:[ (base_currency, money "10000") ]
+  in
+  T.Account.create ~base_currency ~initial_cash |> ok
+
+let account_cash ?(currency = "USD") account =
+  T.Account.cash account currency |> Option.get
+
+let account_value ?(instruments = [ instrument () ])
+    ?(fx_rates = [ ("USD", price "1") ]) account ~marks =
+  T.Account.value account ~instruments ~marks ~fx_rates |> ok
+
+let market_slice ?bars ?fx_rates ?(corporate_actions = []) ?start_at ?end_at
+    ?available_at ?received_at sequence =
   let day = day sequence in
   let start_at =
     Option.value start_at
@@ -61,8 +78,9 @@ let market_slice ?bars ?start_at ?end_at ?available_at ?received_at sequence =
       ~default:(timestamp (Printf.sprintf "2026-01-%02dT21:00:02Z" day))
   in
   let bars = Option.value bars ~default:[ bar sequence ] in
+  let fx_rates = Option.value fx_rates ~default:[ fx_mark () ] in
   T.Market_slice.create ~slice_sequence:sequence ~start_at ~end_at ~available_at
-    ~received_at ~bars
+    ~received_at ~bars ~fx_rates ~corporate_actions
   |> ok
 
 let request ?(instrument = instrument_id "test-equity") ?(side = T.Order.Buy)
@@ -93,8 +111,9 @@ let fill ?(id = "fill-1") ?(price_value = "100") ?(quantity_value = "1")
     ?(slice_sequence = 2L) order =
   T.Fill.create ~id:(fill_id id) ~order_id:order.T.Order.id
     ~instrument_id:order.request.instrument_id ~side:order.request.side
-    ~quantity:(quantity quantity_value) ~price:(price price_value)
-    ~fee:(money fee_value) ~executed_at ~slice_sequence
+    ~quote_currency:"USD" ~quantity:(quantity quantity_value)
+    ~price:(price price_value) ~fee:(money fee_value) ~executed_at
+    ~slice_sequence
   |> ok
 
 let execution ?(participation_bps = 10_000) ?(fixed_fee = "0") ?(fee_bps = 0) ()
@@ -103,10 +122,17 @@ let execution ?(participation_bps = 10_000) ?(fixed_fee = "0") ?(fee_bps = 0) ()
   |> ok
 
 let risk ?(base_currency = "USD") ?(instruments = [ instrument () ])
-    ?(max_order = "1000") ?(max_position = "1000") () =
+    ?(max_order = "1000") ?(max_long = "1000") ?(max_short = "1000")
+    ?(max_gross = "1000000000") ?(max_leverage = "2")
+    ?(initial_margin_bps = 5000) ?(maintenance_margin_bps = 2500)
+    ?(short_borrow_bps = 100) () =
   T.Risk.create ~base_currency ~instruments
     ~max_order_quantity:(quantity max_order)
-    ~max_position:(quantity max_position)
+    ~max_long_position:(quantity max_long)
+    ~max_short_position:(quantity max_short)
+    ~max_gross_exposure:(money max_gross)
+    ~max_leverage:(T.Scalar.Ratio.of_decimal_string max_leverage |> ok)
+    ~initial_margin_bps ~maintenance_margin_bps ~short_borrow_bps
   |> ok
 
 let engine_config ?(risk = risk ()) ?execution_model ?(execution = execution ())
@@ -116,3 +142,9 @@ let engine_config ?(risk = risk ()) ?execution_model ?(execution = execution ())
       ~default:(T.Execution_model.find "completed_bar_v1" |> ok)
   in
   T.Engine.config ~risk ~execution_model ~execution ~max_internal_events |> ok
+
+let risk_check risk ~account ~oms request =
+  T.Risk.check risk ~account ~oms
+    ~marks:[ (instrument_id "test-equity", price "100") ]
+    ~fx_rates:[ ("USD", price "1") ]
+    request

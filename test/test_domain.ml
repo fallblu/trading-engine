@@ -36,7 +36,7 @@ let scalar_decimal_round_trip () =
     [ "01"; "1.0"; "-0" ];
   Alcotest.(check bool)
     "leading-zero quantity rejected" true
-    (Result.is_error (T.Scalar.Quantity.of_string "01"))
+    (Result.is_error (T.Scalar.Quantity.of_decimal_string "01"))
 
 let scalar_overflow_is_rejected () =
   let maximum = T.Scalar.Money.of_micros Int64.max_int in
@@ -49,9 +49,9 @@ let scalar_overflow_is_rejected () =
     (Result.is_error (T.Scalar.Money.notional huge_price (quantity "2")));
   let near_maximum = T.Scalar.Money.of_micros (Int64.sub Int64.max_int 1L) in
   let ratio =
-    T.Scalar.Money.proportion_floor near_maximum
-      ~numerator:(T.Scalar.Quantity.of_int64 (Int64.sub Int64.max_int 1L) |> ok)
-      ~denominator:(T.Scalar.Quantity.of_int64 Int64.max_int |> ok)
+    T.Scalar.Money.proportion_toward_zero near_maximum
+      ~numerator:(T.Scalar.Quantity.of_micros (Int64.sub Int64.max_int 1L))
+      ~denominator:(T.Scalar.Quantity.of_micros Int64.max_int)
     |> ok
   in
   Alcotest.(check int64)
@@ -76,6 +76,8 @@ let market_slice_validation () =
     T.Market_slice.create ~slice_sequence:1L ~start_at ~end_at ~available_at
       ~received_at
       ~bars:[ bar 1L ]
+      ~fx_rates:[ fx_mark () ]
+      ~corporate_actions:[]
   in
   Alcotest.(check bool)
     "premature availability rejected" true (Result.is_error result)
@@ -150,33 +152,32 @@ let oms_rejects_fill_before_order () =
 let risk_checks_lot_and_tick_alignment () =
   let configured = instrument ~tick_size:"0.05" ~lot_size:"10" () in
   let risk = risk ~instruments:[ configured ] () in
-  let account = T.Account.create ~initial_cash:(money "10000") in
+  let account = test_account () in
   let odd_lot = request ~quantity_value:"5" () in
   Alcotest.(check bool)
     "odd lot rejected" true
-    (Result.is_error (T.Risk.check risk ~account ~oms:T.Oms.empty odd_lot));
+    (Result.is_error (risk_check risk ~account ~oms:T.Oms.empty odd_lot));
   let off_tick =
     request ~quantity_value:"10" ~kind:(T.Order.Limit (price "100.03")) ()
   in
   Alcotest.(check bool)
     "off tick rejected" true
-    (Result.is_error (T.Risk.check risk ~account ~oms:T.Oms.empty off_tick));
+    (Result.is_error (risk_check risk ~account ~oms:T.Oms.empty off_tick));
   let aligned =
     request ~quantity_value:"10" ~kind:(T.Order.Limit (price "100.05")) ()
   in
   Alcotest.(check (result unit string))
     "aligned accepted" (Ok ())
-    (T.Risk.check risk ~account ~oms:T.Oms.empty aligned)
+    (risk_check risk ~account ~oms:T.Oms.empty aligned)
 
-let risk_enforces_one_currency () =
+let risk_accepts_multiple_currencies () =
   let instruments =
     [ instrument ~id:"usd" (); instrument ~id:"eur" ~currency:"EUR" () ]
   in
-  Alcotest.(check bool)
-    "mixed currencies rejected" true
-    (Result.is_error
-       (T.Risk.create ~base_currency:"USD" ~instruments
-          ~max_order_quantity:(quantity "1000") ~max_position:(quantity "1000")))
+  let configured = risk ~instruments () in
+  Alcotest.(check int)
+    "mixed currencies accepted" 2
+    (List.length (T.Risk.instruments configured))
 
 let risk_limits_cover_lots () =
   let configured = instrument ~lot_size:"10" () in
@@ -184,12 +185,22 @@ let risk_limits_cover_lots () =
     "order limit smaller than lot rejected" true
     (Result.is_error
        (T.Risk.create ~base_currency:"USD" ~instruments:[ configured ]
-          ~max_order_quantity:(quantity "5") ~max_position:(quantity "100")));
+          ~max_order_quantity:(quantity "5") ~max_long_position:(quantity "100")
+          ~max_short_position:(quantity "100")
+          ~max_gross_exposure:(money "1000000")
+          ~max_leverage:(T.Scalar.Ratio.of_decimal_string "2" |> ok)
+          ~initial_margin_bps:5000 ~maintenance_margin_bps:2500
+          ~short_borrow_bps:100));
   Alcotest.(check bool)
     "position limit smaller than lot rejected" true
     (Result.is_error
        (T.Risk.create ~base_currency:"USD" ~instruments:[ configured ]
-          ~max_order_quantity:(quantity "100") ~max_position:(quantity "5")))
+          ~max_order_quantity:(quantity "100") ~max_long_position:(quantity "5")
+          ~max_short_position:(quantity "100")
+          ~max_gross_exposure:(money "1000000")
+          ~max_leverage:(T.Scalar.Ratio.of_decimal_string "2" |> ok)
+          ~initial_margin_bps:5000 ~maintenance_margin_bps:2500
+          ~short_borrow_bps:100))
 
 let tests =
   [
@@ -207,7 +218,7 @@ let tests =
       oms_rejects_fill_before_order;
     Alcotest.test_case "risk lot and tick alignment" `Quick
       risk_checks_lot_and_tick_alignment;
-    Alcotest.test_case "risk enforces one currency" `Quick
-      risk_enforces_one_currency;
+    Alcotest.test_case "risk accepts multiple currencies" `Quick
+      risk_accepts_multiple_currencies;
     Alcotest.test_case "risk limits cover lots" `Quick risk_limits_cover_lots;
   ]

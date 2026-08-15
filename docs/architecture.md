@@ -9,13 +9,13 @@ journal files, and the runtime shell.
 | Layer | Responsibility |
 |---|---|
 | `Id`, `Scalar` | Opaque identities and checked fixed-point values |
-| `Instrument`, `Bar`, `Market_slice`, `Order`, `Fill` | Validated domain contracts |
+| `Instrument`, `Bar`, `Market_slice`, `Corporate_action`, `Order`, `Fill` | Validated domain contracts |
 | `Strategy` | Pure callback, immutable context, and typed intents |
 | `Planner` | Exact weight-to-quantity conversion |
-| `Risk` | Catalog, size, lot, tick, position, and working-sell checks |
+| `Risk` | Catalog, size, alignment, signed position, exposure, leverage, and margin checks |
 | `Oms` | Order lifecycle, fill limits, idempotency, and deterministic ordering |
 | `Execution`, `Execution_model` | Pluggable synchronized-slice matching, capacity allocation, and fees |
-| `Account` | Cash, per-instrument attribution, average cost, fees, P&L, and valuation |
+| `Account` | Currency ledgers, signed positions, attribution, average cost, fees, P&L, and valuation |
 | `Engine` | Sequencing, portfolio reconciliation, and pure orchestration |
 | `Scenario`, `Scenario_stream`, `Replay` | Strict batch and bounded-memory input runners |
 | `Sha256`, `Codec`, `Journal` | Input identity, stable audit JSON, and file publication |
@@ -26,17 +26,20 @@ For each synchronized market slice, the engine:
 
 1. Validates catalog coverage, slice order, receipt order, and market time.
 2. Emits `run_started` once and then `market_slice_received`.
-3. Builds one matching batch from orders that became eligible after an earlier slice.
-4. Offers each instrument's remaining capacity to sells first, then buys, using FIFO within each
-   side.
-5. Applies sell fills before evaluating buy affordability.
-6. Clips buy fills to affordable lots, consumes only applied capacity, and emits `cash_limited`
-   when clipping occurs.
-7. Cancels eligible market-order remainders.
-8. Stores every synchronized close as the current mark.
-9. Delivers captured fill, order, and `Market_slice_closed` callbacks.
-10. Applies scheduled intents and reconciles the persistent portfolio target once.
-11. Emits one valuation for the complete slice.
+3. Applies splits and dividends, adjusting signed positions, persistent targets, and active orders.
+4. Accrues borrow fees on open shorts for the slice interval.
+5. Builds one matching batch from orders that became eligible after an earlier slice.
+6. Offers each instrument's remaining capacity to liquidation orders first, then applies
+   sell-before-buy and FIFO priority within each origin class.
+7. Clips proposals to the largest lot-aligned quantity allowed by position, exposure, leverage,
+   and initial-margin risk; only applied quantity consumes capacity.
+8. Cancels eligible market-order remainders.
+9. Stores every synchronized close and complete FX vector as current marks.
+10. Delivers captured fill, order, and `Market_slice_closed` callbacks.
+11. Applies scheduled intents and reconciles the persistent portfolio target once.
+12. Assesses maintenance margin, cancelling active orders and creating bounded liquidation orders
+    when breached.
+13. Emits one base-currency valuation with complete cash, position, fee, and margin attribution.
 
 Target-generated market orders are limited to `max_order_quantity`, rounded down to a lot, and
 retried after later slices. A new portfolio target atomically supersedes the prior desired
@@ -71,9 +74,10 @@ Determinism depends on:
 - Immutable state transitions
 - Ordered maps instead of hash-table iteration
 - Complete synchronized slices and stable slice sequences
-- Sell-first matching and FIFO order sorting by creation sequence and ID
+- Liquidation-first, sell-before-buy, and FIFO order sorting
 - Canonical exact strings and checked fixed-point arithmetic
-- Explicit fee, participation, fill, sizing, and affordability rules
+- Explicit fee, participation, fill, sizing, and margin-risk rules
+- Explicit corporate actions, FX marks, borrow rates, and margin policy
 - Stable generated order and fill IDs derived from the run ID
 - Stable event IDs and canonical causal-reference ordering
 - Stable JSON field and event order
@@ -93,14 +97,19 @@ The implementation and tests enforce:
 - Filled quantity stays between zero and requested quantity.
 - Terminal orders cannot accept new fills or cancellations.
 - Equal duplicate fill reports are idempotent; conflicting ID reuse fails.
-- Position quantity, cost basis, cash, market value, equity, and total fees stay nonnegative.
-- Cash equals initial cash minus buys and fees plus sells net of fees.
+- Order and fill quantities are positive, while positions, targets, cash, basis, P&L, and equity
+  may be signed.
+- A fill can close a position but cannot cross it through zero.
+- Every slice contains exactly one FX mark for every scenario currency, with base FX equal to one.
+- Each currency ledger equals its initial balance plus native fills, dividends, and borrow fees.
 - Equity equals cash plus marked position value.
-- Equity change equals realized plus unrealized P&L without external cash flows.
-- Position market value, basis, realized P&L, unrealized P&L, and fees sum exactly to each
-  valuation's account aggregates.
+- Native and base position values, basis, realized P&L, unrealized P&L, dividends, and fees sum
+  exactly to each valuation's account aggregates.
 - Fills respect order size, capacity, lot size, tick size, and causal time.
-- Every configured instrument uses the single base currency.
+- Exposure-increasing fills respect long/short position, gross-exposure, leverage, and initial
+  margin limits; maintenance breaches produce deterministic cancel-and-liquidate transitions.
+- Corporate action IDs are unique, actions precede matching, and split-adjusted state remains
+  exactly aligned to configured lots and ticks.
 
 ## Path to paper and live operation
 

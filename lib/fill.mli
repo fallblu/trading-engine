@@ -4,6 +4,7 @@ type t = private {
   id : Id.Fill.t;
   order_id : Id.Order.t;
   instrument_id : Id.Instrument.t;
+  quote_currency : string;
   side : Order.side;
   quantity : Scalar.Quantity.t;
   price : Scalar.Price.t;
@@ -17,6 +18,7 @@ val create :
   id:Id.Fill.t ->
   order_id:Id.Order.t ->
   instrument_id:Id.Instrument.t ->
+  quote_currency:string ->
   side:Order.side ->
   quantity:Scalar.Quantity.t ->
   price:Scalar.Price.t ->

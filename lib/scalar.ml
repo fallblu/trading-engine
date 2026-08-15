@@ -29,6 +29,10 @@ module Checked_int64 = struct
   let negate value =
     if Int64.equal value Int64.min_int then Error "int64 negation overflow"
     else Ok (Int64.neg value)
+
+  let of_z value =
+    if Z.fits_int64 value then Ok (Z.to_int64 value)
+    else Error "fixed-point calculation overflow"
 end
 
 let scale = 1_000_000L
@@ -126,6 +130,19 @@ module Price = struct
   let equal = Int64.equal
   let is_multiple value ~tick = Int64.equal (Int64.rem value tick) 0L
 
+  let scale_ratio_exact value ~numerator ~denominator =
+    if Int64.compare numerator 0L <= 0 || Int64.compare denominator 0L <= 0 then
+      Error "price ratio terms must be positive"
+    else
+      let product = Z.mul (Z.of_int64 value) (Z.of_int64 numerator) in
+      let denominator = Z.of_int64 denominator in
+      if not (Z.equal (Z.rem product denominator) Z.zero) then
+        Error "price ratio is not exactly representable"
+      else
+        match Checked_int64.of_z (Z.div product denominator) with
+        | Error _ as error -> error
+        | Ok adjusted -> of_micros adjusted
+
   let pp formatter value =
     Format.pp_print_string formatter (to_decimal_string value)
 end
@@ -133,44 +150,47 @@ end
 module Quantity = struct
   type t = int64
 
+  let scale = scale
   let zero = 0L
+  let of_micros value = value
 
-  let of_int64 value =
-    if Int64.compare value 0L < 0 then Error "quantity must be nonnegative"
-    else Ok value
+  let of_decimal_string value =
+    match parse_scaled ~allow_negative:true value with
+    | Error _ as error -> error
+    | Ok parsed when not (String.equal (scaled_to_string parsed) value) ->
+        Error "quantity must use canonical decimal form"
+    | Ok value -> Ok value
 
-  let of_string value =
-    match Int64.of_string_opt value with
-    | None -> Error "quantity must be a whole number"
-    | Some parsed when not (String.equal (Int64.to_string parsed) value) ->
-        Error "quantity must use canonical whole-number form"
-    | Some value -> of_int64 value
-
-  let to_int64 value = value
-  let to_string = Int64.to_string
+  let to_micros value = value
+  let to_decimal_string = scaled_to_string
   let compare = Int64.compare
   let equal = Int64.equal
+  let add = Checked_int64.add
+  let subtract = Checked_int64.subtract
+  let negate = Checked_int64.negate
 
-  let add left right =
-    match Checked_int64.add left right with
-    | Error _ as error -> error
-    | Ok value -> of_int64 value
-
-  let subtract left right =
-    if Int64.compare right left > 0 then
-      Error "quantity subtraction would be negative"
-    else Ok (Int64.sub left right)
+  let absolute value =
+    if Int64.equal value Int64.min_int then Error "quantity absolute overflow"
+    else Ok (Int64.abs value)
 
   let minimum left right = if compare left right <= 0 then left else right
   let is_zero value = Int64.equal value 0L
-  let is_multiple value ~lot = Int64.equal (Int64.rem value lot) 0L
+  let is_positive value = Int64.compare value 0L > 0
+  let is_negative value = Int64.compare value 0L < 0
+  let is_nonnegative value = Int64.compare value 0L >= 0
 
-  let round_down_to_multiple value ~multiple =
-    if Int64.equal multiple 0L then Error "quantity multiple must be positive"
+  let is_multiple value ~lot =
+    Int64.compare lot 0L > 0 && Int64.equal (Int64.rem value lot) 0L
+
+  let round_toward_zero_to_multiple value ~multiple =
+    if Int64.compare multiple 0L <= 0 then
+      Error "quantity multiple must be positive"
     else Ok (Int64.sub value (Int64.rem value multiple))
 
   let bps_floor value ~bps =
-    if bps < 0 || bps > 10_000 then
+    if Int64.compare value 0L < 0 then
+      Error "basis-point quantity must be nonnegative"
+    else if bps < 0 || bps > 10_000 then
       Error "basis points must be between 0 and 10000"
     else
       let quotient = Int64.div value 10_000L in
@@ -183,7 +203,18 @@ module Quantity = struct
           in
           Checked_int64.add whole partial
 
-  let pp formatter value = Format.pp_print_string formatter (to_string value)
+  let scale_ratio_exact value ~numerator ~denominator =
+    if Int64.compare numerator 0L <= 0 || Int64.compare denominator 0L <= 0 then
+      Error "quantity ratio terms must be positive"
+    else
+      let product = Z.mul (Z.of_int64 value) (Z.of_int64 numerator) in
+      let denominator = Z.of_int64 denominator in
+      if not (Z.equal (Z.rem product denominator) Z.zero) then
+        Error "quantity ratio is not exactly representable"
+      else Checked_int64.of_z (Z.div product denominator)
+
+  let pp formatter value =
+    Format.pp_print_string formatter (to_decimal_string value)
 end
 
 module Weight = struct
@@ -194,12 +225,10 @@ module Weight = struct
   let one = scale
 
   let of_decimal_string value =
-    match parse_scaled ~allow_negative:false value with
+    match parse_scaled ~allow_negative:true value with
     | Error _ as error -> error
     | Ok parsed when not (String.equal (scaled_to_string parsed) value) ->
         Error "weight must use canonical decimal form"
-    | Ok value when Int64.compare value scale > 0 ->
-        Error "weight must not exceed one"
     | Ok value -> Ok value
 
   let to_micros value = value
@@ -207,6 +236,35 @@ module Weight = struct
   let compare = Int64.compare
   let equal = Int64.equal
   let add = Checked_int64.add
+  let is_negative value = Int64.compare value 0L < 0
+
+  let absolute value =
+    if Int64.equal value Int64.min_int then Error "weight absolute overflow"
+    else Ok (Int64.abs value)
+
+  let pp formatter value =
+    Format.pp_print_string formatter (to_decimal_string value)
+end
+
+module Ratio = struct
+  type t = int64
+
+  let scale = scale
+  let one = scale
+
+  let of_decimal_string value =
+    match parse_scaled ~allow_negative:false value with
+    | Error _ as error -> error
+    | Ok parsed when not (String.equal (scaled_to_string parsed) value) ->
+        Error "ratio must use canonical decimal form"
+    | Ok value when Int64.compare value 0L <= 0 ->
+        Error "ratio must be positive"
+    | Ok value -> Ok value
+
+  let to_micros value = value
+  let to_decimal_string = scaled_to_string
+  let compare = Int64.compare
+  let equal = Int64.equal
 
   let pp formatter value =
     Format.pp_print_string formatter (to_decimal_string value)
@@ -234,8 +292,39 @@ module Money = struct
   let subtract = Checked_int64.subtract
   let negate = Checked_int64.negate
 
+  let absolute value =
+    if Int64.equal value Int64.min_int then Error "money absolute overflow"
+    else Ok (Int64.abs value)
+
   let notional price quantity =
-    Checked_int64.multiply (Price.to_micros price) (Quantity.to_int64 quantity)
+    Z.(
+      div
+        (mul
+           (of_int64 (Price.to_micros price))
+           (of_int64 (Quantity.to_micros quantity)))
+        (of_int64 scale))
+    |> Checked_int64.of_z
+
+  let for_quantity amount quantity =
+    Z.(
+      div
+        (mul (of_int64 amount) (of_int64 (Quantity.to_micros quantity)))
+        (of_int64 scale))
+    |> Checked_int64.of_z
+
+  let convert value ~rate =
+    Z.(
+      div
+        (mul (of_int64 value) (of_int64 (Price.to_micros rate)))
+        (of_int64 scale))
+    |> Checked_int64.of_z
+
+  let multiply_ratio value ratio =
+    Z.(
+      div
+        (mul (of_int64 value) (of_int64 (Ratio.to_micros ratio)))
+        (of_int64 scale))
+    |> Checked_int64.of_z
 
   let fee ~fixed ~bps ~notional =
     if Int64.compare fixed 0L < 0 then Error "fixed fee must be nonnegative"
@@ -260,30 +349,31 @@ module Money = struct
           | Error _ as error -> error
           | Ok variable -> Checked_int64.add fixed variable)
 
-  let proportion_floor value ~numerator ~denominator =
-    let numerator = Quantity.to_int64 numerator in
-    let denominator = Quantity.to_int64 denominator in
-    if Int64.compare value 0L < 0 then
-      Error "proportional value must be nonnegative"
-    else if Int64.equal denominator 0L then
+  let proportion_toward_zero value ~numerator ~denominator =
+    let numerator = Quantity.to_micros numerator in
+    let denominator = Quantity.to_micros denominator in
+    if Int64.compare numerator 0L < 0 then
+      Error "proportional numerator must be nonnegative"
+    else if Int64.compare denominator 0L <= 0 then
       Error "proportional denominator must be positive"
     else if Int64.compare numerator denominator > 0 then
       Error "proportional numerator must not exceed denominator"
     else
-      let quotient = Int64.div value denominator in
-      let remainder = Int64.rem value denominator in
-      match Checked_int64.multiply quotient numerator with
-      | Error _ as error -> error
-      | Ok whole ->
-          let partial =
-            Z.(
-              div
-                (mul (of_int64 remainder) (of_int64 numerator))
-                (of_int64 denominator))
-          in
-          if not (Z.fits_int64 partial) then
-            Error "proportional calculation overflow"
-          else Checked_int64.add whole (Z.to_int64 partial)
+      Z.(div (mul (of_int64 value) (of_int64 numerator)) (of_int64 denominator))
+      |> Checked_int64.of_z
+
+  let bps_ceil value ~bps =
+    if Int64.compare value 0L < 0 then
+      Error "basis-point money must be nonnegative"
+    else if bps < 0 then Error "basis points must be nonnegative"
+    else
+      let numerator = Z.mul (Z.of_int64 value) (Z.of_int bps) in
+      let denominator = Z.of_int 10_000 in
+      let result =
+        if Z.equal numerator Z.zero then Z.zero
+        else Z.div (Z.add numerator (Z.pred denominator)) denominator
+      in
+      Checked_int64.of_z result
 
   let pp formatter value =
     Format.pp_print_string formatter (to_decimal_string value)

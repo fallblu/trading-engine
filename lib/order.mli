@@ -2,7 +2,7 @@
 
 type side = Buy | Sell
 type kind = Market | Limit of Scalar.Price.t
-type origin = Direct | Target_rebalance
+type origin = Direct | Target_rebalance | Margin_liquidation
 
 type request = private {
   instrument_id : Id.Instrument.t;
@@ -23,6 +23,7 @@ type t = private {
   id : Id.Order.t;
   request : request;
   created_event_id : Id.Event.t;
+  updated_event_id : Id.Event.t;
   created_sequence : int64;
   created_at : Ptime.t;
   eligible_after_slice_sequence : int64;
@@ -70,6 +71,14 @@ val apply_fill :
   (t, string) result
 
 val cancel : t -> (t, string) result
+
+val adjust_for_split :
+  t ->
+  updated_event_id:Id.Event.t ->
+  numerator:int64 ->
+  denominator:int64 ->
+  (t, string) result
+
 val side_to_string : side -> string
 val kind_to_string : kind -> string
 val origin_to_string : origin -> string

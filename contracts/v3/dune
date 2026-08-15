@@ -1,0 +1,10 @@
+(install
+ (section share)
+ (package trading_engine)
+ (files
+  (journal.schema.json as contracts/v3/journal.schema.json)
+  (scenario-stream.schema.json as contracts/v3/scenario-stream.schema.json)
+  (scenario.schema.json as contracts/v3/scenario.schema.json)
+  (fixtures/demo.journal.jsonl as contracts/v3/fixtures/demo.journal.jsonl)
+  (fixtures/demo.scenario.json as contracts/v3/fixtures/demo.scenario.json)
+  (fixtures/demo.scenario.jsonl as contracts/v3/fixtures/demo.scenario.jsonl)))

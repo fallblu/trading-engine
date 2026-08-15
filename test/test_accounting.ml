@@ -11,22 +11,20 @@ let apply_trade account ~id ~side ~quantity_value ~price_value ~fee_value =
   T.Account.apply_fill account fill |> ok
 
 let exact_cost_basis_and_pnl () =
-  let account = T.Account.create ~initial_cash:(money "10000") in
+  let account = test_account () in
   let account =
     apply_trade account ~id:"buy" ~side:T.Order.Buy ~quantity_value:"10"
       ~price_value:"100" ~fee_value:"1"
   in
   Alcotest.check money_testable "cash after buy" (money "8999")
-    (T.Account.cash account);
+    (account_cash account);
   let position = T.Account.position account (instrument_id "test-equity") in
   Alcotest.check quantity_testable "ten shares" (quantity "10")
     position.quantity;
   Alcotest.check money_testable "fee included in basis" (money "1001")
     position.cost_basis;
   let marked =
-    T.Account.value account
-      ~marks:[ (instrument_id "test-equity", price "110") ]
-    |> ok
+    account_value account ~marks:[ (instrument_id "test-equity", price "110") ]
   in
   Alcotest.check money_testable "open equity" (money "10099") marked.equity;
   Alcotest.check money_testable "open unrealized" (money "99")
@@ -45,29 +43,24 @@ let exact_cost_basis_and_pnl () =
       ~price_value:"120" ~fee_value:"0.5"
   in
   Alcotest.check money_testable "cash after partial sell" (money "9478.5")
-    (T.Account.cash account);
-  Alcotest.check money_testable "partial realized" (money "79.1")
-    (T.Account.realized_pnl account);
+    (account_cash account);
   let remaining = T.Account.position account (instrument_id "test-equity") in
   Alcotest.check quantity_testable "six shares remain" (quantity "6")
     remaining.quantity;
   Alcotest.check money_testable "proportional basis" (money "600.6")
     remaining.cost_basis;
+  Alcotest.check money_testable "partial realized" (money "79.1")
+    remaining.realized_pnl;
   let account =
     apply_trade account ~id:"sell-two" ~side:T.Order.Sell ~quantity_value:"6"
       ~price_value:"90" ~fee_value:"0.5"
   in
   Alcotest.check money_testable "final cash" (money "10018")
-    (T.Account.cash account);
-  Alcotest.check money_testable "final realized" (money "18")
-    (T.Account.realized_pnl account);
-  Alcotest.check money_testable "all fees" (money "2")
-    (T.Account.total_fees account);
+    (account_cash account);
   Alcotest.check quantity_testable "position closed" T.Scalar.Quantity.zero
     (T.Account.position_quantity account (instrument_id "test-equity"));
   let closed =
-    T.Account.value account ~marks:[ (instrument_id "test-equity", price "95") ]
-    |> ok
+    account_value account ~marks:[ (instrument_id "test-equity", price "95") ]
   in
   match closed.positions with
   | [ attribution ] ->
@@ -85,27 +78,37 @@ let exact_cost_basis_and_pnl () =
         closed.total_fees attribution.total_fees
   | _ -> Alcotest.fail "expected the closed position attribution to persist"
 
-let sell_cannot_make_position_negative () =
-  let account = T.Account.create ~initial_cash:(money "1000") in
+let sell_opens_short_position () =
+  let account = test_account ~initial_cash:[ ("USD", money "1000") ] () in
   let sell =
     request ~side:T.Order.Sell ~quantity_value:"1" ()
     |> accepted_order |> fill ~quantity_value:"1"
   in
-  Alcotest.(check bool)
-    "naked sell rejected" true
-    (Result.is_error (T.Account.apply_fill account sell))
+  let account = T.Account.apply_fill account sell |> ok in
+  let position = T.Account.position account (instrument_id "test-equity") in
+  Alcotest.check quantity_testable "one unit short" (quantity "-1")
+    position.quantity;
+  Alcotest.check money_testable "short proceeds settle to cash" (money "1100")
+    (account_cash account);
+  Alcotest.check money_testable "short basis is signed" (money "-100")
+    position.cost_basis;
+  let marked =
+    account_value account ~marks:[ (instrument_id "test-equity", price "90") ]
+  in
+  Alcotest.check money_testable "short mark profit" (money "10")
+    marked.unrealized_pnl
 
-let fills_cannot_make_cash_negative () =
-  let account = T.Account.create ~initial_cash:(money "50") in
+let fills_settle_to_explicit_margin_cash () =
+  let account = test_account ~initial_cash:[ ("USD", money "50") ] () in
   let buy =
     request ~quantity_value:"1" ()
     |> accepted_order
     |> fill ~quantity_value:"1" ~price_value:"100"
   in
-  Alcotest.(check bool)
-    "unaffordable buy rejected" true
-    (Result.is_error (T.Account.apply_fill account buy));
-  let funded = T.Account.create ~initial_cash:(money "100") in
+  let account = T.Account.apply_fill account buy |> ok in
+  Alcotest.check money_testable "buy can create a margin debit" (money "-50")
+    (account_cash account);
+  let funded = test_account ~initial_cash:[ ("USD", money "100") ] () in
   let funded =
     apply_trade funded ~id:"fee-position" ~side:T.Order.Buy ~quantity_value:"1"
       ~price_value:"50" ~fee_value:"0"
@@ -116,12 +119,12 @@ let fills_cannot_make_cash_negative () =
     |> fill ~id:"fill-expensive-sell" ~quantity_value:"1" ~price_value:"1"
          ~fee_value:"52"
   in
-  Alcotest.(check bool)
-    "sell fee cannot overdraw cash" true
-    (Result.is_error (T.Account.apply_fill funded expensive_sell))
+  let funded = T.Account.apply_fill funded expensive_sell |> ok in
+  Alcotest.check money_testable "fees settle even when cash becomes negative"
+    (money "-1") (account_cash funded)
 
 let risk_reserves_working_sells () =
-  let account = T.Account.create ~initial_cash:(money "10000") in
+  let account = test_account () in
   let account =
     apply_trade account ~id:"position" ~side:T.Order.Buy ~quantity_value:"10"
       ~price_value:"100" ~fee_value:"0"
@@ -131,12 +134,12 @@ let risk_reserves_working_sells () =
   Alcotest.check
     Alcotest.(result unit string)
     "first sell passes" (Ok ())
-    (T.Risk.check risk ~account ~oms:T.Oms.empty first);
+    (risk_check risk ~account ~oms:T.Oms.empty first);
   let oms, _ = oms_with_order first in
   let second = request ~side:T.Order.Sell ~quantity_value:"5" () in
   Alcotest.(check bool)
     "second sell oversubscribes holdings" true
-    (Result.is_error (T.Risk.check risk ~account ~oms second))
+    (Result.is_error (risk_check risk ~account ~oms second))
 
 let accounting_identity_property =
   let open QCheck2 in
@@ -154,7 +157,7 @@ let accounting_identity_property =
       let int_string = string_of_int in
       try
         let initial = money "1000000" in
-        let account = T.Account.create ~initial_cash:initial in
+        let account = test_account ~initial_cash:[ ("USD", initial) ] () in
         let account =
           apply_trade account ~id:"property-buy" ~side:T.Order.Buy
             ~quantity_value:(int_string bought)
@@ -168,9 +171,8 @@ let accounting_identity_property =
               ~price_value:(int_string sell_price) ~fee_value:"0.01"
         in
         let valuation =
-          T.Account.value account
+          account_value account
             ~marks:[ (instrument_id "test-equity", price (int_string mark)) ]
-          |> ok
         in
         let change = T.Scalar.Money.subtract valuation.equity initial |> ok in
         let pnl =
@@ -182,8 +184,8 @@ let accounting_identity_property =
         in
         T.Scalar.Money.equal change pnl
         && Int64.equal
-             (T.Scalar.Quantity.to_int64 remaining.quantity)
-             (Int64.of_int (bought - sold))
+             (T.Scalar.Quantity.to_micros remaining.quantity)
+             (Int64.mul (Int64.of_int (bought - sold)) T.Scalar.Quantity.scale)
         &&
         if bought = sold then
           T.Scalar.Money.equal remaining.cost_basis T.Scalar.Money.zero
@@ -194,10 +196,10 @@ let tests =
   [
     Alcotest.test_case "exact cost basis and P&L" `Quick
       exact_cost_basis_and_pnl;
-    Alcotest.test_case "sell cannot create negative position" `Quick
-      sell_cannot_make_position_negative;
-    Alcotest.test_case "fills cannot create negative cash" `Quick
-      fills_cannot_make_cash_negative;
+    Alcotest.test_case "sell opens a short position" `Quick
+      sell_opens_short_position;
+    Alcotest.test_case "fills settle to explicit margin cash" `Quick
+      fills_settle_to_explicit_margin_cash;
     Alcotest.test_case "risk reserves working sells" `Quick
       risk_reserves_working_sells;
     QCheck_alcotest.to_alcotest ~speed_level:`Quick accounting_identity_property;

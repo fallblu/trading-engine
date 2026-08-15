@@ -19,6 +19,8 @@ let create ~instrument_id ~open_price ~high_price ~low_price ~close_price
     Scalar.Price.compare close_price low_price < 0
     || Scalar.Price.compare close_price high_price > 0
   then Error "bar close must lie inside its low-high range"
+  else if Option.exists (fun value -> Scalar.Quantity.is_negative value) volume
+  then Error "bar volume must be nonnegative"
   else
     Ok { instrument_id; open_price; high_price; low_price; close_price; volume }
 

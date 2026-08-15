@@ -25,7 +25,7 @@ let create ~id ~symbol ~quote_currency ~tick_size ~lot_size =
       match validate_label ~name:"quote currency" quote_currency with
       | Error _ as error -> error
       | Ok () ->
-          if Scalar.Quantity.is_zero lot_size then
+          if not (Scalar.Quantity.is_positive lot_size) then
             Error "lot size must be positive"
           else Ok { id; symbol; quote_currency; tick_size; lot_size })
 

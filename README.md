@@ -37,16 +37,19 @@ scenario slices and scheduled intents
 - Current-equity weight sizing at synchronized closing marks with lot rounding
 - Persistent target reconciliation through bounded market-order attempts
 - Direct market and limit orders, cancellations, and metrics
-- Long-only position, outstanding-sell, lot, tick, and size risk
-- Deterministic sell-first matching, then FIFO within each side
+- Signed long/short position, order, lot, tick, gross-exposure, leverage, and margin risk
+- Deterministic liquidation-first matching, then sell-before-buy and FIFO priority
 - Shared per-instrument volume participation, partial fills, and GTC limits
 - One-slice IOC market orders
-- Cash buying power with whole-lot clipping and structured `cash_limited` records
+- Risk-aware fractional-lot clipping with structured `margin_limited` records
 - Fixed and notional fees with explicit rounding
-- Average-cost accounting, realized and unrealized P&L, and equity reconciliation
-- Per-instrument quantity, mark, value, basis, P&L, and fee attribution on every valuation
+- Explicit multi-currency cash ledgers and complete per-slice FX marks in a base currency
+- Split and cash-dividend processing before matching, including target and order adjustment
+- Short borrow accrual, maintenance-margin calls, and deterministic liquidation orders
+- Signed average-cost accounting, realized and unrealized P&L, and equity reconciliation
+- Per-currency cash and per-instrument quantity, mark, value, basis, P&L, and fee attribution
 - Deterministic event IDs, ordered causal references, and order-creation attribution
-- Contract-selected compiled execution modules; v2 currently exposes `completed_bar_v1`
+- Contract-selected compiled execution modules; v3 currently exposes `completed_bar_v1`
 - Strict batch JSON and bounded-memory JSON Lines scenario parsing with JSON Schemas
 - Scenario SHA-256 binding in `run_started` and `run_completed`
 - Exclusive partial journal creation and atomic no-replace finalization
@@ -68,7 +71,7 @@ Validate the included scenario with an in-memory replay:
 
 ```sh
 opam exec -- dune exec trading-engine -- \
-  --input contracts/v2/fixtures/demo.scenario.json \
+  --input contracts/v3/fixtures/demo.scenario.json \
   --validate-only
 ```
 
@@ -76,7 +79,7 @@ Run it and create a journal:
 
 ```sh
 opam exec -- dune exec trading-engine -- \
-  --input contracts/v2/fixtures/demo.scenario.json \
+  --input contracts/v3/fixtures/demo.scenario.json \
   --journal demo.journal.jsonl
 ```
 
@@ -84,7 +87,7 @@ For larger histories, validate and replay the equivalent stream one slice at a t
 
 ```sh
 opam exec -- dune exec trading-engine -- \
-  --input contracts/v2/fixtures/demo.scenario.jsonl \
+  --input contracts/v3/fixtures/demo.scenario.jsonl \
   --input-format jsonl \
   --journal demo.journal.jsonl
 ```
@@ -115,12 +118,16 @@ slice whose start is not earlier than its creation time.
 - Persistent portfolio targets submit a new bounded attempt after each miss until reached or
   superseded.
 - Limit orders use deterministic gap improvement and optimistic intrabar touch rules.
-- Eligible sells consume each instrument's participation capacity before buys. FIFO creation
-  order breaks ties within a side.
-- Sell fills across the slice update cash before any buy affordability check.
-- A buy proposal is clipped to the largest affordable whole-lot quantity at its actual fill price,
-  including fees. Only the applied quantity consumes slice capacity, leaving clipped capacity for
-  later eligible same-instrument buys. Cash never becomes negative.
+- Eligible liquidation orders consume capacity before other orders. Within each origin class,
+  sells precede buys and FIFO creation order breaks ties within a side.
+- Corporate actions are applied before matching. Splits adjust positions, persistent targets, and
+  active orders; cash dividends credit longs and debit shorts in the quote-currency ledger.
+- Borrow fees accrue on open shorts for the slice interval before matching.
+- Proposed fills are clipped to the largest permitted fractional-lot quantity at the actual fill
+  price. Increasing exposure must satisfy position, gross-exposure, leverage, and initial-margin
+  limits; exposure-reducing fills remain available.
+- A maintenance-margin breach cancels active orders, clears portfolio targets, and creates
+  deterministic market orders that flatten positions in bounded lots across later slices.
 - The engine emits exactly one valuation after each complete synchronized slice.
 
 Read [Execution model](docs/execution-model.md) for the full phase, price, fee, cash, and accounting
@@ -133,9 +140,6 @@ The current scope omits:
 - Broker and streaming-market-data connectors
 - External execution-report ingestion
 - Exchange calendars and time-zone databases
-- Margin, leverage, borrow, and short-position models
-- Multiple currencies and FX conversion
-- Splits, dividends, and other corporate actions
 - Durable reducer snapshots and broker reconciliation
 - `fsync` and restart recovery for journals
 - Tick, trade, and order-book replay
@@ -148,11 +152,12 @@ production recovery log.
 
 - [Architecture](docs/architecture.md)
 - [Scenario contract](docs/scenario.md)
-- [Current contract v2 and conformance fixtures](contracts/v2/README.md)
+- [Current contract v3 and conformance fixtures](contracts/v3/README.md)
+- [Frozen contract v2](contracts/v2/README.md)
 - [Historical contract v1](contracts/v1/README.md)
-- [Scenario JSON Schema](contracts/v2/scenario.schema.json)
-- [Scenario stream record JSON Schema](contracts/v2/scenario-stream.schema.json)
-- [Journal record JSON Schema](contracts/v2/journal.schema.json)
+- [Scenario JSON Schema](contracts/v3/scenario.schema.json)
+- [Scenario stream record JSON Schema](contracts/v3/scenario-stream.schema.json)
+- [Journal record JSON Schema](contracts/v3/journal.schema.json)
 - [Execution model](docs/execution-model.md)
 - [Persistra integration](docs/persistra.md)
 - [Contributing](CONTRIBUTING.md)

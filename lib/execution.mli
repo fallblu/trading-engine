@@ -33,9 +33,9 @@ val fold_slice :
   init:'a ->
   apply:('a -> proposed_fill -> ('a * Scalar.Quantity.t, string) result) ->
   ('a * Id.Order.t list, string) result
-(** Fold executable orders in sell-first/FIFO order. The callback returns the
-    quantity it actually applied; only that quantity consumes the shared
-    per-instrument slice capacity. *)
+(** Fold executable orders in liquidation-first, then sell-before-buy/FIFO
+    order. The callback returns the quantity it actually applied; only that
+    quantity consumes the shared per-instrument slice capacity. *)
 
 val match_slice :
   t ->

@@ -16,7 +16,7 @@ module Make (Strategy_impl : Strategy.S) : sig
     run_id:Id.Run.t ->
     scenario_sha256:string ->
     config:config ->
-    initial_cash:Scalar.Money.t ->
+    initial_cash:(string * Scalar.Money.t) list ->
     strategy_state:Strategy_impl.state ->
     (t, string) result
 

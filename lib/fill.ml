@@ -2,6 +2,7 @@ type t = {
   id : Id.Fill.t;
   order_id : Id.Order.t;
   instrument_id : Id.Instrument.t;
+  quote_currency : string;
   side : Order.side;
   quantity : Scalar.Quantity.t;
   price : Scalar.Price.t;
@@ -11,10 +12,20 @@ type t = {
   slice_sequence : int64;
 }
 
-let create ~id ~order_id ~instrument_id ~side ~quantity ~price ~fee ~executed_at
-    ~slice_sequence =
-  if Scalar.Quantity.is_zero quantity then
+let create ~id ~order_id ~instrument_id ~quote_currency ~side ~quantity ~price
+    ~fee ~executed_at ~slice_sequence =
+  if not (Scalar.Quantity.is_positive quantity) then
     Error "fill quantity must be positive"
+  else if String.length quote_currency = 0 then
+    Error "fill quote currency must not be empty"
+  else if
+    not
+      (String.for_all
+         (fun character ->
+           let code = Char.code character in
+           code >= 0x21 && code <> 0x7f)
+         quote_currency)
+  then Error "fill quote currency must not contain whitespace"
   else if Scalar.Money.compare fee Scalar.Money.zero < 0 then
     Error "fill fee must be nonnegative"
   else if Int64.compare slice_sequence 0L <= 0 then
@@ -22,12 +33,15 @@ let create ~id ~order_id ~instrument_id ~side ~quantity ~price ~fee ~executed_at
   else
     match Scalar.Money.notional price quantity with
     | Error _ as error -> error
+    | Ok notional when Scalar.Money.equal notional Scalar.Money.zero ->
+        Error "fill notional must be at least one money micro-unit"
     | Ok notional ->
         Ok
           {
             id;
             order_id;
             instrument_id;
+            quote_currency;
             side;
             quantity;
             price;
@@ -41,6 +55,7 @@ let equal left right =
   Id.Fill.equal left.id right.id
   && Id.Order.equal left.order_id right.order_id
   && Id.Instrument.equal left.instrument_id right.instrument_id
+  && String.equal left.quote_currency right.quote_currency
   && left.side = right.side
   && Scalar.Quantity.equal left.quantity right.quantity
   && Scalar.Price.equal left.price right.price

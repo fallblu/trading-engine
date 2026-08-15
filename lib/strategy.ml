@@ -37,7 +37,10 @@ let context ~now ~account ~working_orders ~latest_bars =
   { now; account; working_orders; latest_bars }
 
 let now context = context.now
-let cash context = Account.cash context.account
+
+let cash context =
+  Account.cash context.account (Account.base_currency context.account)
+  |> Option.get
 
 let position context instrument_id =
   Account.position_quantity context.account instrument_id

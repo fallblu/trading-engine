@@ -3,7 +3,7 @@ type t = {
   metadata : Yojson.Safe.t;
   run_id : Id.Run.t;
   base_currency : string;
-  initial_cash : Scalar.Money.t;
+  initial_cash : (string * Scalar.Money.t) list;
   instruments : Instrument.t list;
   risk : Risk.t;
   execution_model : Execution_model.t;
@@ -18,7 +18,7 @@ type stream_header = {
   metadata : Yojson.Safe.t;
   run_id : Id.Run.t;
   base_currency : string;
-  initial_cash : Scalar.Money.t;
+  initial_cash : (string * Scalar.Money.t) list;
   instruments : Instrument.t list;
   risk : Risk.t;
   execution_model : Execution_model.t;
@@ -29,9 +29,11 @@ type stream_header = {
 type stream_item = {
   market_slice : Market_slice.t;
   intents : Strategy.intent list;
+  action_ids : Id.Corporate_action.Set.t;
 }
 
 module Int64_set = Set.Make (Int64)
+module String_set = Set.Make (String)
 
 let ( let* ) result function_ =
   match result with Ok value -> function_ value | Error _ as error -> error
@@ -103,7 +105,7 @@ let parse_int64 ~name json =
 
 let parse_quantity ~name json =
   let* value = string ~name json in
-  Scalar.Quantity.of_string value
+  Scalar.Quantity.of_decimal_string value
 
 let parse_price ~name json =
   let* value = string ~name json in
@@ -116,6 +118,21 @@ let parse_money ~name json =
 let parse_weight ~name json =
   let* value = string ~name json in
   Scalar.Weight.of_decimal_string value
+
+let parse_ratio ~name json =
+  let* value = string ~name json in
+  Scalar.Ratio.of_decimal_string value
+
+let parse_cash_balance json =
+  let* fields =
+    object_fields ~name:"initial cash balance"
+      ~expected:[ "currency"; "amount" ] json
+  in
+  let* currency_json = field fields "currency" in
+  let* currency = string ~name:"cash currency" currency_json in
+  let* amount_json = field fields "amount" in
+  let* amount = parse_money ~name:"initial cash amount" amount_json in
+  Ok (currency, amount)
 
 let parse_timestamp ~name json =
   let* value = string ~name json in
@@ -167,16 +184,44 @@ let parse_instrument json =
 let parse_risk base_currency instruments json =
   let* fields =
     object_fields ~name:"risk"
-      ~expected:[ "max_order_quantity"; "max_position" ]
+      ~expected:
+        [
+          "max_order_quantity";
+          "max_long_position";
+          "max_short_position";
+          "max_gross_exposure";
+          "max_leverage";
+          "initial_margin_bps";
+          "maintenance_margin_bps";
+          "short_borrow_bps";
+        ]
       json
   in
   let* order_json = field fields "max_order_quantity" in
   let* max_order_quantity =
     parse_quantity ~name:"max_order_quantity" order_json
   in
-  let* position_json = field fields "max_position" in
-  let* max_position = parse_quantity ~name:"max_position" position_json in
-  Risk.create ~base_currency ~instruments ~max_order_quantity ~max_position
+  let* long_json = field fields "max_long_position" in
+  let* max_long_position = parse_quantity ~name:"max_long_position" long_json in
+  let* short_json = field fields "max_short_position" in
+  let* max_short_position =
+    parse_quantity ~name:"max_short_position" short_json
+  in
+  let* gross_json = field fields "max_gross_exposure" in
+  let* max_gross_exposure = parse_money ~name:"max_gross_exposure" gross_json in
+  let* leverage_json = field fields "max_leverage" in
+  let* max_leverage = parse_ratio ~name:"max_leverage" leverage_json in
+  let* initial_json = field fields "initial_margin_bps" in
+  let* initial_margin_bps = integer ~name:"initial_margin_bps" initial_json in
+  let* maintenance_json = field fields "maintenance_margin_bps" in
+  let* maintenance_margin_bps =
+    integer ~name:"maintenance_margin_bps" maintenance_json
+  in
+  let* borrow_json = field fields "short_borrow_bps" in
+  let* short_borrow_bps = integer ~name:"short_borrow_bps" borrow_json in
+  Risk.create ~base_currency ~instruments ~max_order_quantity ~max_long_position
+    ~max_short_position ~max_gross_exposure ~max_leverage ~initial_margin_bps
+    ~maintenance_margin_bps ~short_borrow_bps
 
 let parse_execution json =
   let* fields =
@@ -363,6 +408,58 @@ let parse_bar json =
   Bar.create ~instrument_id ~open_price ~high_price ~low_price ~close_price
     ~volume
 
+let parse_fx_mark json =
+  let* fields =
+    object_fields ~name:"FX rate" ~expected:[ "currency"; "rate" ] json
+  in
+  let* currency_json = field fields "currency" in
+  let* currency = string ~name:"currency" currency_json in
+  let* rate_json = field fields "rate" in
+  let* rate = parse_price ~name:"FX rate" rate_json in
+  Market_slice.fx_mark ~currency ~rate
+
+let parse_corporate_action json =
+  let* fields =
+    match json with
+    | `Assoc fields -> Ok fields
+    | _ -> Error "corporate action must be a JSON object"
+  in
+  let* type_json = field fields "type" in
+  let* action_type = string ~name:"corporate action type" type_json in
+  let* id_json = field fields "action_id" in
+  let* id = parse_id Id.Corporate_action.of_string ~name:"action_id" id_json in
+  let* instrument_json = field fields "instrument_id" in
+  let* instrument_id =
+    parse_id Id.Instrument.of_string ~name:"instrument_id" instrument_json
+  in
+  match action_type with
+  | "split" ->
+      let* () =
+        object_fields ~name:"split corporate action"
+          ~expected:
+            [ "type"; "action_id"; "instrument_id"; "numerator"; "denominator" ]
+          json
+        |> Result.map (fun _ -> ())
+      in
+      let* numerator_json = field fields "numerator" in
+      let* numerator = parse_int64 ~name:"split numerator" numerator_json in
+      let* denominator_json = field fields "denominator" in
+      let* denominator =
+        parse_int64 ~name:"split denominator" denominator_json
+      in
+      Corporate_action.split ~id ~instrument_id ~numerator ~denominator
+  | "cash_dividend" ->
+      let* () =
+        object_fields ~name:"cash dividend corporate action"
+          ~expected:[ "type"; "action_id"; "instrument_id"; "amount_per_unit" ]
+          json
+        |> Result.map (fun _ -> ())
+      in
+      let* amount_json = field fields "amount_per_unit" in
+      let* amount_per_unit = parse_money ~name:"amount_per_unit" amount_json in
+      Corporate_action.cash_dividend ~id ~instrument_id ~amount_per_unit
+  | _ -> Error "unsupported corporate action type"
+
 let parse_slice json =
   let* fields =
     object_fields ~name:"market slice"
@@ -374,6 +471,8 @@ let parse_slice json =
           "available_at";
           "received_at";
           "bars";
+          "fx_rates";
+          "corporate_actions";
         ]
       json
   in
@@ -390,8 +489,14 @@ let parse_slice json =
   let* bars_json = field fields "bars" in
   let* bars_json = list ~name:"bars" bars_json in
   let* bars = map_list parse_bar bars_json in
+  let* fx_json = field fields "fx_rates" in
+  let* fx_json = list ~name:"fx_rates" fx_json in
+  let* fx_rates = map_list parse_fx_mark fx_json in
+  let* actions_json = field fields "corporate_actions" in
+  let* actions_json = list ~name:"corporate_actions" actions_json in
+  let* corporate_actions = map_list parse_corporate_action actions_json in
   Market_slice.create ~slice_sequence ~start_at ~end_at ~available_at
-    ~received_at ~bars
+    ~received_at ~bars ~fx_rates ~corporate_actions
 
 let changes_orders = function
   | Strategy.Target_weights _ | Strategy.Target_quantities _
@@ -413,16 +518,21 @@ let validate_portfolio_target risk catalog = function
         not (Id.Instrument.Set.equal catalog (Id.Instrument.Set.of_list ids))
       then Error "target_weights must cover every configured instrument"
       else
-        let sum =
+        let gross =
           List.fold_left
             (fun result (target : Strategy.weight_target) ->
               let* total = result in
-              Scalar.Weight.add total target.Strategy.weight)
+              let* absolute = Scalar.Weight.absolute target.Strategy.weight in
+              Scalar.Weight.add total absolute)
             (Ok Scalar.Weight.zero) targets
         in
-        let* sum = sum in
-        if Scalar.Weight.compare sum Scalar.Weight.one > 0 then
-          Error "target weights must sum to at most one"
+        let* gross = gross in
+        if
+          Int64.compare
+            (Scalar.Weight.to_micros gross)
+            (Scalar.Ratio.to_micros (Risk.max_leverage risk))
+          > 0
+        then Error "target gross weight exceeds maximum leverage"
         else Ok ()
   | Strategy.Target_quantities targets ->
       let ids =
@@ -449,12 +559,7 @@ let validate_portfolio_target risk catalog = function
                        ~lot:instrument.Instrument.lot_size)
                 then
                   Error "target quantity is not aligned to its instrument lot"
-                else if
-                  Scalar.Quantity.compare target.quantity
-                    (Risk.max_position risk)
-                  > 0
-                then Error "target quantity exceeds the maximum position"
-                else Ok ())
+                else Risk.check_position risk target.quantity)
           (Ok ()) targets
   | Strategy.Submit_order request -> (
       if not (Id.Instrument.Set.mem request.Order.instrument_id catalog) then
@@ -484,8 +589,21 @@ let validate_portfolio_target risk catalog = function
                       "limit price is not aligned to the instrument tick size"))
   | Strategy.Cancel_order _ | Strategy.Emit_metric _ -> Ok ()
 
-let validate_slices catalog slices =
-  let rec validate previous_sequence previous_end previous_received = function
+let validate_slices ~base_currency ~currencies ~instruments slices =
+  let catalog =
+    List.map (fun instrument -> instrument.Instrument.id) instruments
+    |> Id.Instrument.Set.of_list
+  in
+  let instrument_map =
+    List.fold_left
+      (fun map instrument ->
+        Id.Instrument.Map.add instrument.Instrument.id instrument map)
+      Id.Instrument.Map.empty instruments
+  in
+  let expected_currencies = String_set.of_list currencies in
+  let one = Scalar.Price.of_decimal_string "1" |> Result.get_ok in
+  let rec validate previous_sequence previous_end previous_received action_ids =
+    function
     | [] -> Ok ()
     | market_slice :: remaining ->
         let ids =
@@ -494,8 +612,66 @@ let validate_slices catalog slices =
             market_slice.Market_slice.bars
           |> Id.Instrument.Set.of_list
         in
+        let fx_currencies =
+          List.map
+            (fun mark -> mark.Market_slice.currency)
+            market_slice.Market_slice.fx_rates
+          |> String_set.of_list
+        in
+        let actions_valid =
+          List.for_all
+            (fun action ->
+              Id.Instrument.Set.mem action.Corporate_action.instrument_id
+                catalog)
+            market_slice.corporate_actions
+        in
+        let duplicate_action =
+          List.find_opt
+            (fun action ->
+              Id.Corporate_action.Set.mem action.Corporate_action.id action_ids)
+            market_slice.corporate_actions
+        in
+        let bars_aligned =
+          List.for_all
+            (fun bar ->
+              match
+                Id.Instrument.Map.find_opt bar.Bar.instrument_id instrument_map
+              with
+              | None -> false
+              | Some instrument ->
+                  List.for_all
+                    (fun price ->
+                      Scalar.Price.is_multiple price ~tick:instrument.tick_size)
+                    [
+                      bar.open_price;
+                      bar.high_price;
+                      bar.low_price;
+                      bar.close_price;
+                    ]
+                  && Option.for_all
+                       (fun volume ->
+                         Scalar.Quantity.is_multiple volume
+                           ~lot:instrument.lot_size)
+                       bar.volume)
+            market_slice.bars
+        in
         if not (Id.Instrument.Set.equal catalog ids) then
           Error "each market slice must contain every configured instrument"
+        else if not (String_set.equal expected_currencies fx_currencies) then
+          Error "each market slice must contain every scenario currency FX rate"
+        else if
+          not
+            (Option.exists
+               (fun rate -> Scalar.Price.equal rate one)
+               (Market_slice.fx_rate market_slice base_currency))
+        then Error "the base-currency FX rate must equal one"
+        else if not actions_valid then
+          Error "corporate action refers to an unknown instrument"
+        else if Option.is_some duplicate_action then
+          Error "corporate action IDs must be unique across the scenario"
+        else if not bars_aligned then
+          Error
+            "market prices and volumes must align with instrument increments"
         else if
           Option.exists
             (fun sequence ->
@@ -514,10 +690,16 @@ let validate_slices catalog slices =
             previous_received
         then Error "market slice receipt time must not move backward"
         else
+          let action_ids =
+            List.fold_left
+              (fun ids action ->
+                Id.Corporate_action.Set.add action.Corporate_action.id ids)
+              action_ids market_slice.corporate_actions
+          in
           validate (Some market_slice.slice_sequence) (Some market_slice.end_at)
-            (Some market_slice.received_at) remaining
+            (Some market_slice.received_at) action_ids remaining
   in
-  validate None None None slices
+  validate None None None Id.Corporate_action.Set.empty slices
 
 let validate_schedule risk catalog schedule slices =
   let slice_sequences =
@@ -616,15 +798,29 @@ let of_yojson json =
     let* currency_json = field fields "base_currency" in
     let* base_currency = string ~name:"base_currency" currency_json in
     let* cash_json = field fields "initial_cash" in
-    let* initial_cash = parse_money ~name:"initial_cash" cash_json in
-    if Scalar.Money.compare initial_cash Scalar.Money.zero < 0 then
-      Error "initial_cash must be nonnegative"
+    let* cash_json = list ~name:"initial_cash" cash_json in
+    let* initial_cash = map_list parse_cash_balance cash_json in
+    let* () =
+      Account.create ~base_currency ~initial_cash |> Result.map (fun _ -> ())
+    in
+    let* instruments_json = field fields "instruments" in
+    let* instruments_json = list ~name:"instruments" instruments_json in
+    let* instruments = map_list parse_instrument instruments_json in
+    if instruments = [] then
+      Error "scenario must define at least one instrument"
     else
-      let* instruments_json = field fields "instruments" in
-      let* instruments_json = list ~name:"instruments" instruments_json in
-      let* instruments = map_list parse_instrument instruments_json in
-      if instruments = [] then
-        Error "scenario must define at least one instrument"
+      let currencies =
+        base_currency
+        :: List.map
+             (fun instrument -> instrument.Instrument.quote_currency)
+             instruments
+        |> List.sort_uniq String.compare
+      in
+      let cash_currencies =
+        List.map fst initial_cash |> List.sort_uniq String.compare
+      in
+      if cash_currencies <> currencies then
+        Error "initial_cash must contain every scenario currency exactly once"
       else
         let catalog =
           List.map (fun instrument -> instrument.Instrument.id) instruments
@@ -647,7 +843,9 @@ let of_yojson json =
           let* slices_json = field fields "slices" in
           let* slices_json = list ~name:"slices" slices_json in
           let* slices = map_list parse_slice slices_json in
-          let* () = validate_slices catalog slices in
+          let* () =
+            validate_slices ~base_currency ~currencies ~instruments slices
+          in
           let* () = validate_schedule risk catalog schedule slices in
           Ok
             {
@@ -729,7 +927,31 @@ let stream_item_of_yojson header ~previous json =
     | None -> [ market_slice ]
     | Some item -> [ item.market_slice; market_slice ]
   in
-  let* () = validate_slices catalog slices in
+  let prior_action_ids =
+    match previous with
+    | None -> Id.Corporate_action.Set.empty
+    | Some item -> item.action_ids
+  in
+  let* action_ids =
+    List.fold_left
+      (fun result action ->
+        let* ids = result in
+        if Id.Corporate_action.Set.mem action.Corporate_action.id ids then
+          Error "corporate action IDs must be unique across the scenario stream"
+        else Ok (Id.Corporate_action.Set.add action.id ids))
+      (Ok prior_action_ids) market_slice.corporate_actions
+  in
+  let currencies =
+    header.base_currency
+    :: List.map
+         (fun instrument -> instrument.Instrument.quote_currency)
+         header.instruments
+    |> List.sort_uniq String.compare
+  in
+  let* () =
+    validate_slices ~base_currency:header.base_currency ~currencies
+      ~instruments:header.instruments slices
+  in
   let* () =
     List.fold_left
       (fun result intent ->
@@ -750,4 +972,4 @@ let stream_item_of_yojson header ~previous json =
              item.market_slice.slice_sequence)
     | None | Some _ -> Ok ()
   in
-  Ok { market_slice; intents }
+  Ok { market_slice; intents; action_ids }

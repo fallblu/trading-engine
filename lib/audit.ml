@@ -1,4 +1,9 @@
-type cancellation_reason = Strategy_requested | Target_replaced | Market_ioc
+type cancellation_reason =
+  | Strategy_requested
+  | Target_replaced
+  | Market_ioc
+  | Margin_call
+
 type target_basis = Weights | Quantities
 
 type requested_target = {
@@ -16,6 +21,8 @@ type order_counts = {
   cancelled : int;
 }
 
+type valuation = { account : Account.valuation; margin : Risk.margin_snapshot }
+
 type event =
   | Run_started of { scenario_sha256 : string; execution_model : string }
   | Market_slice_received of Market_slice.t
@@ -26,21 +33,44 @@ type event =
   | Order_accepted of Order.t
   | Order_rejected of Order.t
   | Order_cancelled of { order : Order.t; reason : cancellation_reason }
+  | Split_applied of {
+      action : Corporate_action.t;
+      previous_quantity : Scalar.Quantity.t;
+      adjusted_quantity : Scalar.Quantity.t;
+    }
+  | Cash_dividend_applied of {
+      action : Corporate_action.t;
+      quantity : Scalar.Quantity.t;
+      cash_amount : Scalar.Money.t;
+    }
+  | Order_adjusted of { order : Order.t; action_id : Id.Corporate_action.t }
   | Fill_applied of Fill.t
-  | Cash_limited of {
+  | Margin_limited of {
       order_id : Id.Order.t;
       instrument_id : Id.Instrument.t;
       requested_quantity : Scalar.Quantity.t;
-      affordable_quantity : Scalar.Quantity.t;
+      permitted_quantity : Scalar.Quantity.t;
       price : Scalar.Price.t;
     }
+  | Borrow_fee_applied of {
+      instrument_id : Id.Instrument.t;
+      quote_currency : string;
+      short_quantity : Scalar.Quantity.t;
+      reference_price : Scalar.Price.t;
+      borrow_bps : int;
+      period_start : Ptime.t;
+      period_end : Ptime.t;
+      fee : Scalar.Money.t;
+    }
+  | Margin_call_triggered of valuation
+  | Margin_restored of valuation
   | Intent_rejected of string
   | Metric_emitted of { name : string; value : string }
-  | Valuation of Account.valuation
+  | Valuation of valuation
   | Run_completed of {
       scenario_sha256 : string;
       execution_model : string;
-      valuation : Account.valuation;
+      valuation : valuation;
       order_counts : order_counts;
     }
 
@@ -73,6 +103,7 @@ let cancellation_reason_to_string = function
   | Strategy_requested -> "strategy_requested"
   | Target_replaced -> "target_replaced"
   | Market_ioc -> "market_ioc"
+  | Margin_call -> "margin_call"
 
 let target_basis_to_string = function
   | Weights -> "weights"
@@ -85,8 +116,14 @@ let event_name = function
   | Order_accepted _ -> "order_accepted"
   | Order_rejected _ -> "order_rejected"
   | Order_cancelled _ -> "order_cancelled"
+  | Split_applied _ -> "split_applied"
+  | Cash_dividend_applied _ -> "cash_dividend_applied"
+  | Order_adjusted _ -> "order_adjusted"
   | Fill_applied _ -> "fill_applied"
-  | Cash_limited _ -> "cash_limited"
+  | Margin_limited _ -> "margin_limited"
+  | Borrow_fee_applied _ -> "borrow_fee_applied"
+  | Margin_call_triggered _ -> "margin_call"
+  | Margin_restored _ -> "margin_restored"
   | Intent_rejected _ -> "intent_rejected"
   | Metric_emitted _ -> "metric_emitted"
   | Valuation _ -> "valuation"

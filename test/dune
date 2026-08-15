@@ -6,40 +6,41 @@
   test_accounting
   test_execution
   test_reducer
+  test_checkpoint4
   test_scenario
   test_engine)
  (deps
-  ../contracts/v2/fixtures/demo.journal.jsonl
-  ../contracts/v2/fixtures/demo.scenario.json
-  ../contracts/v2/fixtures/demo.scenario.jsonl
-  ../contracts/v2/journal.schema.json
-  ../contracts/v2/scenario-stream.schema.json
-  ../contracts/v2/scenario.schema.json)
+  ../contracts/v3/fixtures/demo.journal.jsonl
+  ../contracts/v3/fixtures/demo.scenario.json
+  ../contracts/v3/fixtures/demo.scenario.jsonl
+  ../contracts/v3/journal.schema.json
+  ../contracts/v3/scenario-stream.schema.json
+  ../contracts/v3/scenario.schema.json)
  (libraries trading_engine ptime yojson alcotest qcheck-core qcheck-alcotest))
 
 (cram
  (deps
   ../bin/main.exe
-  ../contracts/v2/fixtures/demo.scenario.json
-  ../contracts/v2/fixtures/demo.scenario.jsonl))
+  ../contracts/v3/fixtures/demo.scenario.json
+  ../contracts/v3/fixtures/demo.scenario.jsonl))
 
 (rule
  (alias runtest)
  (deps
   validate_schemas.py
-  ../contracts/v2/fixtures/demo.journal.jsonl
-  ../contracts/v2/fixtures/demo.scenario.json
-  ../contracts/v2/fixtures/demo.scenario.jsonl
-  ../contracts/v2/journal.schema.json
-  ../contracts/v2/scenario-stream.schema.json
-  ../contracts/v2/scenario.schema.json)
+  ../contracts/v3/fixtures/demo.journal.jsonl
+  ../contracts/v3/fixtures/demo.scenario.json
+  ../contracts/v3/fixtures/demo.scenario.jsonl
+  ../contracts/v3/journal.schema.json
+  ../contracts/v3/scenario-stream.schema.json
+  ../contracts/v3/scenario.schema.json)
  (action
   (run
    python3
    %{dep:validate_schemas.py}
-   %{dep:../contracts/v2/scenario.schema.json}
-   %{dep:../contracts/v2/scenario-stream.schema.json}
-   %{dep:../contracts/v2/journal.schema.json}
-   %{dep:../contracts/v2/fixtures/demo.scenario.json}
-   %{dep:../contracts/v2/fixtures/demo.scenario.jsonl}
-   %{dep:../contracts/v2/fixtures/demo.journal.jsonl})))
+   %{dep:../contracts/v3/scenario.schema.json}
+   %{dep:../contracts/v3/scenario-stream.schema.json}
+   %{dep:../contracts/v3/journal.schema.json}
+   %{dep:../contracts/v3/fixtures/demo.scenario.json}
+   %{dep:../contracts/v3/fixtures/demo.scenario.jsonl}
+   %{dep:../contracts/v3/fixtures/demo.journal.jsonl})))

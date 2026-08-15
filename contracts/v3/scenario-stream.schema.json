@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/fallblu/trading-engine/contracts/v3/scenario-stream.schema.json",
+  "title": "Trading Engine v3 replay scenario stream record",
+  "oneOf": [
+    { "$ref": "#/$defs/headerRecord" },
+    { "$ref": "#/$defs/sliceRecord" },
+    { "$ref": "#/$defs/endRecord" }
+  ],
+  "$defs": {
+    "headerRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_version", "scenario_sequence", "record_type", "payload"],
+      "properties": {
+        "contract_version": { "const": "3" },
+        "scenario_sequence": { "const": "1" },
+        "record_type": { "const": "scenario_header" },
+        "payload": { "$ref": "#/$defs/headerPayload" }
+      }
+    },
+    "sliceRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_version", "scenario_sequence", "record_type", "payload"],
+      "properties": {
+        "contract_version": { "const": "3" },
+        "scenario_sequence": { "$ref": "https://github.com/fallblu/trading-engine/contracts/v3/scenario.schema.json#/$defs/sequence" },
+        "record_type": { "const": "market_slice" },
+        "payload": { "$ref": "#/$defs/slicePayload" }
+      }
+    },
+    "endRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_version", "scenario_sequence", "record_type", "payload"],
+      "properties": {
+        "contract_version": { "const": "3" },
+        "scenario_sequence": { "$ref": "https://github.com/fallblu/trading-engine/contracts/v3/scenario.schema.json#/$defs/sequence" },
+        "record_type": { "const": "scenario_end" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["slice_count"],
+          "properties": { "slice_count": { "type": "string", "pattern": "^(?:0|[1-9][0-9]*)$" } }
+        }
+      }
+    },
+    "headerPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metadata", "run_id", "base_currency", "initial_cash", "instruments", "risk", "execution", "max_internal_events"],
+      "properties": {
+        "metadata": { "type": "object" },
+        "run_id": { "$ref": "https://github.com/fallblu/trading-engine/contracts/v3/scenario.schema.json#/$defs/identifier" },
+        "base_currency": { "$ref": "https://github.com/fallblu/trading-engine/contracts/v3/scenario.schema.json#/$defs/identifier" },
+        "initial_cash": { "type": "array", "minItems": 1, "items": { "$ref": "https://github.com/fallblu/trading-engine/contracts/v3/scenario.schema.json#/$defs/cashBalance" } },
+        "instruments": { "type": "array", "minItems": 1, "items": { "$ref": "https://github.com/fallblu/trading-engine/contracts/v3/scenario.schema.json#/$defs/instrument" } },
+        "risk": { "$ref": "https://github.com/fallblu/trading-engine/contracts/v3/scenario.schema.json#/$defs/risk" },
+        "execution": { "$ref": "https://github.com/fallblu/trading-engine/contracts/v3/scenario.schema.json#/$defs/execution" },
+        "max_internal_events": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "slicePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["market_slice", "intents"],
+      "properties": {
+        "market_slice": { "$ref": "https://github.com/fallblu/trading-engine/contracts/v3/scenario.schema.json#/$defs/marketSlice" },
+        "intents": { "type": "array", "items": { "$ref": "https://github.com/fallblu/trading-engine/contracts/v3/scenario.schema.json#/$defs/intent" } }
+      }
+    }
+  }
+}

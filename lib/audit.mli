@@ -1,6 +1,11 @@
 (** Deterministic audit events emitted by the pure engine. *)
 
-type cancellation_reason = Strategy_requested | Target_replaced | Market_ioc
+type cancellation_reason =
+  | Strategy_requested
+  | Target_replaced
+  | Market_ioc
+  | Margin_call
+
 type target_basis = Weights | Quantities
 
 type requested_target = {
@@ -18,6 +23,8 @@ type order_counts = {
   cancelled : int;
 }
 
+type valuation = { account : Account.valuation; margin : Risk.margin_snapshot }
+
 type event =
   | Run_started of { scenario_sha256 : string; execution_model : string }
   | Market_slice_received of Market_slice.t
@@ -28,21 +35,44 @@ type event =
   | Order_accepted of Order.t
   | Order_rejected of Order.t
   | Order_cancelled of { order : Order.t; reason : cancellation_reason }
+  | Split_applied of {
+      action : Corporate_action.t;
+      previous_quantity : Scalar.Quantity.t;
+      adjusted_quantity : Scalar.Quantity.t;
+    }
+  | Cash_dividend_applied of {
+      action : Corporate_action.t;
+      quantity : Scalar.Quantity.t;
+      cash_amount : Scalar.Money.t;
+    }
+  | Order_adjusted of { order : Order.t; action_id : Id.Corporate_action.t }
   | Fill_applied of Fill.t
-  | Cash_limited of {
+  | Margin_limited of {
       order_id : Id.Order.t;
       instrument_id : Id.Instrument.t;
       requested_quantity : Scalar.Quantity.t;
-      affordable_quantity : Scalar.Quantity.t;
+      permitted_quantity : Scalar.Quantity.t;
       price : Scalar.Price.t;
     }
+  | Borrow_fee_applied of {
+      instrument_id : Id.Instrument.t;
+      quote_currency : string;
+      short_quantity : Scalar.Quantity.t;
+      reference_price : Scalar.Price.t;
+      borrow_bps : int;
+      period_start : Ptime.t;
+      period_end : Ptime.t;
+      fee : Scalar.Money.t;
+    }
+  | Margin_call_triggered of valuation
+  | Margin_restored of valuation
   | Intent_rejected of string
   | Metric_emitted of { name : string; value : string }
-  | Valuation of Account.valuation
+  | Valuation of valuation
   | Run_completed of {
       scenario_sha256 : string;
       execution_model : string;
-      valuation : Account.valuation;
+      valuation : valuation;
       order_counts : order_counts;
     }
 

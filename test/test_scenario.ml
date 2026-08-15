@@ -2,12 +2,12 @@ open Test_support
 module T = Trading_engine
 
 let demo_document () =
-  In_channel.with_open_bin "../contracts/v2/fixtures/demo.scenario.json"
+  In_channel.with_open_bin "../contracts/v3/fixtures/demo.scenario.json"
     In_channel.input_all
 
 let demo () = T.Scenario.of_string (demo_document ()) |> ok
 let demo_hash () = T.Sha256.digest_string (demo_document ())
-let stream_path = "../contracts/v2/fixtures/demo.scenario.jsonl"
+let stream_path = "../contracts/v3/fixtures/demo.scenario.jsonl"
 
 let stream_document () =
   In_channel.with_open_bin stream_path In_channel.input_all
@@ -57,6 +57,8 @@ let write_large_stream path slice_count =
                   ~instrument:(instrument_id "demo-equity-acme")
                   (Int64.of_int index);
               ]
+            ~fx_rates:[ fx_mark () ]
+            ~corporate_actions:[]
           |> ok
         in
         let payload =
@@ -107,9 +109,9 @@ let schema_artifacts_parse () =
           (List.mem_assoc "$defs" fields)
     | _ -> Alcotest.fail (path ^ " must contain a JSON object")
   in
-  check_schema "../contracts/v2/scenario.schema.json";
-  check_schema "../contracts/v2/scenario-stream.schema.json";
-  check_schema "../contracts/v2/journal.schema.json"
+  check_schema "../contracts/v3/scenario.schema.json";
+  check_schema "../contracts/v3/scenario-stream.schema.json";
+  check_schema "../contracts/v3/journal.schema.json"
 
 let timestamp_precision_is_bounded () =
   List.iter
@@ -164,13 +166,13 @@ let contract_version_is_required_and_supported () =
     map_root (fun fields ->
         List.map
           (fun (name, value) ->
-            if String.equal name "contract_version" then (name, `String "3")
+            if String.equal name "contract_version" then (name, `String "2")
             else (name, value))
           fields)
   in
   Alcotest.(check string)
     "unsupported version diagnosed"
-    "unsupported scenario contract_version \"3\" (expected \"2\")"
+    "unsupported scenario contract_version \"2\" (expected \"3\")"
     (T.Scenario.of_yojson unsupported |> error)
 
 let duplicate_fields_are_rejected () =
@@ -469,7 +471,7 @@ let replay_ends_with_completion_summary () =
       Alcotest.(check string)
         "completion model" "completed_bar_v1" execution_model;
       Alcotest.check money_testable "summary equity" result.valuation.equity
-        valuation.equity
+        valuation.account.equity
   | _ -> Alcotest.fail "expected run completion payload"
 
 let replay_matches_golden_file () =
@@ -479,7 +481,7 @@ let replay_matches_golden_file () =
     |> fun value -> value ^ "\n"
   in
   let expected =
-    In_channel.with_open_bin "../contracts/v2/fixtures/demo.journal.jsonl"
+    In_channel.with_open_bin "../contracts/v3/fixtures/demo.journal.jsonl"
       In_channel.input_all
   in
   Alcotest.(check string) "stable audit contract" expected actual
@@ -580,7 +582,7 @@ let streamed_replay_matches_batch_semantics () =
       Alcotest.(check int64) "two schedule batches" 2L result.schedule_count;
       Alcotest.(check int) "one instrument" 1 result.instrument_count;
       Alcotest.(check int64) "twenty audits" 20L result.audit_count;
-      Alcotest.check money_testable "same equity" (money "10005.576")
+      Alcotest.check money_testable "same equity" (money "10004.76812")
         result.valuation.equity;
       Alcotest.(check string)
         "stream and batch journals agree" expected

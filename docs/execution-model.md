@@ -1,7 +1,7 @@
 # Execution model
 
 The engine selects a compiled execution module by the scenario's stable `execution.model` name.
-Contract v2 advertises and accepts `completed_bar_v1`; embedders can inject another module through
+Contract v3 advertises and accepts `completed_bar_v1`; embedders can inject another module through
 the typed engine configuration without introducing runtime shared-library loading. The selected
 name is repeated in both terminal audit records.
 
@@ -31,8 +31,10 @@ weight request:
 3. Divides by the corresponding closing price.
 4. Rounds down to the instrument lot.
 
-Weights are nonnegative and sum to at most one. Quantity targets must align with their lots. Every
-desired quantity must stay within `max_position`.
+Weights and quantities are signed. Gross absolute weight must stay within `max_leverage`, quantity
+targets must align with their lots, and every desired quantity must stay within the configured long
+or short position limit. A target that changes sign is reached causally: flatten first, then open
+the opposite side on a later attempt.
 
 The computed desired quantities persist. After each slice, the engine compares them with actual
 positions and submits at most one market order per instrument. Each order is capped at
@@ -63,11 +65,26 @@ raw capacity = floor(volume × participation_bps / 10,000)
 capacity = raw capacity rounded down to the instrument lot size
 ```
 
-All eligible sells are ordered before buys across the slice. Orders within a side use ascending
-creation sequence and order ID. Each instrument has its own shared capacity, so a sell consumes
-that instrument's capacity before a competing buy.
+Eligible liquidation orders are ordered before all other orders across the slice. Within the
+liquidation and ordinary origin classes, sells precede buys; orders within a side then use
+ascending creation sequence and order ID. Each instrument has its own shared capacity, so the
+higher-priority order consumes that instrument's capacity first.
 
-## Cash and fees
+## Corporate actions and borrow
+
+Corporate actions are ordered by action ID and applied before matching. A split scales the signed
+position, persistent quantity target, and each active order by its exact numerator/denominator
+ratio. It inversely scales limit prices and preserves total position basis. If the adjusted order
+cannot satisfy the configured lot or tick, the slice fails instead of silently rounding. Each
+changed order emits `order_adjusted` with causal links to both the original order and split.
+
+A cash dividend multiplies the pre-match signed position by its per-unit amount. It credits a long
+or debits a short in the instrument's quote-currency ledger and records realized dividend P&L.
+After actions, each open short accrues a quote-currency borrow fee from the slice open mark and the
+exact `start_at`/`end_at` duration using a 365-day basis. Positive fees round upward to one money
+micro-unit.
+
+## Risk-limited fills and fees
 
 Each proposed fill pays:
 
@@ -75,27 +92,28 @@ Each proposed fill pays:
 fixed_fee + ceil(fill_notional × fee_bps / 10,000)
 ```
 
-Sell fills are applied before buys across the slice, making their net proceeds available to later
-buys. For each buy, the engine finds the largest whole-lot quantity whose actual-price notional
-plus fee fits current cash. It emits `cash_limited` when this is below the execution proposal. A
-zero affordable quantity produces no fill. Only the quantity actually applied consumes shared
-slice capacity, so cash-clipped capacity remains available to later eligible buys for the same
-instrument. Account transitions independently reject any fill that would make cash negative,
-including a sell whose fee exceeds cash plus proceeds.
+Liquidation proposals are processed first, followed by sells and then buys within each origin
+class. For each proposal, the engine searches for the largest lot-aligned quantity whose signed
+post-fill position is within the long/short cap.
+When absolute exposure increases, the projected account must also satisfy maximum gross exposure,
+maximum leverage, and initial margin. Reductions in absolute exposure are permitted without a new
+initial-margin test. A clipped proposal emits `margin_limited`; a zero permitted quantity produces
+no fill. Only the applied quantity consumes shared slice capacity.
 
 Each partial fill pays its own fixed fee, so fragmentation affects total cost.
 
 ## Exact values
 
-Prices, weights, and money use six decimal places stored in checked `int64` values. Quantities use
-nonnegative whole units. Scenario strings must use the canonical shortest representation: `1`,
-`1.25`, and `0.000001` are valid; `01`, `1.0`, and negative zero are not.
+Prices, weights, quantities, FX rates, and money use six decimal places stored in checked `int64`
+values. Signed quantities are used for positions and targets; submitted orders and fills retain a
+positive quantity plus a side. Scenario strings use the canonical shortest representation: `1`,
+`1.25`, `-0.5`, and `0.000001` are valid; `01`, `1.0`, excess precision, and negative zero are not.
 
 Orders align with lot size. Limit prices and executable OHLC values align with tick size.
 
 ## Accounting and valuation
 
-For a buy with notional `N` and fee `F`:
+For a buy that opens or increases a long with notional `N` and fee `F`:
 
 ```text
 cash       -= N + F
@@ -103,7 +121,7 @@ quantity   += fill quantity
 cost basis += N + F
 ```
 
-For a sell:
+For a sell that reduces a long:
 
 ```text
 cash          += N - F
@@ -111,18 +129,32 @@ removed basis  = proportional average cost
 realized P&L  += N - F - removed basis
 ```
 
-Closing a position removes its exact remaining basis. A partial sale rounds removed basis down to
-one money micro-unit and leaves the exact remainder open.
+Opening a short credits `N - F` to cash and records its cost basis as the negative net proceeds.
+Covering a short debits `N + F`; realized P&L is the removed negative basis minus that cover cost.
+One fill may reduce a position to zero but may not cross through zero. Closing a position removes
+its exact remaining basis. A partial close uses proportional average basis and leaves the exact
+remainder open.
 
-Valuation uses all synchronized closes:
+The account maintains a signed cash ledger for every scenario currency. Each slice supplies a
+complete currency-to-base FX vector, with base rate one. Valuation converts native cash, market
+value, basis, P&L, and fees into the base reporting currency using the current marks:
 
 ```text
-market value   = sum(mark × quantity)
-unrealized P&L = market value - remaining cost basis
-equity         = cash + market value
+net market value = sum(base FX × mark × signed quantity)
+gross exposure   = long market value + absolute short market value
+unrealized P&L   = net market value - remaining base cost basis
+equity           = base cash + net market value
 ```
 
 Each valuation also emits one deterministic attribution row per marked instrument. Row market
-value, basis, realized P&L, unrealized P&L, and cumulative fees sum exactly to the corresponding
-account totals. Closed instruments retain cumulative realized P&L and fees with zero quantity and
-basis.
+value, basis, realized P&L, dividend P&L, execution fees, and borrow fees is present in both native
+and base values and sums exactly to the corresponding account totals. A separate row attributes
+each currency ledger. Closed instruments retain cumulative realized P&L and fees with zero
+quantity and basis.
+
+The valuation includes initial and maintenance requirements and excesses. After strategy and
+target processing, negative maintenance excess triggers one `margin_call`, cancels all active
+orders, clears the persistent target, and submits deterministic `margin_liquidation` market orders
+in instrument-ID order. Each attempt is capped by `max_order_quantity` and lot aligned. The engine
+continues on later slices until every position is flat, then emits `margin_restored` when the
+maintenance condition is no longer breached.

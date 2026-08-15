@@ -77,6 +77,8 @@ def main() -> None:
     )
 
     scenario = load(scenario_path)
+    contract_version = scenario["contract_version"]
+    unsupported_version = "unsupported"
     scenario_validator.validate(scenario)
     stream_records = [
         json.loads(line) for line in stream_path.read_text(encoding="utf-8").splitlines()
@@ -105,7 +107,7 @@ def main() -> None:
     del unversioned_scenario["contract_version"]
     expect_invalid(scenario_validator, unversioned_scenario)
     unsupported_scenario = copy.deepcopy(scenario)
-    unsupported_scenario["contract_version"] = "3"
+    unsupported_scenario["contract_version"] = unsupported_version
     expect_invalid(scenario_validator, unsupported_scenario)
     missing_execution_model = copy.deepcopy(scenario)
     del missing_execution_model["execution"]["model"]
@@ -117,13 +119,16 @@ def main() -> None:
     del unversioned_stream_record["contract_version"]
     expect_invalid(stream_validator, unversioned_stream_record)
     unsupported_stream_record = copy.deepcopy(stream_records[1])
-    unsupported_stream_record["contract_version"] = "3"
+    unsupported_stream_record["contract_version"] = unsupported_version
     expect_invalid(stream_validator, unsupported_stream_record)
     malformed_stream_slice = copy.deepcopy(stream_records[1])
     malformed_stream_slice["payload"]["market_slice"]["unexpected"] = True
     expect_invalid(stream_validator, malformed_stream_slice)
     noncanonical = copy.deepcopy(scenario)
-    noncanonical["initial_cash"] = "10000.0"
+    if contract_version == "3":
+        noncanonical["initial_cash"][0]["amount"] = "10000.0"
+    else:
+        noncanonical["initial_cash"] = "10000.0"
     expect_invalid(scenario_validator, noncanonical)
     first_journal_record = json.loads(
         journal_path.read_text(encoding="utf-8").splitlines()[0]
@@ -138,7 +143,7 @@ def main() -> None:
     del unversioned_journal_record["contract_version"]
     expect_invalid(journal_validator, unversioned_journal_record)
     unsupported_journal_record = copy.deepcopy(first_journal_record)
-    unsupported_journal_record["contract_version"] = "3"
+    unsupported_journal_record["contract_version"] = unsupported_version
     expect_invalid(journal_validator, unsupported_journal_record)
     journal_records = [
         json.loads(line)

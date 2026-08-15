@@ -190,6 +190,36 @@ let sells_have_capacity_priority () =
         buy_fill.quantity
   | _ -> Alcotest.fail "expected sell-first capacity proposals"
 
+let liquidations_have_capacity_priority () =
+  let sell_request = request ~side:T.Order.Sell ~quantity_value:"5" () in
+  let oms, sell = oms_with_order ~id:"order-sell" sell_request in
+  let liquidation_request =
+    request ~quantity_value:"5" ~origin:T.Order.Margin_liquidation ()
+  in
+  let oms, liquidation =
+    T.Oms.accept oms
+      ~id:(order_id "order-liquidation")
+      ~accepted_sequence:2L
+      ~created_event_id:(event_id "order-liquidation-event")
+      ~created_at:(timestamp "2026-01-02T21:00:02Z")
+      ~eligible_after_slice_sequence:1L liquidation_request
+    |> ok
+  in
+  let matched =
+    match_orders ~oms (market_slice ~bars:[ bar ~volume:(Some "6") 2L ] 2L)
+  in
+  match matched.fills with
+  | [ liquidation_fill; sell_fill ] ->
+      Alcotest.check order_id_testable "liquidation matched first"
+        liquidation.id liquidation_fill.order_id;
+      Alcotest.check quantity_testable "liquidation takes five" (quantity "5")
+        liquidation_fill.quantity;
+      Alcotest.check order_id_testable "ordinary sell matched second" sell.id
+        sell_fill.order_id;
+      Alcotest.check quantity_testable "ordinary sell gets remainder"
+        (quantity "1") sell_fill.quantity
+  | _ -> Alcotest.fail "expected liquidation-first capacity proposals"
+
 let participation_cap_is_shared () =
   let first_request =
     request ~quantity_value:"10" ~kind:(T.Order.Limit (price "110")) ()
@@ -325,6 +355,8 @@ let tests =
     Alcotest.test_case "volume FIFO" `Quick volume_is_allocated_fifo;
     Alcotest.test_case "sells have capacity priority" `Quick
       sells_have_capacity_priority;
+    Alcotest.test_case "liquidations have capacity priority" `Quick
+      liquidations_have_capacity_priority;
     Alcotest.test_case "participation cap shared" `Quick
       participation_cap_is_shared;
     Alcotest.test_case "applied quantity controls shared capacity" `Quick

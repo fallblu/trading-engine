@@ -17,9 +17,12 @@ let valid_sha256 value =
        value
 
 module Make (Strategy_impl : Strategy.S) = struct
+  let ( let* ) result function_ =
+    match result with Ok value -> function_ value | Error _ as error -> error
+
   type desired_targets = {
     quantities : Scalar.Quantity.t Id.Instrument.Map.t;
-    cause_id : Id.Event.t;
+    cause_ids : Id.Event.t list;
   }
 
   type t = {
@@ -33,7 +36,10 @@ module Make (Strategy_impl : Strategy.S) = struct
     last_slice_end : Ptime.t option;
     last_received_at : Ptime.t option;
     latest_bars : Bar.t Id.Instrument.Map.t;
+    latest_fx_rates : (string * Scalar.Price.t) list;
+    applied_action_ids : Id.Corporate_action.Set.t;
     desired_targets : desired_targets option;
+    liquidation_pending : bool;
     account : Account.t;
     oms : Oms.t;
     strategy_state : Strategy_impl.state;
@@ -57,30 +63,55 @@ module Make (Strategy_impl : Strategy.S) = struct
   }
 
   let create ~run_id ~scenario_sha256 ~config ~initial_cash ~strategy_state =
-    if Scalar.Money.compare initial_cash Scalar.Money.zero < 0 then
-      Error "initial cash must be nonnegative"
-    else if not (valid_sha256 scenario_sha256) then
+    if not (valid_sha256 scenario_sha256) then
       Error "scenario SHA-256 must contain 64 lowercase hexadecimal characters"
     else
-      Ok
-        {
-          run_id;
-          scenario_sha256;
-          config;
-          engine_sequence = 0L;
-          next_order_number = 1L;
-          next_fill_number = 1L;
-          last_slice_sequence = None;
-          last_slice_end = None;
-          last_received_at = None;
-          latest_bars = Id.Instrument.Map.empty;
-          desired_targets = None;
-          account = Account.create ~initial_cash;
-          oms = Oms.empty;
-          strategy_state;
-          started = false;
-          completed = false;
-        }
+      let expected_currencies =
+        Risk.base_currency config.risk
+        :: List.map
+             (fun instrument -> instrument.Instrument.quote_currency)
+             (Risk.instruments config.risk)
+        |> List.sort_uniq String.compare
+      in
+      let supplied_currencies =
+        List.map fst initial_cash |> List.sort_uniq String.compare
+      in
+      if supplied_currencies <> expected_currencies then
+        Error "initial cash must contain every configured currency exactly once"
+      else
+        match
+          Account.create
+            ~base_currency:(Risk.base_currency config.risk)
+            ~initial_cash
+        with
+        | Error _ as error -> error
+        | Ok account ->
+            let base_rate =
+              Scalar.Price.of_decimal_string "1" |> Result.get_ok
+            in
+            Ok
+              {
+                run_id;
+                scenario_sha256;
+                config;
+                engine_sequence = 0L;
+                next_order_number = 1L;
+                next_fill_number = 1L;
+                last_slice_sequence = None;
+                last_slice_end = None;
+                last_received_at = None;
+                latest_bars = Id.Instrument.Map.empty;
+                latest_fx_rates =
+                  [ (Risk.base_currency config.risk, base_rate) ];
+                applied_action_ids = Id.Corporate_action.Set.empty;
+                desired_targets = None;
+                liquidation_pending = false;
+                account;
+                oms = Oms.empty;
+                strategy_state;
+                started = false;
+                completed = false;
+              }
 
   let account state = state.account
   let oms state = state.oms
@@ -202,9 +233,14 @@ module Make (Strategy_impl : Strategy.S) = struct
                 ~engine_sequence:order_sequence
             in
             match
+              let marks =
+                Id.Instrument.Map.bindings reduction.state.latest_bars
+                |> List.map (fun (instrument_id, bar) ->
+                    (instrument_id, bar.Bar.close_price))
+              in
               Risk.check reduction.state.config.risk
-                ~account:reduction.state.account ~oms:reduction.state.oms
-                request
+                ~account:reduction.state.account ~oms:reduction.state.oms ~marks
+                ~fx_rates:reduction.state.latest_fx_rates request
             with
             | Ok () -> (
                 match
@@ -298,6 +334,228 @@ module Make (Strategy_impl : Strategy.S) = struct
     |> List.sort (fun left right ->
         Id.Instrument.compare left.Instrument.id right.Instrument.id)
 
+  let event_ids_after state count =
+    let rec collect sequence remaining values =
+      if remaining = 0 then Ok (List.rev values)
+      else
+        let* sequence = next_sequence sequence in
+        let id =
+          Audit.event_id ~run_id:state.run_id ~engine_sequence:sequence
+        in
+        collect sequence (remaining - 1) (id :: values)
+    in
+    collect state.engine_sequence count []
+
+  let split_desired_targets desired action event_id =
+    match
+      Id.Instrument.Map.find_opt action.Corporate_action.instrument_id
+        desired.quantities
+    with
+    | None -> Error "split target refers to an unknown instrument"
+    | Some quantity -> (
+        match action.kind with
+        | Corporate_action.Cash_dividend _ -> Ok desired
+        | Corporate_action.Split { numerator; denominator } ->
+            let* quantity =
+              Scalar.Quantity.scale_ratio_exact quantity ~numerator ~denominator
+            in
+            Ok
+              {
+                quantities =
+                  Id.Instrument.Map.add action.instrument_id quantity
+                    desired.quantities;
+                cause_ids = event_id :: desired.cause_ids;
+              })
+
+  let apply_split_action reduction action numerator denominator =
+    let instrument_id = action.Corporate_action.instrument_id in
+    let previous_quantity =
+      Account.position_quantity reduction.state.account instrument_id
+    in
+    let* account =
+      Account.apply_split reduction.state.account ~instrument_id ~numerator
+        ~denominator
+    in
+    let adjusted_quantity = Account.position_quantity account instrument_id in
+    let reduction =
+      { reduction with state = { reduction.state with account } }
+    in
+    let* reduction, split_event_id =
+      emit_with_id reduction
+        (Audit.Split_applied { action; previous_quantity; adjusted_quantity })
+    in
+    let* desired_targets =
+      match reduction.state.desired_targets with
+      | None -> Ok None
+      | Some desired ->
+          split_desired_targets desired action split_event_id
+          |> Result.map Option.some
+    in
+    let active = Oms.active_for_instrument reduction.state.oms instrument_id in
+    let* updated_event_ids =
+      event_ids_after reduction.state (List.length active)
+    in
+    let* oms, adjusted =
+      Oms.adjust_for_split reduction.state.oms ~instrument_id ~updated_event_ids
+        ~numerator ~denominator
+    in
+    let* instrument =
+      match Risk.instrument reduction.state.config.risk instrument_id with
+      | Some value -> Ok value
+      | None -> Error "split refers to an unknown instrument"
+    in
+    let* () =
+      List.fold_left
+        (fun result order ->
+          let* () = result in
+          if
+            not
+              (Scalar.Quantity.is_multiple order.Order.request.quantity
+                 ~lot:instrument.lot_size)
+          then Error "split-adjusted order is not aligned to the instrument lot"
+          else
+            match order.request.kind with
+            | Order.Market -> Ok ()
+            | Order.Limit price ->
+                if Scalar.Price.is_multiple price ~tick:instrument.tick_size
+                then Ok ()
+                else
+                  Error
+                    "split-adjusted limit price is not aligned to the \
+                     instrument tick")
+        (Ok ()) adjusted
+    in
+    let state = { reduction.state with oms; desired_targets } in
+    let reduction = { reduction with state } in
+    List.fold_left
+      (fun result order ->
+        let* reduction = result in
+        let causes = [ order.Order.created_event_id; split_event_id ] in
+        let* reduction, emitted_id =
+          emit_with_id
+            (with_causes reduction causes)
+            (Audit.Order_adjusted { order; action_id = action.id })
+        in
+        if not (Id.Event.equal emitted_id order.updated_event_id) then
+          Error "split order adjustment event ID prediction diverged"
+        else Ok reduction)
+      (Ok reduction) adjusted
+
+  let apply_dividend_action reduction action amount_per_unit =
+    let instrument_id = action.Corporate_action.instrument_id in
+    let quantity =
+      Account.position_quantity reduction.state.account instrument_id
+    in
+    let* instrument =
+      match Risk.instrument reduction.state.config.risk instrument_id with
+      | Some value -> Ok value
+      | None -> Error "cash dividend refers to an unknown instrument"
+    in
+    let* cash_amount = Scalar.Money.for_quantity amount_per_unit quantity in
+    let* account =
+      Account.apply_cash_dividend reduction.state.account ~instrument_id
+        ~quote_currency:instrument.quote_currency ~amount_per_unit
+    in
+    let reduction =
+      { reduction with state = { reduction.state with account } }
+    in
+    emit reduction
+      (Audit.Cash_dividend_applied { action; quantity; cash_amount })
+
+  let apply_corporate_actions reduction actions =
+    List.fold_left
+      (fun result action ->
+        let* reduction = result in
+        let causes = Option.to_list reduction.slice_event_id in
+        let reduction = with_causes reduction causes in
+        match action.Corporate_action.kind with
+        | Split { numerator; denominator } ->
+            apply_split_action reduction action numerator denominator
+        | Cash_dividend { amount_per_unit } ->
+            apply_dividend_action reduction action amount_per_unit)
+      (Ok reduction) actions
+
+  let borrow_fee ~notional ~bps span =
+    if bps = 0 || Scalar.Money.equal notional Scalar.Money.zero then
+      Ok Scalar.Money.zero
+    else
+      let days, picoseconds = Ptime.Span.to_d_ps span in
+      let picoseconds_per_second = Z.of_string "1000000000000" in
+      let duration =
+        Z.add
+          (Z.mul (Z.of_int days)
+             (Z.mul (Z.of_int 86_400) picoseconds_per_second))
+          (Z.of_int64 picoseconds)
+      in
+      let numerator =
+        Z.mul
+          (Z.mul (Z.of_int64 (Scalar.Money.to_micros notional)) (Z.of_int bps))
+          duration
+      in
+      let denominator =
+        Z.mul
+          (Z.mul (Z.of_int 10_000) (Z.of_int (365 * 86_400)))
+          picoseconds_per_second
+      in
+      let fee =
+        if Z.equal numerator Z.zero then Z.zero
+        else Z.div (Z.add numerator (Z.pred denominator)) denominator
+      in
+      if Z.fits_int64 fee then Ok (Scalar.Money.of_micros (Z.to_int64 fee))
+      else Error "short borrow fee overflow"
+
+  let apply_borrow_fees reduction market_slice =
+    let span =
+      Ptime.diff market_slice.Market_slice.end_at market_slice.start_at
+    in
+    List.fold_left
+      (fun result instrument ->
+        let* reduction = result in
+        let quantity =
+          Account.position_quantity reduction.state.account
+            instrument.Instrument.id
+        in
+        if
+          (not (Scalar.Quantity.is_negative quantity))
+          || Risk.short_borrow_bps reduction.state.config.risk = 0
+        then Ok reduction
+        else
+          let* short_quantity = Scalar.Quantity.absolute quantity in
+          let* bar =
+            match Market_slice.bar market_slice instrument.id with
+            | Some value -> Ok value
+            | None -> Error "short position has no market slice bar"
+          in
+          let* notional = Scalar.Money.notional bar.open_price short_quantity in
+          let borrow_bps = Risk.short_borrow_bps reduction.state.config.risk in
+          let* fee = borrow_fee ~notional ~bps:borrow_bps span in
+          if Scalar.Money.equal fee Scalar.Money.zero then Ok reduction
+          else
+            let* account =
+              Account.apply_borrow_fee reduction.state.account
+                ~instrument_id:instrument.id
+                ~quote_currency:instrument.quote_currency ~fee
+            in
+            let reduction =
+              { reduction with state = { reduction.state with account } }
+            in
+            let causes = Option.to_list reduction.slice_event_id in
+            emit
+              (with_causes reduction causes)
+              (Audit.Borrow_fee_applied
+                 {
+                   instrument_id = instrument.id;
+                   quote_currency = instrument.quote_currency;
+                   short_quantity;
+                   reference_price = bar.open_price;
+                   borrow_bps;
+                   period_start = market_slice.start_at;
+                   period_end = market_slice.end_at;
+                   fee;
+                 }))
+      (Ok reduction)
+      (configured_instruments reduction.state)
+
   let validate_target_ids state ids =
     let expected =
       configured_instruments state
@@ -332,12 +590,8 @@ module Make (Strategy_impl : Strategy.S) = struct
               (Scalar.Quantity.is_multiple target.quantity
                  ~lot:instrument.Instrument.lot_size)
           then Error "target quantity is not aligned to its instrument lot"
-          else if
-            Scalar.Quantity.compare target.quantity
-              (Risk.max_position state.config.risk)
-            > 0
-          then Error "target quantity exceeds the maximum position"
           else
+            let* () = Risk.check_position state.config.risk target.quantity in
             Ok
               ( Id.Instrument.Map.add target.instrument_id target.quantity
                   desired,
@@ -367,15 +621,20 @@ module Make (Strategy_impl : Strategy.S) = struct
       | Error _ as error -> error
     in
     let* () = validate_target_ids state ids in
-    let* total_weight =
+    let* gross_weight =
       List.fold_left
         (fun result (target : Strategy.weight_target) ->
           let* total = result in
-          Scalar.Weight.add total target.Strategy.weight)
+          let* absolute = Scalar.Weight.absolute target.Strategy.weight in
+          Scalar.Weight.add total absolute)
         (Ok Scalar.Weight.zero) targets
     in
-    if Scalar.Weight.compare total_weight Scalar.Weight.one > 0 then
-      Error "target weights must sum to at most one"
+    if
+      Int64.compare
+        (Scalar.Weight.to_micros gross_weight)
+        (Scalar.Ratio.to_micros (Risk.max_leverage state.config.risk))
+      > 0
+    then Error "target gross weight exceeds maximum leverage"
     else
       let* valuation =
         let marks =
@@ -383,7 +642,9 @@ module Make (Strategy_impl : Strategy.S) = struct
           |> List.map (fun (instrument_id, bar) ->
               (instrument_id, bar.Bar.close_price))
         in
-        Account.value state.account ~marks
+        Account.value state.account
+          ~instruments:(Risk.instruments state.config.risk)
+          ~marks ~fx_rates:state.latest_fx_rates
       in
       let add result (target : Strategy.weight_target) =
         let* desired, requested = result in
@@ -399,22 +660,17 @@ module Make (Strategy_impl : Strategy.S) = struct
                 ~weight:target.weight ~price:bar.close_price
                 ~lot_size:instrument.lot_size
             in
-            if
-              Scalar.Quantity.compare quantity
-                (Risk.max_position state.config.risk)
-              > 0
-            then Error "weight-derived target exceeds the maximum position"
-            else
-              Ok
-                ( Id.Instrument.Map.add target.instrument_id quantity desired,
-                  Audit.
-                    {
-                      instrument_id = target.instrument_id;
-                      weight = Some target.weight;
-                      quantity;
-                      reference_price = Some bar.close_price;
-                    }
-                  :: requested )
+            let* () = Risk.check_position state.config.risk quantity in
+            Ok
+              ( Id.Instrument.Map.add target.instrument_id quantity desired,
+                Audit.
+                  {
+                    instrument_id = target.instrument_id;
+                    weight = Some target.weight;
+                    quantity;
+                    reference_price = Some bar.close_price;
+                  }
+                :: requested )
       in
       let* desired, requested =
         List.fold_left add (Ok (Id.Instrument.Map.empty, [])) targets
@@ -447,7 +703,11 @@ module Make (Strategy_impl : Strategy.S) = struct
                   {
                     reduction.state with
                     desired_targets =
-                      Some { quantities = desired; cause_id = target_event_id };
+                      Some
+                        {
+                          quantities = desired;
+                          cause_ids = [ target_event_id ];
+                        };
                   };
               })
 
@@ -469,6 +729,10 @@ module Make (Strategy_impl : Strategy.S) = struct
     else emit reduction (Audit.Metric_emitted { name; value })
 
   let handle_intent reduction = function
+    | intent when reduction.state.liquidation_pending -> (
+        match intent with
+        | Strategy.Emit_metric { name; value } -> metric reduction name value
+        | _ -> reject_intent reduction "margin liquidation is in progress")
     | Strategy.Target_weights targets -> set_weight_targets reduction targets
     | Strategy.Target_quantities targets ->
         set_quantity_targets reduction targets
@@ -523,8 +787,43 @@ module Make (Strategy_impl : Strategy.S) = struct
       List.map (fun bar -> bar.Bar.instrument_id) market_slice.Market_slice.bars
     in
     let actual = List.sort_uniq Id.Instrument.compare ids in
+    let expected_currencies =
+      Risk.base_currency state.config.risk
+      :: List.map
+           (fun instrument -> instrument.Instrument.quote_currency)
+           (configured_instruments state)
+      |> List.sort_uniq String.compare
+    in
+    let actual_currencies =
+      List.map
+        (fun mark -> mark.Market_slice.currency)
+        market_slice.Market_slice.fx_rates
+      |> List.sort_uniq String.compare
+    in
+    let one = Scalar.Price.of_decimal_string "1" |> Result.get_ok in
+    let actions_valid =
+      List.for_all
+        (fun action ->
+          Option.is_some
+            (Risk.instrument state.config.risk
+               action.Corporate_action.instrument_id)
+          && not
+               (Id.Corporate_action.Set.mem action.id state.applied_action_ids))
+        market_slice.corporate_actions
+    in
     if List.length ids <> List.length actual || actual <> expected then
       Error "market slice must contain each configured instrument exactly once"
+    else if actual_currencies <> expected_currencies then
+      Error "market slice must contain each configured currency FX rate"
+    else if
+      not
+        (Option.exists
+           (fun rate -> Scalar.Price.equal rate one)
+           (Market_slice.fx_rate market_slice
+              (Risk.base_currency state.config.risk)))
+    then Error "market slice base-currency FX rate must equal one"
+    else if not actions_valid then
+      Error "corporate action is unknown or was already applied"
     else
       match state.last_slice_sequence with
       | Some sequence
@@ -541,35 +840,64 @@ module Make (Strategy_impl : Strategy.S) = struct
                   Error "market slice receipt time must not move backward"
               | _ -> Ok ()))
 
-  let fill_cost execution price quantity =
-    match Scalar.Money.notional price quantity with
-    | Error _ as error -> error
-    | Ok notional -> (
-        match
-          Scalar.Money.fee
-            ~fixed:(Execution.fixed_fee execution)
-            ~bps:(Execution.fee_bps execution)
-            ~notional
-        with
-        | Error _ as error -> error
-        | Ok fee -> (
-            match Scalar.Money.add notional fee with
-            | Error _ as error -> error
-            | Ok cost -> Ok (fee, cost)))
+  let fill_fee execution price quantity =
+    let* notional = Scalar.Money.notional price quantity in
+    Scalar.Money.fee
+      ~fixed:(Execution.fixed_fee execution)
+      ~bps:(Execution.fee_bps execution)
+      ~notional
 
-  let affordable_quantity state instrument price requested =
-    let cash = Account.cash state.account in
-    let lot = instrument.Instrument.lot_size in
-    let lot_value = Scalar.Quantity.to_int64 lot in
-    let requested_lots =
-      Int64.div (Scalar.Quantity.to_int64 requested) lot_value
+  let slice_open_marks market_slice =
+    List.map
+      (fun bar -> (bar.Bar.instrument_id, bar.Bar.open_price))
+      market_slice.Market_slice.bars
+
+  let permitted_fill state market_slice order proposed instrument =
+    let marks = slice_open_marks market_slice in
+    let instruments = configured_instruments state in
+    let* before =
+      Account.value state.account ~instruments ~marks
+        ~fx_rates:state.latest_fx_rates
     in
-    let affordable lots =
-      let quantity_value = Int64.mul lots lot_value in
-      let quantity = Scalar.Quantity.of_int64 quantity_value |> Result.get_ok in
-      match fill_cost state.config.execution price quantity with
-      | Ok (_, cost) -> Scalar.Money.compare cost cash <= 0
-      | Error _ -> false
+    let before_position =
+      Account.position_quantity state.account instrument.Instrument.id
+    in
+    let candidate quantity =
+      let* fee =
+        fill_fee state.config.execution proposed.Execution.price quantity
+      in
+      let* fill =
+        Fill.create ~id:(fill_id state) ~order_id:order.Order.id
+          ~instrument_id:instrument.id ~quote_currency:instrument.quote_currency
+          ~side:order.request.side ~quantity ~price:proposed.price ~fee
+          ~executed_at:proposed.executed_at
+          ~slice_sequence:market_slice.Market_slice.slice_sequence
+      in
+      let* account = Account.apply_fill state.account fill in
+      let after_position = Account.position_quantity account instrument.id in
+      let* before_absolute = Scalar.Quantity.absolute before_position in
+      let* after_absolute = Scalar.Quantity.absolute after_position in
+      let* () =
+        if Scalar.Quantity.compare after_absolute before_absolute <= 0 then
+          Ok ()
+        else Risk.check_position state.config.risk after_position
+      in
+      let* after =
+        Account.value account ~instruments ~marks
+          ~fx_rates:state.latest_fx_rates
+      in
+      let* () = Risk.check_post_fill state.config.risk ~before ~after in
+      Ok fee
+    in
+    let lot_value = Scalar.Quantity.to_micros instrument.lot_size in
+    let requested_lots =
+      Int64.div (Scalar.Quantity.to_micros proposed.quantity) lot_value
+    in
+    let allowed lots =
+      if Int64.equal lots 0L then true
+      else
+        let quantity = Scalar.Quantity.of_micros (Int64.mul lots lot_value) in
+        Result.is_ok (candidate quantity)
     in
     let rec search low high =
       if Int64.compare low high >= 0 then low
@@ -579,119 +907,115 @@ module Make (Strategy_impl : Strategy.S) = struct
           Int64.add (Int64.div difference 2L) (Int64.rem difference 2L)
         in
         let middle = Int64.add low upper_half in
-        if affordable middle then search middle high
+        if allowed middle then search middle high
         else search low (Int64.pred middle)
     in
     let lots = search 0L requested_lots in
-    Scalar.Quantity.of_int64 (Int64.mul lots lot_value)
+    let quantity = Scalar.Quantity.of_micros (Int64.mul lots lot_value) in
+    if Scalar.Quantity.is_zero quantity then Ok (quantity, Scalar.Money.zero)
+    else candidate quantity |> Result.map (fun fee -> (quantity, fee))
 
   let apply_fill reduction market_slice proposed quantity fee =
     match Oms.find reduction.state.oms proposed.Execution.order_id with
     | None -> Error "execution proposal refers to an unknown order"
     | Some order -> (
-        let id = fill_id reduction.state in
-        match increment_fill_number reduction.state with
-        | Error _ as error -> error
-        | Ok state -> (
-            let reduction = { reduction with state } in
-            match
-              Fill.create ~id ~order_id:order.id
-                ~instrument_id:order.request.instrument_id
-                ~side:order.request.side ~quantity ~price:proposed.price ~fee
-                ~executed_at:proposed.executed_at
-                ~slice_sequence:market_slice.Market_slice.slice_sequence
-            with
+        match
+          Risk.instrument reduction.state.config.risk
+            order.request.instrument_id
+        with
+        | None -> Error "execution order refers to an unknown instrument"
+        | Some instrument -> (
+            let id = fill_id reduction.state in
+            match increment_fill_number reduction.state with
             | Error _ as error -> error
-            | Ok fill -> (
-                match Oms.apply_fill reduction.state.oms fill with
+            | Ok state -> (
+                let reduction = { reduction with state } in
+                match
+                  Fill.create ~id ~order_id:order.id
+                    ~instrument_id:order.request.instrument_id
+                    ~quote_currency:instrument.Instrument.quote_currency
+                    ~side:order.request.side ~quantity ~price:proposed.price
+                    ~fee ~executed_at:proposed.executed_at
+                    ~slice_sequence:market_slice.Market_slice.slice_sequence
+                with
                 | Error _ as error -> error
-                | Ok (_, Oms.Duplicate) ->
-                    Error "newly allocated fill ID was duplicated"
-                | Ok (oms, Oms.Applied order) -> (
-                    match Account.apply_fill reduction.state.account fill with
+                | Ok fill -> (
+                    match Oms.apply_fill reduction.state.oms fill with
                     | Error _ as error -> error
-                    | Ok account -> (
-                        let state = { reduction.state with oms; account } in
-                        let reduction = { reduction with state } in
+                    | Ok (_, Oms.Duplicate) ->
+                        Error "newly allocated fill ID was duplicated"
+                    | Ok (oms, Oms.Applied order) -> (
                         match
-                          emit_with_id reduction (Audit.Fill_applied fill)
+                          Account.apply_fill reduction.state.account fill
                         with
                         | Error _ as error -> error
-                        | Ok (reduction, event_id) ->
-                            Ok
-                              (enqueue reduction
-                                 [
-                                   notification reduction
-                                     ~causation_ids:[ event_id ]
-                                     (Strategy.Fill_received fill);
-                                   notification reduction
-                                     ~causation_ids:[ event_id ]
-                                     (Strategy.Order_updated order);
-                                 ]))))))
+                        | Ok account -> (
+                            let state = { reduction.state with oms; account } in
+                            let reduction = { reduction with state } in
+                            match
+                              emit_with_id reduction (Audit.Fill_applied fill)
+                            with
+                            | Error _ as error -> error
+                            | Ok (reduction, event_id) ->
+                                Ok
+                                  (enqueue reduction
+                                     [
+                                       notification reduction
+                                         ~causation_ids:[ event_id ]
+                                         (Strategy.Fill_received fill);
+                                       notification reduction
+                                         ~causation_ids:[ event_id ]
+                                         (Strategy.Order_updated order);
+                                     ])))))))
 
   let apply_proposed_fill reduction market_slice proposed =
     match Oms.find reduction.state.oms proposed.Execution.order_id with
     | None -> Error "execution proposal refers to an unknown order"
-    | Some order -> (
+    | Some order ->
         let causes =
           match reduction.slice_event_id with
-          | None -> [ order.Order.created_event_id ]
+          | None ->
+              [ order.Order.created_event_id; order.Order.updated_event_id ]
           | Some slice_event_id ->
-              [ order.Order.created_event_id; slice_event_id ]
+              [
+                order.Order.created_event_id;
+                order.Order.updated_event_id;
+                slice_event_id;
+              ]
         in
         let reduction = with_causes reduction causes in
-        match order.Order.request.side with
-        | Order.Sell ->
-            apply_fill reduction market_slice proposed proposed.quantity
-              proposed.fee
-            |> Result.map (fun reduction -> (reduction, proposed.quantity))
-        | Order.Buy -> (
-            match
-              Risk.instrument reduction.state.config.risk
-                order.request.instrument_id
-            with
-            | None -> Error "execution order refers to an unknown instrument"
-            | Some instrument -> (
-                match
-                  affordable_quantity reduction.state instrument proposed.price
-                    proposed.quantity
-                with
-                | Error _ as error -> error
-                | Ok affordable_quantity -> (
-                    let clipped =
-                      Scalar.Quantity.compare affordable_quantity
-                        proposed.quantity
-                      < 0
-                    in
-                    let limited =
-                      if clipped then
-                        emit reduction
-                          (Audit.Cash_limited
-                             {
-                               order_id = order.id;
-                               instrument_id = order.request.instrument_id;
-                               requested_quantity = proposed.quantity;
-                               affordable_quantity;
-                               price = proposed.price;
-                             })
-                      else Ok reduction
-                    in
-                    match limited with
-                    | Error _ as error -> error
-                    | Ok reduction -> (
-                        if Scalar.Quantity.is_zero affordable_quantity then
-                          Ok (reduction, affordable_quantity)
-                        else
-                          match
-                            fill_cost reduction.state.config.execution
-                              proposed.price affordable_quantity
-                          with
-                          | Error _ as error -> error
-                          | Ok (fee, _) ->
-                              apply_fill reduction market_slice proposed
-                                affordable_quantity fee
-                              |> Result.map (fun reduction ->
-                                  (reduction, affordable_quantity)))))))
+        let* instrument =
+          match
+            Risk.instrument reduction.state.config.risk
+              order.request.instrument_id
+          with
+          | Some value -> Ok value
+          | None -> Error "execution order refers to an unknown instrument"
+        in
+        let* permitted_quantity, fee =
+          permitted_fill reduction.state market_slice order proposed instrument
+        in
+        let clipped =
+          Scalar.Quantity.compare permitted_quantity proposed.quantity < 0
+        in
+        let* reduction =
+          if clipped then
+            emit reduction
+              (Audit.Margin_limited
+                 {
+                   order_id = order.id;
+                   instrument_id = order.request.instrument_id;
+                   requested_quantity = proposed.quantity;
+                   permitted_quantity;
+                   price = proposed.price;
+                 })
+          else Ok reduction
+        in
+        if Scalar.Quantity.is_zero permitted_quantity then
+          Ok (reduction, permitted_quantity)
+        else
+          apply_fill reduction market_slice proposed permitted_quantity fee
+          |> Result.map (fun reduction -> (reduction, permitted_quantity))
 
   let cancel_market_remainders reduction order_ids =
     let causation_ids = reduction.causation_ids in
@@ -720,10 +1044,17 @@ module Make (Strategy_impl : Strategy.S) = struct
       |> List.map (fun (instrument_id, bar) ->
           (instrument_id, bar.Bar.close_price))
     in
-    Account.value state.account ~marks
+    Account.value state.account
+      ~instruments:(Risk.instruments state.config.risk)
+      ~marks ~fx_rates:state.latest_fx_rates
+
+  let audit_valuation state =
+    let* account = value state in
+    let* margin = Risk.margin_snapshot state.config.risk account in
+    Ok Audit.{ account; margin }
 
   let valuation reduction =
-    match value reduction.state with
+    match audit_valuation reduction.state with
     | Error _ as error -> error
     | Ok valuation ->
         let causes = Option.to_list reduction.slice_event_id in
@@ -746,10 +1077,21 @@ module Make (Strategy_impl : Strategy.S) = struct
       let current = Account.position_quantity state.account instrument_id in
       if Scalar.Quantity.equal current target then Ok None
       else
-        let side, delta =
-          if Scalar.Quantity.compare target current > 0 then
-            (Order.Buy, Scalar.Quantity.subtract target current)
-          else (Order.Sell, Scalar.Quantity.subtract current target)
+        let side =
+          if Scalar.Quantity.compare target current > 0 then Order.Buy
+          else Order.Sell
+        in
+        let crosses_zero =
+          Scalar.Quantity.is_positive current
+          && Scalar.Quantity.is_negative target
+          || Scalar.Quantity.is_negative current
+             && Scalar.Quantity.is_positive target
+        in
+        let delta =
+          if crosses_zero then Scalar.Quantity.absolute current
+          else
+            Scalar.Quantity.subtract target current |> fun result ->
+            Result.bind result Scalar.Quantity.absolute
         in
         match delta with
         | Error _ as error -> error
@@ -762,7 +1104,7 @@ module Make (Strategy_impl : Strategy.S) = struct
                     (Risk.max_order_quantity state.config.risk)
                 in
                 match
-                  Scalar.Quantity.round_down_to_multiple bounded
+                  Scalar.Quantity.round_toward_zero_to_multiple bounded
                     ~multiple:instrument.lot_size
                 with
                 | Error _ as error -> error
@@ -791,106 +1133,187 @@ module Make (Strategy_impl : Strategy.S) = struct
                    | Ok (Some request) ->
                        let causes =
                          match reduction.slice_event_id with
-                         | None -> [ desired.cause_id ]
+                         | None -> desired.cause_ids
                          | Some slice_event_id ->
-                             [ desired.cause_id; slice_event_id ]
+                             slice_event_id :: desired.cause_ids
                        in
                        submit_order (with_causes reduction causes) request))
              (Ok reduction)
+
+  let positions_flat state =
+    configured_instruments state
+    |> List.for_all (fun instrument ->
+        Account.position_quantity state.account instrument.Instrument.id
+        |> Scalar.Quantity.is_zero)
+
+  let ensure_liquidation_orders reduction causes =
+    List.fold_left
+      (fun result instrument ->
+        let* reduction = result in
+        let quantity =
+          Account.position_quantity reduction.state.account
+            instrument.Instrument.id
+        in
+        let already_working =
+          Oms.active_for_instrument reduction.state.oms instrument.id
+          |> List.exists (fun order ->
+              order.Order.request.origin = Order.Margin_liquidation)
+        in
+        if Scalar.Quantity.is_zero quantity || already_working then Ok reduction
+        else
+          let* absolute = Scalar.Quantity.absolute quantity in
+          let bounded =
+            Scalar.Quantity.minimum absolute
+              (Risk.max_order_quantity reduction.state.config.risk)
+          in
+          let* quantity =
+            Scalar.Quantity.round_toward_zero_to_multiple bounded
+              ~multiple:instrument.lot_size
+          in
+          if Scalar.Quantity.is_zero quantity then
+            Error "margin liquidation cannot cover one instrument lot"
+          else
+            let side =
+              if
+                Scalar.Quantity.is_positive
+                  (Account.position_quantity reduction.state.account
+                     instrument.id)
+              then Order.Sell
+              else Order.Buy
+            in
+            let* request =
+              Order.request ~instrument_id:instrument.id ~side ~quantity
+                ~kind:Order.Market ~origin:Order.Margin_liquidation
+            in
+            submit_order (with_causes reduction causes) request)
+      (Ok reduction)
+      (configured_instruments reduction.state)
+
+  let assess_margin reduction =
+    let* valuation = audit_valuation reduction.state in
+    if (not reduction.state.liquidation_pending) && valuation.margin.margin_call
+    then
+      let causes = Option.to_list reduction.slice_event_id in
+      let* reduction, margin_event_id =
+        emit_with_id
+          (with_causes reduction causes)
+          (Audit.Margin_call_triggered valuation)
+      in
+      let active_ids =
+        Oms.active_orders reduction.state.oms
+        |> List.map (fun order -> order.Order.id)
+      in
+      let* reduction =
+        cancel_orders
+          (with_causes reduction [ margin_event_id ])
+          ~reason:Audit.Margin_call active_ids
+      in
+      let state =
+        {
+          reduction.state with
+          desired_targets = None;
+          liquidation_pending = true;
+        }
+      in
+      ensure_liquidation_orders { reduction with state } [ margin_event_id ]
+    else if reduction.state.liquidation_pending then
+      if positions_flat reduction.state && not valuation.margin.margin_call then
+        let causes = Option.to_list reduction.slice_event_id in
+        let* reduction =
+          emit (with_causes reduction causes) (Audit.Margin_restored valuation)
+        in
+        Ok
+          {
+            reduction with
+            state = { reduction.state with liquidation_pending = false };
+          }
+      else
+        ensure_liquidation_orders reduction
+          (Option.to_list reduction.slice_event_id)
+    else Ok reduction
 
   let process_slice state market_slice =
     if state.completed then
       Error "completed engine cannot process another market slice"
     else
-      match validate_slice state market_slice with
-      | Error _ as error -> error
-      | Ok () -> (
-          let state =
-            {
-              state with
-              last_slice_sequence = Some market_slice.slice_sequence;
-              last_slice_end = Some market_slice.end_at;
-              last_received_at = Some market_slice.received_at;
-            }
-          in
-          let reduction =
-            {
-              state;
-              now = market_slice.received_at;
-              current_slice_sequence = market_slice.slice_sequence;
-              slice_event_id = None;
-              causation_ids = [];
-              audits_rev = [];
-              pending = [];
-              processed = 0;
-            }
-          in
-          match ensure_started reduction with
-          | Error _ as error -> error
-          | Ok reduction -> (
-              match
-                emit_with_id (with_causes reduction [])
-                  (Audit.Market_slice_received market_slice)
-              with
-              | Error _ as error -> error
-              | Ok (reduction, slice_event_id) -> (
-                  let reduction =
-                    {
-                      reduction with
-                      slice_event_id = Some slice_event_id;
-                      causation_ids = [ slice_event_id ];
-                    }
-                  in
-                  match
-                    Execution_model.fold_slice state.config.execution_model
-                      state.config.execution
-                      ~instruments:(configured_instruments state)
-                      ~oms:state.oms market_slice ~init:reduction
-                      ~apply:(fun reduction proposed ->
-                        apply_proposed_fill reduction market_slice proposed)
-                  with
-                  | Error _ as error -> error
-                  | Ok (reduction, market_ioc_orders) -> (
-                      let reduction =
-                        with_causes reduction [ slice_event_id ]
-                      in
-                      match
-                        cancel_market_remainders reduction market_ioc_orders
-                      with
-                      | Error _ as error -> error
-                      | Ok reduction -> (
-                          let latest_bars =
-                            List.fold_left
-                              (fun bars bar ->
-                                Id.Instrument.Map.add bar.Bar.instrument_id bar
-                                  bars)
-                              reduction.state.latest_bars market_slice.bars
-                          in
-                          let state = { reduction.state with latest_bars } in
-                          let reduction =
-                            enqueue { reduction with state }
-                              [
-                                notification { reduction with state }
-                                  ~causation_ids:[ slice_event_id ]
-                                  (Strategy.Market_slice_closed market_slice);
-                              ]
-                          in
-                          match drain reduction with
-                          | Error _ as error -> error
-                          | Ok reduction -> (
-                              match reconcile_targets reduction with
-                              | Error _ as error -> error
-                              | Ok reduction -> (
-                                  match drain reduction with
-                                  | Error _ as error -> error
-                                  | Ok reduction -> (
-                                      match valuation reduction with
-                                      | Error _ as error -> error
-                                      | Ok reduction ->
-                                          Ok
-                                            ( reduction.state,
-                                              List.rev reduction.audits_rev ))))
-                          )))))
+      let* () = validate_slice state market_slice in
+      let state =
+        let applied_action_ids =
+          List.fold_left
+            (fun ids action ->
+              Id.Corporate_action.Set.add action.Corporate_action.id ids)
+            state.applied_action_ids market_slice.corporate_actions
+        in
+        {
+          state with
+          last_slice_sequence = Some market_slice.slice_sequence;
+          last_slice_end = Some market_slice.end_at;
+          last_received_at = Some market_slice.received_at;
+          latest_fx_rates =
+            List.map
+              (fun mark -> (mark.Market_slice.currency, mark.Market_slice.rate))
+              market_slice.fx_rates;
+          applied_action_ids;
+        }
+      in
+      let reduction =
+        {
+          state;
+          now = market_slice.received_at;
+          current_slice_sequence = market_slice.slice_sequence;
+          slice_event_id = None;
+          causation_ids = [];
+          audits_rev = [];
+          pending = [];
+          processed = 0;
+        }
+      in
+      let* reduction = ensure_started reduction in
+      let* reduction, slice_event_id =
+        emit_with_id (with_causes reduction [])
+          (Audit.Market_slice_received market_slice)
+      in
+      let reduction =
+        {
+          reduction with
+          slice_event_id = Some slice_event_id;
+          causation_ids = [ slice_event_id ];
+        }
+      in
+      let* reduction =
+        apply_corporate_actions reduction market_slice.corporate_actions
+      in
+      let* reduction = apply_borrow_fees reduction market_slice in
+      let* reduction, market_ioc_orders =
+        Execution_model.fold_slice reduction.state.config.execution_model
+          reduction.state.config.execution
+          ~instruments:(configured_instruments reduction.state)
+          ~oms:reduction.state.oms market_slice ~init:reduction
+          ~apply:(fun reduction proposed ->
+            apply_proposed_fill reduction market_slice proposed)
+      in
+      let reduction = with_causes reduction [ slice_event_id ] in
+      let* reduction = cancel_market_remainders reduction market_ioc_orders in
+      let latest_bars =
+        List.fold_left
+          (fun bars bar -> Id.Instrument.Map.add bar.Bar.instrument_id bar bars)
+          reduction.state.latest_bars market_slice.bars
+      in
+      let state = { reduction.state with latest_bars } in
+      let reduction =
+        enqueue { reduction with state }
+          [
+            notification { reduction with state }
+              ~causation_ids:[ slice_event_id ]
+              (Strategy.Market_slice_closed market_slice);
+          ]
+      in
+      let* reduction = drain reduction in
+      let* reduction = reconcile_targets reduction in
+      let* reduction = drain reduction in
+      let* reduction = assess_margin reduction in
+      let* reduction = valuation reduction in
+      Ok (reduction.state, List.rev reduction.audits_rev)
 
   let order_counts orders =
     List.fold_left
@@ -912,6 +1335,8 @@ module Make (Strategy_impl : Strategy.S) = struct
       | Error _ as error -> error
       | Ok valuation -> (
           let order_counts = Oms.orders state.oms |> order_counts in
+          let* margin = Risk.margin_snapshot state.config.risk valuation in
+          let audit_valuation = Audit.{ account = valuation; margin } in
           let state = { state with completed = true } in
           let causation_ids =
             if Int64.equal state.engine_sequence 0L then []
@@ -944,7 +1369,7 @@ module Make (Strategy_impl : Strategy.S) = struct
                        scenario_sha256 = state.scenario_sha256;
                        execution_model =
                          Execution_model.name state.config.execution_model;
-                       valuation;
+                       valuation = audit_valuation;
                        order_counts;
                      })
               with

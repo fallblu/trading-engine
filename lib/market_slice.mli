@@ -1,4 +1,9 @@
-(** One synchronized completed-bar observation for the configured market. *)
+(** One synchronized completed-bar observation, complete FX snapshot, and
+    pre-match corporate-action batch for the configured market. *)
+
+type fx_mark = private { currency : string; rate : Scalar.Price.t }
+
+val fx_mark : currency:string -> rate:Scalar.Price.t -> (fx_mark, string) result
 
 type t = private {
   slice_sequence : int64;
@@ -7,6 +12,8 @@ type t = private {
   available_at : Ptime.t;
   received_at : Ptime.t;
   bars : Bar.t list;
+  fx_rates : fx_mark list;
+  corporate_actions : Corporate_action.t list;
 }
 
 val create :
@@ -16,8 +23,11 @@ val create :
   available_at:Ptime.t ->
   received_at:Ptime.t ->
   bars:Bar.t list ->
+  fx_rates:fx_mark list ->
+  corporate_actions:Corporate_action.t list ->
   (t, string) result
 
 val bar : t -> Id.Instrument.t -> Bar.t option
+val fx_rate : t -> string -> Scalar.Price.t option
 val compare_replay_order : t -> t -> int
 val pp : Format.formatter -> t -> unit

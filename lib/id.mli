@@ -20,3 +20,4 @@ module Order : S
 module Fill : S
 module Strategy : S
 module Event : S
+module Corporate_action : S

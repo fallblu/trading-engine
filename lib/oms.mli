@@ -31,4 +31,13 @@ val reject :
   (t * Order.t, string) result
 
 val cancel : t -> Id.Order.t -> (t * Order.t, string) result
+
+val adjust_for_split :
+  t ->
+  instrument_id:Id.Instrument.t ->
+  updated_event_ids:Id.Event.t list ->
+  numerator:int64 ->
+  denominator:int64 ->
+  (t * Order.t list, string) result
+
 val apply_fill : t -> Fill.t -> (t * fill_outcome, string) result

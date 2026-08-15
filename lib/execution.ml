@@ -66,7 +66,7 @@ let initial_capacity state instrument bar =
       match Scalar.Quantity.bps_floor volume ~bps:state.participation_bps with
       | Error _ as error -> error
       | Ok capacity ->
-          Scalar.Quantity.round_down_to_multiple capacity
+          Scalar.Quantity.round_toward_zero_to_multiple capacity
             ~multiple:instrument.Instrument.lot_size
           |> Result.map (fun capacity -> Limited capacity))
 
@@ -82,13 +82,20 @@ let validate_bar_prices instrument bar =
   else Ok ()
 
 let compare_execution_order left right =
+  let origin_rank = function Order.Margin_liquidation -> 0 | _ -> 1 in
+  let origin =
+    Int.compare
+      (origin_rank left.Order.request.origin)
+      (origin_rank right.Order.request.origin)
+  in
   let side_rank = function Order.Sell -> 0 | Order.Buy -> 1 in
   let side =
     Int.compare
       (side_rank left.Order.request.side)
       (side_rank right.Order.request.side)
   in
-  if side <> 0 then side
+  if origin <> 0 then origin
+  else if side <> 0 then side
   else
     let sequence =
       Int64.compare left.Order.created_sequence right.Order.created_sequence

@@ -74,7 +74,7 @@ let ptime_of_string value =
 let string value = `String value
 let int64 value = `String (Int64.to_string value)
 let price value = string (Scalar.Price.to_decimal_string value)
-let quantity value = string (Scalar.Quantity.to_string value)
+let quantity value = string (Scalar.Quantity.to_decimal_string value)
 let weight value = string (Scalar.Weight.to_decimal_string value)
 let money value = string (Scalar.Money.to_decimal_string value)
 let timestamp value = string (ptime_to_string value)
@@ -93,6 +93,31 @@ let bar_to_yojson bar =
       ("volume", Option.fold ~none:`Null ~some:quantity bar.volume);
     ]
 
+let fx_mark_to_yojson mark =
+  `Assoc
+    [
+      ("currency", string mark.Market_slice.currency); ("rate", price mark.rate);
+    ]
+
+let corporate_action_to_yojson action =
+  let common =
+    [
+      ( "action_id",
+        string (Id.Corporate_action.to_string action.Corporate_action.id) );
+      ("instrument_id", instrument_id action.instrument_id);
+    ]
+  in
+  match action.kind with
+  | Corporate_action.Split { numerator; denominator } ->
+      `Assoc
+        ((("type", string "split") :: common)
+        @ [ ("numerator", int64 numerator); ("denominator", int64 denominator) ]
+        )
+  | Corporate_action.Cash_dividend { amount_per_unit } ->
+      `Assoc
+        ((("type", string "cash_dividend") :: common)
+        @ [ ("amount_per_unit", money amount_per_unit) ])
+
 let market_slice_to_yojson market_slice =
   `Assoc
     [
@@ -102,6 +127,11 @@ let market_slice_to_yojson market_slice =
       ("available_at", timestamp market_slice.available_at);
       ("received_at", timestamp market_slice.received_at);
       ("bars", `List (List.map bar_to_yojson market_slice.bars));
+      ("fx_rates", `List (List.map fx_mark_to_yojson market_slice.fx_rates));
+      ( "corporate_actions",
+        `List
+          (List.map corporate_action_to_yojson market_slice.corporate_actions)
+      );
     ]
 
 let request_fields request =
@@ -129,6 +159,7 @@ let order_to_yojson order =
     ((("order_id", order_id order.id) :: request_fields order.request)
     @ [
         ("created_event_id", string (Id.Event.to_string order.created_event_id));
+        ("updated_event_id", string (Id.Event.to_string order.updated_event_id));
         ("created_sequence", int64 order.created_sequence);
         ("created_at", timestamp order.created_at);
         ( "eligible_after_slice_sequence",
@@ -145,6 +176,7 @@ let fill_to_yojson fill =
       ("fill_id", fill_id fill.Fill.id);
       ("order_id", order_id fill.order_id);
       ("instrument_id", instrument_id fill.instrument_id);
+      ("quote_currency", string fill.quote_currency);
       ("side", string (Order.side_to_string fill.side));
       ("quantity", quantity fill.quantity);
       ("price", price fill.price);
@@ -158,28 +190,75 @@ let position_attribution_to_yojson position =
   `Assoc
     [
       ("instrument_id", instrument_id position.Account.instrument_id);
+      ("quote_currency", string position.quote_currency);
       ("quantity", quantity position.quantity);
       ("mark", price position.mark);
+      ("fx_rate", price position.fx_rate);
       ("market_value", money position.market_value);
+      ("base_market_value", money position.base_market_value);
       ("cost_basis", money position.cost_basis);
+      ("base_cost_basis", money position.base_cost_basis);
       ("realized_pnl", money position.realized_pnl);
+      ("base_realized_pnl", money position.base_realized_pnl);
       ("unrealized_pnl", money position.unrealized_pnl);
+      ("base_unrealized_pnl", money position.base_unrealized_pnl);
+      ("dividend_pnl", money position.dividend_pnl);
+      ("base_dividend_pnl", money position.base_dividend_pnl);
+      ("execution_fees", money position.execution_fees);
+      ("base_execution_fees", money position.base_execution_fees);
+      ("borrow_fees", money position.borrow_fees);
+      ("base_borrow_fees", money position.base_borrow_fees);
       ("total_fees", money position.total_fees);
+      ("base_total_fees", money position.base_total_fees);
     ]
 
-let valuation_to_yojson valuation =
+let cash_attribution_to_yojson cash =
   `Assoc
     [
+      ("currency", string cash.Account.currency);
+      ("amount", money cash.amount);
+      ("fx_rate", price cash.fx_rate);
+      ("base_value", money cash.base_value);
+    ]
+
+let account_valuation_to_yojson valuation =
+  `Assoc
+    [
+      ("base_currency", string valuation.Account.base_currency);
       ("cash", money valuation.Account.cash);
-      ("market_value", money valuation.market_value);
+      ("net_market_value", money valuation.net_market_value);
+      ("long_market_value", money valuation.long_market_value);
+      ("short_market_value", money valuation.short_market_value);
+      ("gross_exposure", money valuation.gross_exposure);
       ("cost_basis", money valuation.cost_basis);
       ("realized_pnl", money valuation.realized_pnl);
       ("unrealized_pnl", money valuation.unrealized_pnl);
       ("equity", money valuation.equity);
+      ("dividend_pnl", money valuation.dividend_pnl);
+      ("execution_fees", money valuation.execution_fees);
+      ("borrow_fees", money valuation.borrow_fees);
       ("total_fees", money valuation.total_fees);
+      ( "cash_balances",
+        `List (List.map cash_attribution_to_yojson valuation.cash_balances) );
       ( "positions",
         `List (List.map position_attribution_to_yojson valuation.positions) );
     ]
+
+let margin_to_yojson margin =
+  `Assoc
+    [
+      ("initial_requirement", money margin.Risk.initial_requirement);
+      ("maintenance_requirement", money margin.maintenance_requirement);
+      ("initial_excess", money margin.initial_excess);
+      ("maintenance_excess", money margin.maintenance_excess);
+      ("margin_call", `Bool margin.margin_call);
+    ]
+
+let valuation_to_yojson valuation =
+  match account_valuation_to_yojson valuation.Audit.account with
+  | `Assoc fields ->
+      `Assoc (fields @ [ ("margin", margin_to_yojson valuation.margin) ])
+  | _ -> assert false
 
 let order_counts_to_yojson counts =
   `Assoc
@@ -224,13 +303,33 @@ let payload_to_yojson = function
           ("order", order_to_yojson order);
           ("reason", string (Audit.cancellation_reason_to_string reason));
         ]
+  | Audit.Split_applied { action; previous_quantity; adjusted_quantity } ->
+      `Assoc
+        [
+          ("action", corporate_action_to_yojson action);
+          ("previous_quantity", quantity previous_quantity);
+          ("adjusted_quantity", quantity adjusted_quantity);
+        ]
+  | Audit.Cash_dividend_applied { action; quantity = held; cash_amount } ->
+      `Assoc
+        [
+          ("action", corporate_action_to_yojson action);
+          ("quantity", quantity held);
+          ("cash_amount", money cash_amount);
+        ]
+  | Audit.Order_adjusted { order; action_id } ->
+      `Assoc
+        [
+          ("order", order_to_yojson order);
+          ("action_id", string (Id.Corporate_action.to_string action_id));
+        ]
   | Audit.Fill_applied fill -> fill_to_yojson fill
-  | Audit.Cash_limited
+  | Audit.Margin_limited
       {
         order_id = id;
         instrument_id = instrument;
         requested_quantity;
-        affordable_quantity;
+        permitted_quantity;
         price = fill_price;
       } ->
       `Assoc
@@ -238,9 +337,33 @@ let payload_to_yojson = function
           ("order_id", order_id id);
           ("instrument_id", instrument_id instrument);
           ("requested_quantity", quantity requested_quantity);
-          ("affordable_quantity", quantity affordable_quantity);
+          ("permitted_quantity", quantity permitted_quantity);
           ("price", price fill_price);
         ]
+  | Audit.Borrow_fee_applied
+      {
+        instrument_id = instrument;
+        quote_currency;
+        short_quantity;
+        reference_price;
+        borrow_bps;
+        period_start;
+        period_end;
+        fee;
+      } ->
+      `Assoc
+        [
+          ("instrument_id", instrument_id instrument);
+          ("quote_currency", string quote_currency);
+          ("short_quantity", quantity short_quantity);
+          ("reference_price", price reference_price);
+          ("borrow_bps", `Int borrow_bps);
+          ("period_start", timestamp period_start);
+          ("period_end", timestamp period_end);
+          ("fee", money fee);
+        ]
+  | Audit.Margin_call_triggered valuation | Audit.Margin_restored valuation ->
+      valuation_to_yojson valuation
   | Audit.Intent_rejected reason -> `Assoc [ ("reason", string reason) ]
   | Audit.Metric_emitted { name; value } ->
       `Assoc [ ("name", string name); ("value", string value) ]

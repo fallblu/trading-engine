@@ -4,8 +4,10 @@ let quantity_from_weight ~equity ~weight ~price ~lot_size =
   else
     let numerator =
       Z.mul
-        (Z.of_int64 (Scalar.Money.to_micros equity))
-        (Z.of_int64 (Scalar.Weight.to_micros weight))
+        (Z.mul
+           (Z.of_int64 (Scalar.Money.to_micros equity))
+           (Z.of_int64 (Scalar.Weight.to_micros weight)))
+        (Z.of_int64 Scalar.Quantity.scale)
     in
     let denominator =
       Z.mul
@@ -15,7 +17,6 @@ let quantity_from_weight ~equity ~weight ~price ~lot_size =
     let quantity = Z.div numerator denominator in
     if not (Z.fits_int64 quantity) then Error "target quantity overflow"
     else
-      match Scalar.Quantity.of_int64 (Z.to_int64 quantity) with
-      | Error _ as error -> error
-      | Ok quantity ->
-          Scalar.Quantity.round_down_to_multiple quantity ~multiple:lot_size
+      Scalar.Quantity.round_toward_zero_to_multiple
+        (Scalar.Quantity.of_micros (Z.to_int64 quantity))
+        ~multiple:lot_size

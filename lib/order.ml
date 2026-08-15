@@ -1,6 +1,6 @@
 type side = Buy | Sell
 type kind = Market | Limit of Scalar.Price.t
-type origin = Direct | Target_rebalance
+type origin = Direct | Target_rebalance | Margin_liquidation
 
 type request = {
   instrument_id : Id.Instrument.t;
@@ -17,10 +17,14 @@ type status =
   | Cancelled
   | Rejected of string
 
+let ( let* ) result function_ =
+  match result with Ok value -> function_ value | Error _ as error -> error
+
 type t = {
   id : Id.Order.t;
   request : request;
   created_event_id : Id.Event.t;
+  updated_event_id : Id.Event.t;
   created_sequence : int64;
   created_at : Ptime.t;
   eligible_after_slice_sequence : int64;
@@ -30,7 +34,7 @@ type t = {
 }
 
 let request ~instrument_id ~side ~quantity ~kind ~origin =
-  if Scalar.Quantity.is_zero quantity then
+  if not (Scalar.Quantity.is_positive quantity) then
     Error "order quantity must be positive"
   else Ok { instrument_id; side; quantity; kind; origin }
 
@@ -46,6 +50,7 @@ let make ~id ~created_event_id ~sequence ~created_at
         id;
         request;
         created_event_id;
+        updated_event_id = created_event_id;
         created_sequence = sequence;
         created_at;
         eligible_after_slice_sequence;
@@ -87,7 +92,7 @@ let is_market order =
 
 let apply_fill order ~quantity ~notional =
   if not (is_active order) then Error "cannot fill a terminal order"
-  else if Scalar.Quantity.is_zero quantity then
+  else if not (Scalar.Quantity.is_positive quantity) then
     Error "fill quantity must be positive"
   else
     let remaining = remaining_quantity order in
@@ -111,6 +116,33 @@ let cancel order =
   if is_active order then Ok { order with status = Cancelled }
   else Error "cannot cancel a terminal order"
 
+let adjust_for_split order ~updated_event_id ~numerator ~denominator =
+  if not (is_active order) then Error "cannot split-adjust a terminal order"
+  else
+    let adjust_quantity value =
+      Scalar.Quantity.scale_ratio_exact value ~numerator ~denominator
+    in
+    let* quantity = adjust_quantity order.request.quantity in
+    let* filled_quantity = adjust_quantity order.filled_quantity in
+    let* kind =
+      match order.request.kind with
+      | Market -> Ok Market
+      | Limit price ->
+          Scalar.Price.scale_ratio_exact price ~numerator:denominator
+            ~denominator:numerator
+          |> Result.map (fun price -> Limit price)
+    in
+    if not (Scalar.Quantity.is_positive quantity) then
+      Error "split-adjusted order quantity must be positive"
+    else
+      Ok
+        {
+          order with
+          request = { order.request with quantity; kind };
+          updated_event_id;
+          filled_quantity;
+        }
+
 let side_to_string = function Buy -> "buy" | Sell -> "sell"
 
 let kind_to_string = function
@@ -120,6 +152,7 @@ let kind_to_string = function
 let origin_to_string = function
   | Direct -> "direct"
   | Target_rebalance -> "target_rebalance"
+  | Margin_liquidation -> "margin_liquidation"
 
 let status_to_string = function
   | Working -> "working"

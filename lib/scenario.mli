@@ -5,7 +5,7 @@ type t = private {
   metadata : Yojson.Safe.t;
   run_id : Id.Run.t;
   base_currency : string;
-  initial_cash : Scalar.Money.t;
+  initial_cash : (string * Scalar.Money.t) list;
   instruments : Instrument.t list;
   risk : Risk.t;
   execution_model : Execution_model.t;
@@ -20,7 +20,7 @@ type stream_header = private {
   metadata : Yojson.Safe.t;
   run_id : Id.Run.t;
   base_currency : string;
-  initial_cash : Scalar.Money.t;
+  initial_cash : (string * Scalar.Money.t) list;
   instruments : Instrument.t list;
   risk : Risk.t;
   execution_model : Execution_model.t;
@@ -31,6 +31,7 @@ type stream_header = private {
 type stream_item = private {
   market_slice : Market_slice.t;
   intents : Strategy.intent list;
+  action_ids : Id.Corporate_action.Set.t;
 }
 
 val of_yojson : Yojson.Safe.t -> (t, string) result
