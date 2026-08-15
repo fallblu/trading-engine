@@ -62,8 +62,80 @@ let run_stream input journal =
       Fmt.pr "journal=%s@." journal;
       Ok ()
 
-let execute_json input journal validate_only =
-  Eio_main.run @@ fun _environment ->
+type external_strategy = {
+  command : string list;
+  timeout : float;
+  transcript : string;
+}
+
+let run_external_replay environment scenario_sha256 scenario journal strategy =
+  match
+    Trading_engine.External_replay.run ~env:environment ~scenario_sha256
+      ~journal_path:journal ~transcript_path:strategy.transcript
+      ~strategy_command:strategy.command ~strategy_timeout:strategy.timeout
+      scenario
+  with
+  | Error message -> Error message
+  | Ok result ->
+      let active = count Trading_engine.Order.is_active result.orders in
+      let filled =
+        count
+          (fun order ->
+            order.Trading_engine.Order.status = Trading_engine.Order.Filled)
+          result.orders
+      in
+      let rejected =
+        count
+          (fun order ->
+            match order.Trading_engine.Order.status with
+            | Trading_engine.Order.Rejected _ -> true
+            | _ -> false)
+          result.orders
+      in
+      Fmt.pr "run=%a audits=%d orders=%d active=%d filled=%d rejected=%d@."
+        Trading_engine.Id.Run.pp scenario.Trading_engine.Scenario.run_id
+        (List.length result.audits)
+        (List.length result.orders)
+        active filled rejected;
+      Fmt.pr "%a@." Trading_engine.Account.pp_valuation result.valuation;
+      Fmt.pr "journal=%s@." journal;
+      Fmt.pr "strategy_transcript=%s@." strategy.transcript;
+      Ok ()
+
+let run_external_stream environment input journal strategy =
+  match
+    Trading_engine.External_replay.run_stream ~env:environment
+      ~journal_path:journal ~transcript_path:strategy.transcript
+      ~strategy_command:strategy.command ~strategy_timeout:strategy.timeout
+      input
+  with
+  | Error message -> Error message
+  | Ok result ->
+      let active = count Trading_engine.Order.is_active result.orders in
+      let filled =
+        count
+          (fun order ->
+            order.Trading_engine.Order.status = Trading_engine.Order.Filled)
+          result.orders
+      in
+      let rejected =
+        count
+          (fun order ->
+            match order.Trading_engine.Order.status with
+            | Trading_engine.Order.Rejected _ -> true
+            | _ -> false)
+          result.orders
+      in
+      Fmt.pr "run=%a audits=%Ld orders=%d active=%d filled=%d rejected=%d@."
+        Trading_engine.Id.Run.pp result.run_id result.audit_count
+        (List.length result.orders)
+        active filled rejected;
+      Fmt.pr "%a@." Trading_engine.Account.pp_valuation result.valuation;
+      Fmt.pr "journal=%s@." journal;
+      Fmt.pr "strategy_transcript=%s@." strategy.transcript;
+      Ok ()
+
+let execute_json environment input journal validate_only strategy =
   let document =
     try Ok (In_channel.with_open_bin input In_channel.input_all)
     with Sys_error message -> Error ("could not read scenario: " ^ message)
@@ -95,9 +167,14 @@ let execute_json input journal validate_only =
             match journal with
             | None ->
                 Error "--journal is required unless --validate-only is set"
-            | Some path -> run_replay scenario_sha256 scenario path))
+            | Some path -> (
+                match strategy with
+                | None -> run_replay scenario_sha256 scenario path
+                | Some strategy ->
+                    run_external_replay environment scenario_sha256 scenario
+                      path strategy)))
 
-let execute_jsonl input journal validate_only =
+let execute_jsonl environment input journal validate_only strategy =
   if validate_only then
     match journal with
     | Some _ -> Error "--journal cannot be used with --validate-only"
@@ -114,28 +191,66 @@ let execute_jsonl input journal validate_only =
   else
     match journal with
     | None -> Error "--journal is required unless --validate-only is set"
-    | Some path -> run_stream input path
+    | Some path -> (
+        match strategy with
+        | None -> run_stream input path
+        | Some strategy -> run_external_stream environment input path strategy)
 
 type input_format = Json | Jsonl
 
-let execute_scenario input journal validate_only = function
-  | Json -> execute_json input journal validate_only
-  | Jsonl -> execute_jsonl input journal validate_only
+let execute_scenario environment input journal validate_only strategy = function
+  | Json -> execute_json environment input journal validate_only strategy
+  | Jsonl -> execute_jsonl environment input journal validate_only strategy
 
-let execute input journal validate_only capabilities input_format =
+let external_strategy executable arguments timeout transcript =
+  match (executable, transcript, arguments, timeout) with
+  | None, None, [], None -> Ok None
+  | None, _, _, _ ->
+      Error
+        "--strategy-arg, --strategy-timeout, and --strategy-transcript require \
+         --strategy-executable"
+  | Some _, None, _, _ ->
+      Error "--strategy-transcript is required with --strategy-executable"
+  | Some executable, Some transcript, arguments, timeout ->
+      let timeout = Option.value timeout ~default:30.0 in
+      if (not (Float.is_finite timeout)) || Float.compare timeout 0.0 <= 0 then
+        Error "--strategy-timeout must be finite and positive"
+      else Ok (Some { command = executable :: arguments; timeout; transcript })
+
+let execute environment input journal validate_only capabilities input_format
+    strategy_executable strategy_arguments strategy_timeout strategy_transcript
+    =
   if capabilities then
-    match (input, journal, validate_only) with
-    | None, None, false ->
+    match
+      ( input,
+        journal,
+        validate_only,
+        strategy_executable,
+        strategy_arguments,
+        strategy_timeout,
+        strategy_transcript )
+    with
+    | None, None, false, None, [], None, None ->
         Fmt.pr "%s@." (Trading_engine.Contract.capabilities_to_string ());
         Ok ()
     | _ ->
         Error
-          "--capabilities cannot be combined with --input, --journal, or \
-           --validate-only"
+          "--capabilities cannot be combined with replay or strategy options"
   else
     match input with
     | None -> Error "--input is required unless --capabilities is set"
-    | Some path -> execute_scenario path journal validate_only input_format
+    | Some path -> (
+        match
+          external_strategy strategy_executable strategy_arguments
+            strategy_timeout strategy_transcript
+        with
+        | Error _ as error -> error
+        | Ok (Some _) when validate_only ->
+            Error
+              "external strategy options cannot be used with --validate-only"
+        | Ok strategy ->
+            execute_scenario environment path journal validate_only strategy
+              input_format)
 
 let input =
   let doc = "Read the replay scenario from $(docv)." in
@@ -162,7 +277,42 @@ let capabilities =
   let doc = "Print machine-readable engine capabilities as JSON and exit." in
   Arg.(value & flag & info [ "capabilities" ] ~doc)
 
-let command =
+let strategy_executable =
+  let doc =
+    "Launch $(docv) as the external strategy process without using a shell."
+  in
+  Arg.(
+    value
+    & opt (some file) None
+    & info [ "strategy-executable" ] ~docv:"PROGRAM" ~doc)
+
+let strategy_argument =
+  let doc =
+    "Pass $(docv) to the external strategy. Repeat this option to preserve \
+     argv boundaries."
+  in
+  Arg.(value & opt_all string [] & info [ "strategy-arg" ] ~docv:"ARG" ~doc)
+
+let strategy_timeout =
+  let doc =
+    "Allow $(docv) seconds for each external strategy request and clean exit \
+     (default: 30)."
+  in
+  Arg.(
+    value
+    & opt (some float) None
+    & info [ "strategy-timeout" ] ~docv:"SECONDS" ~doc)
+
+let strategy_transcript =
+  let doc =
+    "Create the append-only external strategy protocol transcript at $(docv)."
+  in
+  Arg.(
+    value
+    & opt (some string) None
+    & info [ "strategy-transcript" ] ~docv:"TRANSCRIPT.jsonl" ~doc)
+
+let command environment =
   let doc = "run a deterministic completed-bar trading replay" in
   let man =
     [
@@ -179,9 +329,12 @@ let command =
     (Cmd.info "trading-engine" ~version:Trading_engine.Contract.engine_version
        ~doc ~man)
     Term.(
-      const execute $ input $ journal $ validate_only $ capabilities
-      $ input_format)
+      const (execute environment)
+      $ input $ journal $ validate_only $ capabilities $ input_format
+      $ strategy_executable $ strategy_argument $ strategy_timeout
+      $ strategy_transcript)
 
 let () =
   Fmt_tty.setup_std_outputs ();
-  exit (Cmd.eval_result command)
+  Eio_main.run @@ fun environment ->
+  exit (Cmd.eval_result (command environment))

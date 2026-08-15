@@ -16,9 +16,10 @@ journal files, and the runtime shell.
 | `Oms` | Order lifecycle, fill limits, idempotency, and deterministic ordering |
 | `Execution`, `Execution_model` | Pluggable synchronized-slice matching, capacity allocation, and fees |
 | `Account` | Currency ledgers, signed positions, attribution, average cost, fees, P&L, and valuation |
-| `Engine` | Sequencing, portfolio reconciliation, and pure orchestration |
-| `Scenario`, `Scenario_stream`, `Replay` | Strict batch and bounded-memory input runners |
-| `Sha256`, `Codec`, `Journal` | Input identity, stable audit JSON, and file publication |
+| `Engine` | Sequencing, portfolio reconciliation, and pure suspend/resume orchestration |
+| `Scenario`, `Scenario_stream`, `Replay` | Strict batch and bounded-memory scripted runners |
+| `Strategy_protocol`, `Strategy_process`, `External_replay` | Versioned child supervision and external runners |
+| `Sha256`, `Codec`, `Journal`, `Strategy_transcript` | Input identity, stable audit JSON, and file publication |
 
 ## Reducer phases
 
@@ -35,8 +36,8 @@ For each synchronized market slice, the engine:
    and initial-margin risk; only applied quantity consumes capacity.
 8. Cancels eligible market-order remainders.
 9. Stores every synchronized close and complete FX vector as current marks.
-10. Delivers captured fill, order, and `Market_slice_closed` callbacks.
-11. Applies scheduled intents and reconciles the persistent portfolio target once.
+10. Delivers captured fill, order, and `Market_slice_closed` requests one at a time.
+11. Resumes with scripted or external intents and reconciles the persistent portfolio target once.
 12. Assesses maintenance margin, cancelling active orders and creating bounded liquidation orders
     when breached.
 13. Emits one base-currency valuation with complete cash, position, fee, and margin attribution.
@@ -85,9 +86,20 @@ Determinism depends on:
 
 Running the same scenario bytes produces byte-identical audit lines.
 
+`Engine.Interactive` stops at each strategy request and exposes the immutable context and event.
+Its `resume` transition accepts typed intents and continues the same pure reducer. The scripted
+runner invokes an in-process callback at that boundary. The external runner serializes it through
+protocol v1. Reducer state never contains a process, clock, pipe, timeout, or file handle.
+
 The JSON Lines runner hashes and validates the complete stream before journal creation. It then
 replays one slice-plus-intents record at a time and does not accumulate market slices, schedule
 maps, or audit events. A required terminal record distinguishes completion from truncation.
+
+External replay requires an empty batch schedule or empty streamed intent batches. The effectful
+supervisor launches an explicit argument vector, permits one request at a time, enforces a
+per-exchange timeout and 1 MiB response limit, then requires a clean child exit with no extra
+standard output. It records every accepted request and response in sequence. Failures preserve
+the transcript and journal partials; success publishes both requested paths without replacement.
 
 ## Invariants
 

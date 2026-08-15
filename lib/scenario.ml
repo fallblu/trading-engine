@@ -368,6 +368,8 @@ let parse_intent json =
       | None -> Error "intent is missing type")
   | _ -> Error "intent must be a JSON object"
 
+let intent_of_yojson = parse_intent
+
 let parse_schedule_item json =
   let* fields =
     object_fields ~name:"schedule item"

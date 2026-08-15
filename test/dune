@@ -7,6 +7,7 @@
   test_execution
   test_reducer
   test_checkpoint4
+  test_strategy_protocol
   test_scenario
   test_engine)
  (deps
@@ -21,6 +22,10 @@
 (cram
  (deps
   ../bin/main.exe
+  fake_strategy.py
+  ../contracts/strategy/v1/fixtures/external.scenario.json
+  ../contracts/strategy/v1/fixtures/external.scenario.jsonl
+  ../contracts/strategy/v1/fixtures/external.strategy.jsonl
   ../contracts/v3/fixtures/demo.scenario.json
   ../contracts/v3/fixtures/demo.scenario.jsonl))
 
@@ -44,3 +49,22 @@
    %{dep:../contracts/v3/fixtures/demo.scenario.json}
    %{dep:../contracts/v3/fixtures/demo.scenario.jsonl}
    %{dep:../contracts/v3/fixtures/demo.journal.jsonl})))
+
+(rule
+ (alias runtest)
+ (deps
+  validate_strategy_schema.py
+  ../contracts/v3/scenario.schema.json
+  ../contracts/v3/journal.schema.json
+  ../contracts/strategy/v1/message.schema.json
+  ../contracts/strategy/v1/transcript.schema.json
+  ../contracts/strategy/v1/fixtures/external.strategy.jsonl)
+ (action
+  (run
+   python3
+   %{dep:validate_strategy_schema.py}
+   %{dep:../contracts/v3/scenario.schema.json}
+   %{dep:../contracts/v3/journal.schema.json}
+   %{dep:../contracts/strategy/v1/message.schema.json}
+   %{dep:../contracts/strategy/v1/transcript.schema.json}
+   %{dep:../contracts/strategy/v1/fixtures/external.strategy.jsonl})))

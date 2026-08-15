@@ -401,6 +401,56 @@ let configured_execution_model_is_dispatched () =
         "selected model is audited" No_fill_execution.name actual
   | _ -> Alcotest.fail "expected run start"
 
+let interactive_reducer_matches_scripted_strategy () =
+  let scripted = runner [ (1L, [ target "7" ]) ] in
+  let scripted, scripted_events =
+    Runner.process_slice scripted (market_slice 1L) |> ok
+  in
+  let config = engine_config () in
+  let interactive =
+    T.Engine.Interactive.create ~run_id:(run_id "test-run") ~scenario_sha256
+      ~config
+      ~initial_cash:[ ("USD", money "10000") ]
+    |> ok
+  in
+  let progress =
+    T.Engine.Interactive.process_slice interactive (market_slice 1L) |> ok
+  in
+  let rec drive sent_target progress =
+    match T.Engine.Interactive.strategy_request progress with
+    | Some (_, T.Strategy.Market_slice_closed _) when not sent_target ->
+        T.Engine.Interactive.resume progress [ target "7" ] |> ok |> drive true
+    | Some _ ->
+        T.Engine.Interactive.resume progress [] |> ok |> drive sent_target
+    | None -> (
+        match T.Engine.Interactive.slice_result progress with
+        | Some result -> result
+        | None -> Alcotest.fail "expected completed interactive slice")
+  in
+  let interactive, interactive_events = drive false progress in
+  Alcotest.(check (list string))
+    "audit bytes"
+    (List.map T.Codec.audit_to_string scripted_events)
+    (List.map T.Codec.audit_to_string interactive_events);
+  Alcotest.check money_testable "account cash"
+    (account_cash (Runner.account scripted))
+    (account_cash (T.Engine.Interactive.account interactive));
+  let completed_progress =
+    match T.Engine.Interactive.process_slice interactive (market_slice 2L) with
+    | Error message -> Alcotest.fail message
+    | Ok progress ->
+        let rec finish progress =
+          match T.Engine.Interactive.strategy_request progress with
+          | Some _ -> T.Engine.Interactive.resume progress [] |> ok |> finish
+          | None -> progress
+        in
+        finish progress
+  in
+  Alcotest.(check string)
+    "completed progress rejects a response"
+    "completed slice cannot accept strategy intents"
+    (T.Engine.Interactive.resume completed_progress [] |> error)
+
 let tests =
   [
     Alcotest.test_case "market target retries after partial fill" `Quick
@@ -429,4 +479,6 @@ let tests =
     Alcotest.test_case "one valuation per slice" `Quick one_valuation_per_slice;
     Alcotest.test_case "configured execution model is dispatched" `Quick
       configured_execution_model_is_dispatched;
+    Alcotest.test_case "interactive reducer matches scripted strategy" `Quick
+      interactive_reducer_matches_scripted_strategy;
   ]

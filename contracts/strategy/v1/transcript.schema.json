@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/fallblu/trading-engine/contracts/strategy/v1/transcript.schema.json",
+  "title": "Trading Engine external strategy protocol v1 transcript record",
+  "description": "One ordered request or response retained from a supervised stdio strategy session.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["strategy_protocol_version", "transcript_sequence", "direction", "message"],
+  "properties": {
+    "strategy_protocol_version": { "const": "1" },
+    "transcript_sequence": {
+      "type": "string",
+      "pattern": "^[1-9][0-9]*$"
+    },
+    "direction": {
+      "enum": ["engine_to_strategy", "strategy_to_engine"]
+    },
+    "message": {
+      "$ref": "https://github.com/fallblu/trading-engine/contracts/strategy/v1/message.schema.json"
+    }
+  }
+}

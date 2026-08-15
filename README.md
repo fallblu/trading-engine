@@ -8,7 +8,7 @@ The engine is replay-first. Its pure kernel and explicit source, strategy, execu
 layers keep networking, files, and wall-clock state outside the reducer.
 
 ```text
-scenario slices and scheduled intents
+scenario slices and scheduled or external intents
                   │
                   ▼
         deterministic reducer
@@ -33,6 +33,7 @@ scenario slices and scheduled intents
 - Synchronized market slices with one bar per configured instrument
 - Separate market event, availability, receipt, slice, and engine ordering
 - Pure strategy callbacks with causal, immutable context snapshots
+- Pure suspend/resume strategy requests with equivalent scripted and external reducers
 - Portfolio weight and quantity targets covering the complete instrument catalog
 - Current-equity weight sizing at synchronized closing marks with lot rounding
 - Persistent target reconciliation through bounded market-order attempts
@@ -51,6 +52,9 @@ scenario slices and scheduled intents
 - Deterministic event IDs, ordered causal references, and order-creation attribution
 - Contract-selected compiled execution modules; v3 currently exposes `completed_bar_v1`
 - Strict batch JSON and bounded-memory JSON Lines scenario parsing with JSON Schemas
+- Versioned synchronous JSON Lines strategy processes with per-request timeouts and strict
+  lifecycle supervision
+- Complete bidirectional strategy transcripts with exclusive partial and no-replace publication
 - Scenario SHA-256 binding in `run_started` and `run_completed`
 - Exclusive partial journal creation and atomic no-replace finalization
 - Unit, schema-conformance, scenario, golden-contract, and property tests
@@ -92,6 +96,26 @@ opam exec -- dune exec trading-engine -- \
   --journal demo.journal.jsonl
 ```
 
+Run an external strategy against an empty-schedule scenario:
+
+```sh
+opam exec -- dune exec trading-engine -- \
+  --input contracts/strategy/v1/fixtures/external.scenario.json \
+  --journal external.journal.jsonl \
+  --strategy-executable ./my-strategy \
+  --strategy-arg=config.toml \
+  --strategy-timeout 30 \
+  --strategy-transcript external.strategy.jsonl
+```
+
+The engine launches the program directly without a shell. This supervises the child but does not
+sandbox it; run strategy code with the same trust you give the invoking user. Protocol messages
+own the child's standard input and output; strategy diagnostics belong on standard error. Only
+one request is outstanding. Initialization must return `ready`, each event must return `intents`,
+and shutdown must return `stopped`. Wrong versions or sequences, unknown or malformed fields,
+oversized responses, EOF, timeout, extra output, and nonzero exit all fail the replay. The journal
+and transcript retain partial artifacts for diagnosis.
+
 Discover the executable version and machine-readable compatibility surface:
 
 ```sh
@@ -100,7 +124,8 @@ opam exec -- dune exec trading-engine -- --capabilities
 ```
 
 Clients must confirm that both `scenario_contract_versions` and `journal_contract_versions`
-contain the scenario's `contract_version` before starting a replay.
+contain the scenario's `contract_version` before starting a replay. External clients must also
+require their version in `strategy_protocol_versions`.
 
 The final and `.partial` journal paths must not already exist. Batch JSON hashes the same complete
 document it parses. JSON Lines input is hashed and validated in a bounded-memory pass before the
@@ -158,6 +183,9 @@ production recovery log.
 - [Scenario JSON Schema](contracts/v3/scenario.schema.json)
 - [Scenario stream record JSON Schema](contracts/v3/scenario-stream.schema.json)
 - [Journal record JSON Schema](contracts/v3/journal.schema.json)
+- [External strategy protocol v1](contracts/strategy/v1/README.md)
+- [Strategy message JSON Schema](contracts/strategy/v1/message.schema.json)
+- [Strategy transcript JSON Schema](contracts/strategy/v1/transcript.schema.json)
 - [Execution model](docs/execution-model.md)
 - [Persistra integration](docs/persistra.md)
 - [Contributing](CONTRIBUTING.md)

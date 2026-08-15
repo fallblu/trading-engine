@@ -16,7 +16,7 @@ let valid_sha256 value =
        (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false)
        value
 
-module Make (Strategy_impl : Strategy.S) = struct
+module Interactive = struct
   let ( let* ) result function_ =
     match result with Ok value -> function_ value | Error _ as error -> error
 
@@ -42,7 +42,6 @@ module Make (Strategy_impl : Strategy.S) = struct
     liquidation_pending : bool;
     account : Account.t;
     oms : Oms.t;
-    strategy_state : Strategy_impl.state;
     started : bool;
     completed : bool;
   }
@@ -62,7 +61,7 @@ module Make (Strategy_impl : Strategy.S) = struct
     processed : int;
   }
 
-  let create ~run_id ~scenario_sha256 ~config ~initial_cash ~strategy_state =
+  let create ~run_id ~scenario_sha256 ~config ~initial_cash =
     if not (valid_sha256 scenario_sha256) then
       Error "scenario SHA-256 must contain 64 lowercase hexadecimal characters"
     else
@@ -108,7 +107,6 @@ module Make (Strategy_impl : Strategy.S) = struct
                 liquidation_pending = false;
                 account;
                 oms = Oms.empty;
-                strategy_state;
                 started = false;
                 completed = false;
               }
@@ -118,9 +116,6 @@ module Make (Strategy_impl : Strategy.S) = struct
 
   let latest_bar state instrument_id =
     Id.Instrument.Map.find_opt instrument_id state.latest_bars
-
-  let strategy_state state = state.strategy_state
-  let with_strategy_state state strategy_state = { state with strategy_state }
 
   let next_sequence value =
     if Int64.equal value Int64.max_int then Error "engine sequence is exhausted"
@@ -745,19 +740,18 @@ module Make (Strategy_impl : Strategy.S) = struct
         cancel_order reduction ~reason:Audit.Strategy_requested order_id
     | Strategy.Emit_metric { name; value } -> metric reduction name value
 
-  let handle_notification reduction causation_ids context event =
-    let strategy_state, intents =
-      Strategy_impl.on_event reduction.state.strategy_state context event
-    in
-    let state = { reduction.state with strategy_state } in
-    let actions =
-      List.map (fun intent -> Act (causation_ids, intent)) intents
-    in
-    Ok (enqueue { reduction with state } actions)
+  type drain_result =
+    | Drained of reduction
+    | Strategy_requested of {
+        reduction : reduction;
+        causation_ids : Id.Event.t list;
+        context : Strategy.context;
+        event : Strategy.event;
+      }
 
   let rec drain reduction =
     match reduction.pending with
-    | [] -> Ok reduction
+    | [] -> Ok (Drained reduction)
     | _ when reduction.processed >= reduction.state.config.max_internal_events
       ->
         Error "maximum internal event count exceeded"
@@ -765,18 +759,22 @@ module Make (Strategy_impl : Strategy.S) = struct
         let reduction =
           { reduction with pending; processed = reduction.processed + 1 }
         in
-        let result =
-          match item with
-          | Notify (causation_ids, context, event) ->
-              handle_notification
-                (with_causes reduction causation_ids)
-                causation_ids context event
-          | Act (causation_ids, intent) ->
+        match item with
+        | Notify (causation_ids, context, event) ->
+            Ok
+              (Strategy_requested
+                 {
+                   reduction = with_causes reduction causation_ids;
+                   causation_ids;
+                   context;
+                   event;
+                 })
+        | Act (causation_ids, intent) -> (
+            match
               handle_intent (with_causes reduction causation_ids) intent
-        in
-        match result with
-        | Error _ as error -> error
-        | Ok reduction -> drain reduction)
+            with
+            | Error _ as error -> error
+            | Ok reduction -> drain reduction))
 
   let validate_slice state market_slice =
     let expected =
@@ -1232,6 +1230,54 @@ module Make (Strategy_impl : Strategy.S) = struct
           (Option.to_list reduction.slice_event_id)
     else Ok reduction
 
+  type phase = Reconcile_targets | Finish_slice
+
+  type progress =
+    | Awaiting_strategy of {
+        reduction : reduction;
+        phase : phase;
+        causation_ids : Id.Event.t list;
+        context : Strategy.context;
+        event : Strategy.event;
+      }
+    | Slice_completed of t * Audit.t list
+
+  let rec continue phase reduction =
+    let* drained = drain reduction in
+    match drained with
+    | Strategy_requested { reduction; causation_ids; context; event } ->
+        Ok
+          (Awaiting_strategy { reduction; phase; causation_ids; context; event })
+    | Drained reduction -> (
+        match phase with
+        | Reconcile_targets ->
+            let* reduction = reconcile_targets reduction in
+            continue Finish_slice reduction
+        | Finish_slice ->
+            let* reduction = assess_margin reduction in
+            let* reduction = valuation reduction in
+            Ok
+              (Slice_completed (reduction.state, List.rev reduction.audits_rev))
+        )
+
+  let strategy_request = function
+    | Awaiting_strategy { context; event; _ } -> Some (context, event)
+    | Slice_completed _ -> None
+
+  let slice_result = function
+    | Awaiting_strategy _ -> None
+    | Slice_completed (state, audits) -> Some (state, audits)
+
+  let resume progress intents =
+    match progress with
+    | Slice_completed _ ->
+        Error "completed slice cannot accept strategy intents"
+    | Awaiting_strategy { reduction; phase; causation_ids; _ } ->
+        let actions =
+          List.map (fun intent -> Act (causation_ids, intent)) intents
+        in
+        continue phase (enqueue reduction actions)
+
   let process_slice state market_slice =
     if state.completed then
       Error "completed engine cannot process another market slice"
@@ -1308,12 +1354,7 @@ module Make (Strategy_impl : Strategy.S) = struct
               (Strategy.Market_slice_closed market_slice);
           ]
       in
-      let* reduction = drain reduction in
-      let* reduction = reconcile_targets reduction in
-      let* reduction = drain reduction in
-      let* reduction = assess_margin reduction in
-      let* reduction = valuation reduction in
-      Ok (reduction.state, List.rev reduction.audits_rev)
+      continue Reconcile_targets reduction
 
   let order_counts orders =
     List.fold_left
@@ -1377,4 +1418,45 @@ module Make (Strategy_impl : Strategy.S) = struct
               | Ok reduction ->
                   Ok (reduction.state, valuation, List.rev reduction.audits_rev)
               ))
+end
+
+module Make (Strategy_impl : Strategy.S) = struct
+  let ( let* ) result function_ =
+    match result with Ok value -> function_ value | Error _ as error -> error
+
+  type t = { engine : Interactive.t; strategy_state : Strategy_impl.state }
+
+  let create ~run_id ~scenario_sha256 ~config ~initial_cash ~strategy_state =
+    Interactive.create ~run_id ~scenario_sha256 ~config ~initial_cash
+    |> Result.map (fun engine -> { engine; strategy_state })
+
+  let account state = Interactive.account state.engine
+  let oms state = Interactive.oms state.engine
+
+  let latest_bar state instrument_id =
+    Interactive.latest_bar state.engine instrument_id
+
+  let strategy_state state = state.strategy_state
+  let with_strategy_state state strategy_state = { state with strategy_state }
+
+  let rec drive strategy_state progress =
+    match Interactive.strategy_request progress with
+    | Some (context, event) ->
+        let strategy_state, intents =
+          Strategy_impl.on_event strategy_state context event
+        in
+        let* progress = Interactive.resume progress intents in
+        drive strategy_state progress
+    | None -> (
+        match Interactive.slice_result progress with
+        | Some (engine, audits) -> Ok ({ engine; strategy_state }, audits)
+        | None -> Error "interactive engine reached an invalid progress state")
+
+  let process_slice state market_slice =
+    let* progress = Interactive.process_slice state.engine market_slice in
+    drive state.strategy_state progress
+
+  let complete state =
+    let* engine, valuation, audits = Interactive.complete state.engine in
+    Ok ({ state with engine }, valuation, audits)
 end

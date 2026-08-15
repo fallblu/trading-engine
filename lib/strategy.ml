@@ -42,6 +42,8 @@ let cash context =
   Account.cash context.account (Account.base_currency context.account)
   |> Option.get
 
+let cash_balances context = Account.cash_balances context.account
+
 let position context instrument_id =
   Account.position_quantity context.account instrument_id
 

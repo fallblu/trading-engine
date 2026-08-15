@@ -52,6 +52,10 @@ retains current account, order, target, and latest-bar state required by executi
 Metadata may contain nested JSON values. Duplicate object keys and non-finite numbers are rejected
 at any depth. Metadata is retained on `Scenario.t` but never affects execution.
 
+An external strategy replay requires `schedule: []`. The JSON Lines form likewise requires every
+slice record's `intents` array to be empty. This keeps one authoritative decision source: either
+the scenario contract or the separate strategy protocol, never both.
+
 ## Instruments, risk, and execution
 
 Each instrument contains `instrument_id`, `symbol`, `quote_currency`, `tick_size`, and `lot_size`.

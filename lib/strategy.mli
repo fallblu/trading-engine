@@ -34,6 +34,7 @@ val context :
 
 val now : context -> Ptime.t
 val cash : context -> Scalar.Money.t
+val cash_balances : context -> (string * Scalar.Money.t) list
 val position : context -> Id.Instrument.t -> Scalar.Quantity.t
 val working_orders : context -> Order.t list
 val latest_bar : context -> Id.Instrument.t -> Bar.t option

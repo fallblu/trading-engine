@@ -37,6 +37,7 @@ type stream_item = private {
 val of_yojson : Yojson.Safe.t -> (t, string) result
 val of_string : string -> (t, string) result
 val read_file : string -> (t, string) result
+val intent_of_yojson : Yojson.Safe.t -> (Strategy.intent, string) result
 
 val stream_header_of_yojson :
   contract_version:string -> Yojson.Safe.t -> (stream_header, string) result

@@ -18,7 +18,7 @@ The JSON scenario carries:
 - Signed position, exposure, leverage, margin, borrow, participation, and fee policies
 - Strictly increasing synchronized market slices with complete FX marks and corporate actions
 - Explicit initial cash ledgers for every base or quote currency
-- Scheduled full-portfolio signed weight or fractional quantity targets
+- Optional scheduled full-portfolio signed weight or fractional quantity targets
 - Optional direct orders, cancellations, and metrics
 
 Persistra should:
@@ -29,7 +29,8 @@ Persistra should:
 4. Group one bar per instrument into each synchronized slice.
 5. Preserve original portfolio weights in `target_weights` instead of pre-sizing them.
 6. Populate `metadata` with dataset, policy, and build provenance.
-7. Read `--capabilities` and require support for the scenario and journal contract version.
+7. Read `--capabilities` and require support for the scenario, journal, and optional strategy
+   protocol versions.
 8. Validate the scenario through the JSON Schema and `--validate-only`.
 9. Run the CLI as a separate process and import its audit journal.
 10. Require the same contract version and deterministic run-scoped event-ID derivation on every
@@ -41,7 +42,10 @@ Persistra should:
     exposure, fee, and margin values.
 14. Reconcile split adjustments, dividends, borrow fees, risk-limited fills, and margin
     liquidation against scenario and runtime state.
-15. Require the terminal completion record before accepting a replay.
+15. For external replay, require an empty schedule, launch an explicit strategy argument vector,
+    hash every declared strategy input, and validate the complete bidirectional transcript.
+16. Reconcile external transcript intents to their journal outcomes.
+17. Require the terminal completion record before accepting a replay.
 
 Do not let the engine read Persistra's internal DuckDB tables. Their schema and connection
 lifecycle belong to Persistra.
@@ -50,6 +54,13 @@ Use the current v3 [scenario](../contracts/v3/scenario.schema.json) and
 [journal](../contracts/v3/journal.schema.json) JSON Schemas and their adjacent conformance fixtures
 for structural checks. The engine parser is authoritative for ordering, catalog coverage,
 causality, tick, lot, risk, and accounting invariants that JSON Schema cannot express.
+
+External strategies use the separate
+[strategy protocol v1](../contracts/strategy/v1/README.md). Persistra's host turns protocol
+initialization, complete contexts, market-slice, fill, order, and rejection events into typed
+callbacks. The retained run manifest binds the strategy identity, executable hash, declared input
+hashes, transcript hash, scenario hash, and journal hash. Strategy standard output remains
+protocol-only; logs and diagnostics use standard error.
 
 ## Time mapping
 
