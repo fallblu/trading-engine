@@ -40,7 +40,8 @@ For each synchronized market slice, the engine:
 11. Resumes with scripted or external intents and reconciles the persistent portfolio target once.
 12. Assesses maintenance margin, cancelling active orders and creating bounded liquidation orders
     when breached.
-13. Emits one base-currency valuation with complete cash, position, fee, and margin attribution.
+13. Delivers resulting order updates and drains strategy feedback.
+14. Emits one base-currency valuation with complete cash, position, fee, and margin attribution.
 
 Target-generated market orders are limited to `max_order_quantity`, rounded down to a lot, and
 retried after later slices. A new portfolio target atomically supersedes the prior desired

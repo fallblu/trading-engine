@@ -155,6 +155,7 @@ quantity and basis.
 The valuation includes initial and maintenance requirements and excesses. After strategy and
 target processing, negative maintenance excess triggers one `margin_call`, cancels all active
 orders, clears the persistent target, and submits deterministic `margin_liquidation` market orders
-in instrument-ID order. Each attempt is capped by `max_order_quantity` and lot aligned. The engine
-continues on later slices until every position is flat, then emits `margin_restored` when the
-maintenance condition is no longer breached.
+in instrument-ID order. Strategies receive the resulting cancellation and liquidation-order
+updates before the slice valuation. Each attempt is capped by `max_order_quantity` and lot aligned.
+The engine continues on later slices until every position is flat, then emits `margin_restored`
+when the maintenance condition is no longer breached.

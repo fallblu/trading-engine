@@ -289,6 +289,14 @@ let applied_quantity_controls_shared_capacity () =
 let applied_quantity_is_validated () =
   let oms, _ = oms_with_order (request ~quantity_value:"2" ()) in
   let slice = market_slice ~bars:[ bar ~volume:(Some "2") 2L ] 2L in
+  let negative =
+    T.Execution.fold_slice (execution ())
+      ~instruments:[ instrument () ]
+      ~oms slice ~init:()
+      ~apply:(fun () _ -> Ok ((), quantity "-1"))
+  in
+  Alcotest.(check bool)
+    "quantity cannot be negative" true (Result.is_error negative);
   let excessive =
     T.Execution.fold_slice (execution ())
       ~instruments:[ instrument () ]

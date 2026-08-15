@@ -23,7 +23,7 @@
     },
     "risk": { "$ref": "#/$defs/risk" },
     "execution": { "$ref": "#/$defs/execution" },
-    "max_internal_events": { "type": "integer", "minimum": 1 },
+    "max_internal_events": { "type": "integer", "minimum": 1, "maximum": 4611686018427387903 },
     "schedule": { "type": "array", "items": { "$ref": "#/$defs/scheduleItem" } },
     "slices": { "type": "array", "items": { "$ref": "#/$defs/marketSlice" } }
   },

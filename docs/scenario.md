@@ -45,7 +45,7 @@ retains current account, order, target, and latest-bar state required by executi
 | `instruments` | Approved executable-instrument catalog |
 | `risk` | Signed position, exposure, leverage, margin, and borrow policy |
 | `execution` | Capacity and fee configuration |
-| `max_internal_events` | Positive reducer feedback cap |
+| `max_internal_events` | Positive reducer feedback cap, at most `4611686018427387903` |
 | `schedule` | Intents emitted after named slices |
 | `slices` | Complete synchronized market observations |
 

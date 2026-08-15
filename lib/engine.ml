@@ -1255,10 +1255,11 @@ module Interactive = struct
             continue Finish_slice reduction
         | Finish_slice ->
             let* reduction = assess_margin reduction in
-            let* reduction = valuation reduction in
-            Ok
-              (Slice_completed (reduction.state, List.rev reduction.audits_rev))
-        )
+            if reduction.pending = [] then
+              let* reduction = valuation reduction in
+              Ok
+                (Slice_completed (reduction.state, List.rev reduction.audits_rev))
+            else continue Finish_slice reduction)
 
   let strategy_request = function
     | Awaiting_strategy { context; event; _ } -> Some (context, event)

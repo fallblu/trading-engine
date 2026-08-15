@@ -167,7 +167,11 @@ let fold_slice state ~instruments ~oms (market_slice : Market_slice.t) ~init
                 { order_id = order.id; quantity; price; fee; executed_at }
               in
               let* accumulator, applied_quantity = apply accumulator proposed in
-              if Scalar.Quantity.compare applied_quantity quantity > 0 then
+              if
+                Scalar.Quantity.compare applied_quantity Scalar.Quantity.zero
+                < 0
+              then Error "applied fill quantity must be nonnegative"
+              else if Scalar.Quantity.compare applied_quantity quantity > 0 then
                 Error "applied fill quantity exceeds the execution proposal"
               else if
                 not

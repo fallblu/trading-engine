@@ -115,6 +115,10 @@ def main() -> None:
     unsupported_execution_model = copy.deepcopy(scenario)
     unsupported_execution_model["execution"]["model"] = "future_model"
     expect_invalid(scenario_validator, unsupported_execution_model)
+    if contract_version == "3":
+        excessive_feedback_cap = copy.deepcopy(scenario)
+        excessive_feedback_cap["max_internal_events"] = 4611686018427387904
+        expect_invalid(scenario_validator, excessive_feedback_cap)
     unversioned_stream_record = copy.deepcopy(stream_records[0])
     del unversioned_stream_record["contract_version"]
     expect_invalid(stream_validator, unversioned_stream_record)
