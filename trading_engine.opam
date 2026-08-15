@@ -8,6 +8,7 @@ an append-only audit journal.
 """
 maintainer: "James Mallette <jamesmallmw@gmail.com>"
 authors: ["James Mallette <jamesmallmw@gmail.com>"]
+license: "MIT"
 build: [
   ["dune" "subst"] {dev}
   ["dune" "build" "-p" name "-j" jobs]
