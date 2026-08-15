@@ -9,28 +9,28 @@
   test_scenario
   test_engine)
  (deps
-  ../examples/demo.json
-  ../schemas/journal.schema.json
-  ../schemas/scenario.schema.json
-  fixtures/demo.journal.jsonl)
+  ../contracts/v1/fixtures/demo.journal.jsonl
+  ../contracts/v1/fixtures/demo.scenario.json
+  ../contracts/v1/journal.schema.json
+  ../contracts/v1/scenario.schema.json)
  (libraries trading_engine yojson alcotest qcheck-core qcheck-alcotest))
 
 (cram
- (deps ../bin/main.exe ../examples/demo.json))
+ (deps ../bin/main.exe ../contracts/v1/fixtures/demo.scenario.json))
 
 (rule
  (alias runtest)
  (deps
   validate_schemas.py
-  ../examples/demo.json
-  ../schemas/journal.schema.json
-  ../schemas/scenario.schema.json
-  fixtures/demo.journal.jsonl)
+  ../contracts/v1/fixtures/demo.journal.jsonl
+  ../contracts/v1/fixtures/demo.scenario.json
+  ../contracts/v1/journal.schema.json
+  ../contracts/v1/scenario.schema.json)
  (action
   (run
    python3
    %{dep:validate_schemas.py}
-   %{dep:../schemas/scenario.schema.json}
-   %{dep:../schemas/journal.schema.json}
-   %{dep:../examples/demo.json}
-   %{dep:fixtures/demo.journal.jsonl})))
+   %{dep:../contracts/v1/scenario.schema.json}
+   %{dep:../contracts/v1/journal.schema.json}
+   %{dep:../contracts/v1/fixtures/demo.scenario.json}
+   %{dep:../contracts/v1/fixtures/demo.journal.jsonl})))

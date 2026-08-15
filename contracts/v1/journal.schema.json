@@ -1,11 +1,19 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/fallblu/trading-engine/schemas/journal.schema.json",
-  "title": "Trading Engine audit journal record",
+  "$id": "https://github.com/fallblu/trading-engine/contracts/v1/journal.schema.json",
+  "title": "Trading Engine v1 audit journal record",
   "type": "object",
   "additionalProperties": false,
-  "required": ["engine_sequence", "run_id", "recorded_at", "event_type", "payload"],
+  "required": [
+    "contract_version",
+    "engine_sequence",
+    "run_id",
+    "recorded_at",
+    "event_type",
+    "payload"
+  ],
   "properties": {
+    "contract_version": { "const": "1" },
     "engine_sequence": { "$ref": "#/$defs/sequence" },
     "run_id": { "$ref": "#/$defs/identifier" },
     "recorded_at": { "$ref": "#/$defs/timestamp" },

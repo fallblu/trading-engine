@@ -74,12 +74,24 @@ def main() -> None:
     extra_field = copy.deepcopy(scenario)
     extra_field["unexpected_contract_field"] = True
     expect_invalid(scenario_validator, extra_field)
+    unversioned_scenario = copy.deepcopy(scenario)
+    del unversioned_scenario["contract_version"]
+    expect_invalid(scenario_validator, unversioned_scenario)
+    unsupported_scenario = copy.deepcopy(scenario)
+    unsupported_scenario["contract_version"] = "2"
+    expect_invalid(scenario_validator, unsupported_scenario)
     noncanonical = copy.deepcopy(scenario)
     noncanonical["initial_cash"] = "10000.0"
     expect_invalid(scenario_validator, noncanonical)
     first_journal_record = json.loads(
         journal_path.read_text(encoding="utf-8").splitlines()[0]
     )
+    unversioned_journal_record = copy.deepcopy(first_journal_record)
+    del unversioned_journal_record["contract_version"]
+    expect_invalid(journal_validator, unversioned_journal_record)
+    unsupported_journal_record = copy.deepcopy(first_journal_record)
+    unsupported_journal_record["contract_version"] = "2"
+    expect_invalid(journal_validator, unsupported_journal_record)
     for timestamp in (
         "2026-01-02t14:30:00.1z",
         "2026-01-02T14:30:00.123456+05:30",

@@ -35,7 +35,7 @@ let run_replay scenario_sha256 scenario journal =
       Fmt.pr "journal=%s@." journal;
       Ok ()
 
-let execute input journal validate_only =
+let execute_scenario input journal validate_only =
   Eio_main.run @@ fun _environment ->
   let document =
     try Ok (In_channel.with_open_bin input In_channel.input_all)
@@ -70,10 +70,25 @@ let execute input journal validate_only =
                 Error "--journal is required unless --validate-only is set"
             | Some path -> run_replay scenario_sha256 scenario path))
 
+let execute input journal validate_only capabilities =
+  if capabilities then
+    match (input, journal, validate_only) with
+    | None, None, false ->
+        Fmt.pr "%s@." (Trading_engine.Contract.capabilities_to_string ());
+        Ok ()
+    | _ ->
+        Error
+          "--capabilities cannot be combined with --input, --journal, or \
+           --validate-only"
+  else
+    match input with
+    | None -> Error "--input is required unless --capabilities is set"
+    | Some path -> execute_scenario path journal validate_only
+
 let input =
   let doc = "Read the replay scenario from $(docv)." in
   Arg.(
-    required
+    value
     & opt (some file) None
     & info [ "input"; "i" ] ~docv:"SCENARIO.json" ~doc)
 
@@ -87,6 +102,10 @@ let journal =
 let validate_only =
   let doc = "Validate the scenario and exit without creating a journal." in
   Arg.(value & flag & info [ "validate-only" ] ~doc)
+
+let capabilities =
+  let doc = "Print machine-readable engine capabilities as JSON and exit." in
+  Arg.(value & flag & info [ "capabilities" ] ~doc)
 
 let command =
   let doc = "run a deterministic completed-bar trading replay" in
@@ -102,8 +121,9 @@ let command =
     ]
   in
   Cmd.v
-    (Cmd.info "trading-engine" ~doc ~man)
-    Term.(const execute $ input $ journal $ validate_only)
+    (Cmd.info "trading-engine" ~version:Trading_engine.Contract.engine_version
+       ~doc ~man)
+    Term.(const execute $ input $ journal $ validate_only $ capabilities)
 
 let () =
   Fmt_tty.setup_std_outputs ();

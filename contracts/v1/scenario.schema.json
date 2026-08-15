@@ -1,11 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/fallblu/trading-engine/schemas/scenario.schema.json",
-  "title": "Trading Engine replay scenario",
+  "$id": "https://github.com/fallblu/trading-engine/contracts/v1/scenario.schema.json",
+  "title": "Trading Engine v1 replay scenario",
   "description": "The strict structural input contract. The engine additionally checks catalog coverage, ordering, causality, risk, tick, lot, time, and OHLC invariants.",
   "type": "object",
   "additionalProperties": false,
   "required": [
+    "contract_version",
     "metadata",
     "run_id",
     "base_currency",
@@ -18,6 +19,7 @@
     "slices"
   ],
   "properties": {
+    "contract_version": { "const": "1" },
     "metadata": { "type": "object" },
     "run_id": { "$ref": "#/$defs/identifier" },
     "base_currency": { "$ref": "#/$defs/identifier" },

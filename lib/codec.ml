@@ -236,6 +236,7 @@ let payload_to_yojson = function
 let audit_to_yojson audit =
   `Assoc
     [
+      ("contract_version", string audit.Audit.contract_version);
       ("engine_sequence", int64 audit.Audit.engine_sequence);
       ("run_id", string (Id.Run.to_string audit.run_id));
       ("recorded_at", timestamp audit.recorded_at);

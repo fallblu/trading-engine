@@ -2,13 +2,16 @@ open Test_support
 module T = Trading_engine
 
 let demo_document () =
-  In_channel.with_open_bin "../examples/demo.json" In_channel.input_all
+  In_channel.with_open_bin "../contracts/v1/fixtures/demo.scenario.json"
+    In_channel.input_all
 
 let demo () = T.Scenario.of_string (demo_document ()) |> ok
 let demo_hash () = T.Sha256.digest_string (demo_document ())
 
 let demo_contract_parses () =
   let scenario = demo () in
+  Alcotest.(check string)
+    "contract" T.Contract.version scenario.contract_version;
   Alcotest.(check string) "run" "demo" (T.Id.Run.to_string scenario.run_id);
   Alcotest.(check int) "one instrument" 1 (List.length scenario.instruments);
   Alcotest.(check int) "four slices" 4 (List.length scenario.slices);
@@ -34,8 +37,8 @@ let schema_artifacts_parse () =
           (List.mem_assoc "$defs" fields)
     | _ -> Alcotest.fail (path ^ " must contain a JSON object")
   in
-  check_schema "../schemas/scenario.schema.json";
-  check_schema "../schemas/journal.schema.json"
+  check_schema "../contracts/v1/scenario.schema.json";
+  check_schema "../contracts/v1/journal.schema.json"
 
 let timestamp_precision_is_bounded () =
   List.iter
@@ -77,6 +80,27 @@ let unknown_fields_are_rejected () =
   Alcotest.(check bool)
     "unknown field rejected" true
     (Result.is_error (T.Scenario.of_yojson changed))
+
+let contract_version_is_required_and_supported () =
+  let missing =
+    map_root
+      (List.filter (fun (name, _) -> not (String.equal name "contract_version")))
+  in
+  Alcotest.(check bool)
+    "unversioned scenario rejected" true
+    (Result.is_error (T.Scenario.of_yojson missing));
+  let unsupported =
+    map_root (fun fields ->
+        List.map
+          (fun (name, value) ->
+            if String.equal name "contract_version" then (name, `String "2")
+            else (name, value))
+          fields)
+  in
+  Alcotest.(check string)
+    "unsupported version diagnosed"
+    "unsupported scenario contract_version \"2\" (expected \"1\")"
+    (T.Scenario.of_yojson unsupported |> error)
 
 let duplicate_fields_are_rejected () =
   let changed =
@@ -263,6 +287,8 @@ let replay_ends_with_completion_summary () =
   let result = T.Replay.run ~scenario_sha256:hash (demo ()) |> ok in
   let first = List.hd result.audits in
   let completion = List.rev result.audits |> List.hd in
+  Alcotest.(check string)
+    "journal contract" T.Contract.version first.contract_version;
   (match first.event with
   | T.Audit.Run_started { scenario_sha256 = actual } ->
       Alcotest.(check string) "start hash" hash actual
@@ -281,7 +307,8 @@ let replay_matches_golden_file () =
     |> fun value -> value ^ "\n"
   in
   let expected =
-    In_channel.with_open_bin "fixtures/demo.journal.jsonl" In_channel.input_all
+    In_channel.with_open_bin "../contracts/v1/fixtures/demo.journal.jsonl"
+      In_channel.input_all
   in
   Alcotest.(check string) "stable audit contract" expected actual
 
@@ -367,6 +394,8 @@ let tests =
       timestamp_precision_is_bounded;
     Alcotest.test_case "unknown fields rejected" `Quick
       unknown_fields_are_rejected;
+    Alcotest.test_case "contract version required and supported" `Quick
+      contract_version_is_required_and_supported;
     Alcotest.test_case "duplicate fields rejected" `Quick
       duplicate_fields_are_rejected;
     Alcotest.test_case "metadata validation is recursive" `Quick

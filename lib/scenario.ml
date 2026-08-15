@@ -1,4 +1,5 @@
 type t = {
+  contract_version : string;
   metadata : Yojson.Safe.t;
   run_id : Id.Run.t;
   base_currency : string;
@@ -560,6 +561,7 @@ let of_yojson json =
     object_fields ~name:"scenario"
       ~expected:
         [
+          "contract_version";
           "metadata";
           "run_id";
           "base_currency";
@@ -573,63 +575,71 @@ let of_yojson json =
         ]
       json
   in
-  let* metadata = field fields "metadata" in
-  let* () =
-    match metadata with
-    | `Assoc _ -> validate_metadata metadata
-    | _ -> Error "metadata must be a JSON object"
-  in
-  let* run_json = field fields "run_id" in
-  let* run_id = parse_id Id.Run.of_string ~name:"run_id" run_json in
-  let* currency_json = field fields "base_currency" in
-  let* base_currency = string ~name:"base_currency" currency_json in
-  let* cash_json = field fields "initial_cash" in
-  let* initial_cash = parse_money ~name:"initial_cash" cash_json in
-  if Scalar.Money.compare initial_cash Scalar.Money.zero < 0 then
-    Error "initial_cash must be nonnegative"
+  let* contract_json = field fields "contract_version" in
+  let* contract_version = string ~name:"contract_version" contract_json in
+  if not (String.equal contract_version Contract.version) then
+    Error
+      (Printf.sprintf "unsupported scenario contract_version %S (expected %S)"
+         contract_version Contract.version)
   else
-    let* instruments_json = field fields "instruments" in
-    let* instruments_json = list ~name:"instruments" instruments_json in
-    let* instruments = map_list parse_instrument instruments_json in
-    if instruments = [] then
-      Error "scenario must define at least one instrument"
+    let* metadata = field fields "metadata" in
+    let* () =
+      match metadata with
+      | `Assoc _ -> validate_metadata metadata
+      | _ -> Error "metadata must be a JSON object"
+    in
+    let* run_json = field fields "run_id" in
+    let* run_id = parse_id Id.Run.of_string ~name:"run_id" run_json in
+    let* currency_json = field fields "base_currency" in
+    let* base_currency = string ~name:"base_currency" currency_json in
+    let* cash_json = field fields "initial_cash" in
+    let* initial_cash = parse_money ~name:"initial_cash" cash_json in
+    if Scalar.Money.compare initial_cash Scalar.Money.zero < 0 then
+      Error "initial_cash must be nonnegative"
     else
-      let catalog =
-        List.map (fun instrument -> instrument.Instrument.id) instruments
-        |> Id.Instrument.Set.of_list
-      in
-      let* risk_json = field fields "risk" in
-      let* risk = parse_risk base_currency instruments risk_json in
-      let* execution_json = field fields "execution" in
-      let* execution = parse_execution execution_json in
-      let* maximum_json = field fields "max_internal_events" in
-      let* max_internal_events =
-        integer ~name:"max_internal_events" maximum_json
-      in
-      if max_internal_events <= 0 then
-        Error "max_internal_events must be positive"
+      let* instruments_json = field fields "instruments" in
+      let* instruments_json = list ~name:"instruments" instruments_json in
+      let* instruments = map_list parse_instrument instruments_json in
+      if instruments = [] then
+        Error "scenario must define at least one instrument"
       else
-        let* schedule_json = field fields "schedule" in
-        let* schedule_json = list ~name:"schedule" schedule_json in
-        let* schedule = map_list parse_schedule_item schedule_json in
-        let* slices_json = field fields "slices" in
-        let* slices_json = list ~name:"slices" slices_json in
-        let* slices = map_list parse_slice slices_json in
-        let* () = validate_slices catalog slices in
-        let* () = validate_schedule risk catalog schedule slices in
-        Ok
-          {
-            metadata;
-            run_id;
-            base_currency;
-            initial_cash;
-            instruments;
-            risk;
-            execution;
-            max_internal_events;
-            schedule;
-            slices;
-          }
+        let catalog =
+          List.map (fun instrument -> instrument.Instrument.id) instruments
+          |> Id.Instrument.Set.of_list
+        in
+        let* risk_json = field fields "risk" in
+        let* risk = parse_risk base_currency instruments risk_json in
+        let* execution_json = field fields "execution" in
+        let* execution = parse_execution execution_json in
+        let* maximum_json = field fields "max_internal_events" in
+        let* max_internal_events =
+          integer ~name:"max_internal_events" maximum_json
+        in
+        if max_internal_events <= 0 then
+          Error "max_internal_events must be positive"
+        else
+          let* schedule_json = field fields "schedule" in
+          let* schedule_json = list ~name:"schedule" schedule_json in
+          let* schedule = map_list parse_schedule_item schedule_json in
+          let* slices_json = field fields "slices" in
+          let* slices_json = list ~name:"slices" slices_json in
+          let* slices = map_list parse_slice slices_json in
+          let* () = validate_slices catalog slices in
+          let* () = validate_schedule risk catalog schedule slices in
+          Ok
+            {
+              contract_version;
+              metadata;
+              run_id;
+              base_currency;
+              initial_cash;
+              instruments;
+              risk;
+              execution;
+              max_internal_events;
+              schedule;
+              slices;
+            }
 
 let of_string document =
   try Yojson.Safe.from_string document |> of_yojson

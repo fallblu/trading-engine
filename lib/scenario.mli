@@ -1,6 +1,7 @@
 (** Strict replay scenario input contract. *)
 
 type t = private {
+  contract_version : string;
   metadata : Yojson.Safe.t;
   run_id : Id.Run.t;
   base_currency : string;

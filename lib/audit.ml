@@ -44,6 +44,7 @@ type event =
     }
 
 type t = {
+  contract_version : string;
   engine_sequence : int64;
   run_id : Id.Run.t;
   recorded_at : Ptime.t;
@@ -51,7 +52,13 @@ type t = {
 }
 
 let create ~engine_sequence ~run_id ~recorded_at event =
-  { engine_sequence; run_id; recorded_at; event }
+  {
+    contract_version = Contract.version;
+    engine_sequence;
+    run_id;
+    recorded_at;
+    event;
+  }
 
 let cancellation_reason_to_string = function
   | Strategy_requested -> "strategy_requested"

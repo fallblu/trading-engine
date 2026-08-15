@@ -46,6 +46,7 @@ type event =
     }
 
 type t = private {
+  contract_version : string;
   engine_sequence : int64;
   run_id : Id.Run.t;
   recorded_at : Ptime.t;

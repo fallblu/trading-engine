@@ -65,7 +65,7 @@ Validate the included scenario with an in-memory replay:
 
 ```sh
 opam exec -- dune exec trading-engine -- \
-  --input examples/demo.json \
+  --input contracts/v1/fixtures/demo.scenario.json \
   --validate-only
 ```
 
@@ -73,9 +73,19 @@ Run it and create a journal:
 
 ```sh
 opam exec -- dune exec trading-engine -- \
-  --input examples/demo.json \
+  --input contracts/v1/fixtures/demo.scenario.json \
   --journal demo.journal.jsonl
 ```
+
+Discover the executable version and machine-readable compatibility surface:
+
+```sh
+opam exec -- dune exec trading-engine -- --version
+opam exec -- dune exec trading-engine -- --capabilities
+```
+
+Clients must confirm that both `scenario_contract_versions` and `journal_contract_versions`
+contain the scenario's `contract_version` before starting a replay.
 
 The final and `.partial` journal paths must not already exist. The CLI reads the scenario once,
 hashes those exact bytes, parses the same bytes, and binds the hash into the journal. It writes to
@@ -124,8 +134,9 @@ production recovery log.
 
 - [Architecture](docs/architecture.md)
 - [Scenario contract](docs/scenario.md)
-- [Scenario JSON Schema](schemas/scenario.schema.json)
-- [Journal record JSON Schema](schemas/journal.schema.json)
+- [Contract v1 and conformance fixtures](contracts/v1/README.md)
+- [Scenario JSON Schema](contracts/v1/scenario.schema.json)
+- [Journal record JSON Schema](contracts/v1/journal.schema.json)
 - [Execution model](docs/execution-model.md)
 - [Persistra integration](docs/persistra.md)
 - [Contributing](CONTRIBUTING.md)

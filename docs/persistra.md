@@ -11,6 +11,7 @@ execution audit artifacts.
 
 The JSON scenario carries:
 
+- Required `contract_version` identifying the scenario and journal protocol
 - Required producer metadata preserved as JSON but ignored by execution
 - One explicit executable-instrument catalog
 - Risk, participation, and fee policies
@@ -26,18 +27,20 @@ Persistra should:
 4. Group one bar per instrument into each synchronized slice.
 5. Preserve original portfolio weights in `target_weights` instead of pre-sizing them.
 6. Populate `metadata` with dataset, policy, and build provenance.
-7. Validate the scenario through the JSON Schema and `--validate-only`.
-8. Run the CLI as a separate process and import its audit journal.
-9. Verify the same scenario SHA-256 in `run_started` and `run_completed`.
-10. Require the terminal completion record before accepting a replay.
+7. Read `--capabilities` and require support for the scenario and journal contract version.
+8. Validate the scenario through the JSON Schema and `--validate-only`.
+9. Run the CLI as a separate process and import its audit journal.
+10. Require the same contract version on every journal record.
+11. Verify the same scenario SHA-256 in `run_started` and `run_completed`.
+12. Require the terminal completion record before accepting a replay.
 
 Do not let the engine read Persistra's internal DuckDB tables. Their schema and connection
 lifecycle belong to Persistra.
 
-Use the committed [scenario](../schemas/scenario.schema.json) and
-[journal](../schemas/journal.schema.json) JSON Schemas for structural checks. The engine parser is
-authoritative for ordering, catalog coverage, causality, tick, lot, risk, and accounting
-invariants that JSON Schema cannot express.
+Use the committed v1 [scenario](../contracts/v1/scenario.schema.json) and
+[journal](../contracts/v1/journal.schema.json) JSON Schemas and their adjacent conformance fixtures
+for structural checks. The engine parser is authoritative for ordering, catalog coverage,
+causality, tick, lot, risk, and accounting invariants that JSON Schema cannot express.
 
 ## Time mapping
 

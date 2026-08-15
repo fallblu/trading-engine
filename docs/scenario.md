@@ -4,9 +4,9 @@ A replay scenario is one strict JSON object. Exact prices, weights, quantities, 
 sequences are canonical JSON strings. Counts and basis points are JSON integers. Unknown,
 missing, duplicate, noncanonical, and non-finite values fail parsing.
 
-Use [the demo](../examples/demo.json) as the canonical complete example. The
-[scenario JSON Schema](../schemas/scenario.schema.json) provides structural validation. The engine
-parser also enforces cross-field and cross-record invariants.
+Use [the v1 demo](../contracts/v1/fixtures/demo.scenario.json) as the canonical complete example.
+The [scenario JSON Schema](../contracts/v1/scenario.schema.json) provides structural validation.
+The engine parser also enforces cross-field and cross-record invariants.
 
 ```sh
 trading-engine --input scenario.json --validate-only
@@ -16,6 +16,7 @@ trading-engine --input scenario.json --validate-only
 
 | Field | Meaning |
 |---|---|
+| `contract_version` | Required string identifying this file contract; v1 is `"1"` |
 | `metadata` | Required arbitrary JSON object preserved for provenance and ignored by execution |
 | `run_id` | Stable identity used in generated IDs |
 | `base_currency` | Single cash and quote currency |
@@ -118,9 +119,10 @@ than the next slice `start_at`.
 
 ## Audit journal
 
-The [journal JSON Schema](../schemas/journal.schema.json) validates each JSON Lines record. Every
-record contains `engine_sequence`, `run_id`, `recorded_at`, `event_type`, and an event-specific
-`payload`.
+The [journal JSON Schema](../contracts/v1/journal.schema.json) validates each JSON Lines record.
+Every record contains `contract_version`, `engine_sequence`, `run_id`, `recorded_at`, `event_type`,
+and an event-specific `payload`. The version is repeated on every record so a journal remains
+self-describing when it is streamed or split.
 
 The first record is `run_started` with `scenario_sha256`. The CLI hashes the same bytes it parses.
 `market_slice_received` contains the complete normalized slice. Portfolio requests record their
