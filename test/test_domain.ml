@@ -86,7 +86,11 @@ let sha256_vectors () =
     (T.Sha256.digest_string "");
   Alcotest.(check string)
     "abc" "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
-    (T.Sha256.digest_string "abc")
+    (T.Sha256.digest_string "abc");
+  Alcotest.(check string)
+    "padding boundary"
+    "b35439a4ac6f0948b6d6f9e3c6af0f5f590ce20f1bde7090ef7970686ec6738a"
+    (T.Sha256.digest_string (String.make 56 'a'))
 
 let oms_partial_fill_and_duplicate () =
   let request = request ~quantity_value:"10" () in

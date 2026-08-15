@@ -35,7 +35,34 @@ let run_replay scenario_sha256 scenario journal =
       Fmt.pr "journal=%s@." journal;
       Ok ()
 
-let execute_scenario input journal validate_only =
+let run_stream input journal =
+  match Trading_engine.Replay.run_stream ~journal_path:journal input with
+  | Error message -> Error message
+  | Ok result ->
+      let active = count Trading_engine.Order.is_active result.orders in
+      let filled =
+        count
+          (fun order ->
+            order.Trading_engine.Order.status = Trading_engine.Order.Filled)
+          result.orders
+      in
+      let rejected =
+        count
+          (fun order ->
+            match order.Trading_engine.Order.status with
+            | Trading_engine.Order.Rejected _ -> true
+            | _ -> false)
+          result.orders
+      in
+      Fmt.pr "run=%a audits=%Ld orders=%d active=%d filled=%d rejected=%d@."
+        Trading_engine.Id.Run.pp result.run_id result.audit_count
+        (List.length result.orders)
+        active filled rejected;
+      Fmt.pr "%a@." Trading_engine.Account.pp_valuation result.valuation;
+      Fmt.pr "journal=%s@." journal;
+      Ok ()
+
+let execute_json input journal validate_only =
   Eio_main.run @@ fun _environment ->
   let document =
     try Ok (In_channel.with_open_bin input In_channel.input_all)
@@ -70,7 +97,32 @@ let execute_scenario input journal validate_only =
                 Error "--journal is required unless --validate-only is set"
             | Some path -> run_replay scenario_sha256 scenario path))
 
-let execute input journal validate_only capabilities =
+let execute_jsonl input journal validate_only =
+  if validate_only then
+    match journal with
+    | Some _ -> Error "--journal cannot be used with --validate-only"
+    | None -> (
+        match Trading_engine.Replay.run_stream input with
+        | Error message -> Error message
+        | Ok result ->
+            Fmt.pr
+              "valid run=%a instruments=%d schedule=%Ld slices=%Ld \
+               scenario_sha256=%s@."
+              Trading_engine.Id.Run.pp result.run_id result.instrument_count
+              result.schedule_count result.slice_count result.scenario_sha256;
+            Ok ())
+  else
+    match journal with
+    | None -> Error "--journal is required unless --validate-only is set"
+    | Some path -> run_stream input path
+
+type input_format = Json | Jsonl
+
+let execute_scenario input journal validate_only = function
+  | Json -> execute_json input journal validate_only
+  | Jsonl -> execute_jsonl input journal validate_only
+
+let execute input journal validate_only capabilities input_format =
   if capabilities then
     match (input, journal, validate_only) with
     | None, None, false ->
@@ -83,14 +135,17 @@ let execute input journal validate_only capabilities =
   else
     match input with
     | None -> Error "--input is required unless --capabilities is set"
-    | Some path -> execute_scenario path journal validate_only
+    | Some path -> execute_scenario path journal validate_only input_format
 
 let input =
   let doc = "Read the replay scenario from $(docv)." in
   Arg.(
-    value
-    & opt (some file) None
-    & info [ "input"; "i" ] ~docv:"SCENARIO.json" ~doc)
+    value & opt (some file) None & info [ "input"; "i" ] ~docv:"SCENARIO" ~doc)
+
+let input_format =
+  let formats = Arg.enum [ ("json", Json); ("jsonl", Jsonl) ] in
+  let doc = "Parse the scenario as $(docv)." in
+  Arg.(value & opt formats Json & info [ "input-format" ] ~docv:"FORMAT" ~doc)
 
 let journal =
   let doc = "Create the append-only JSON Lines audit journal at $(docv)." in
@@ -123,7 +178,9 @@ let command =
   Cmd.v
     (Cmd.info "trading-engine" ~version:Trading_engine.Contract.engine_version
        ~doc ~man)
-    Term.(const execute $ input $ journal $ validate_only $ capabilities)
+    Term.(
+      const execute $ input $ journal $ validate_only $ capabilities
+      $ input_format)
 
 let () =
   Fmt_tty.setup_std_outputs ();

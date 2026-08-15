@@ -12,6 +12,23 @@ type t = {
   slices : Market_slice.t list;
 }
 
+type stream_header = {
+  contract_version : string;
+  metadata : Yojson.Safe.t;
+  run_id : Id.Run.t;
+  base_currency : string;
+  initial_cash : Scalar.Money.t;
+  instruments : Instrument.t list;
+  risk : Risk.t;
+  execution : Execution.t;
+  max_internal_events : int;
+}
+
+type stream_item = {
+  market_slice : Market_slice.t;
+  intents : Strategy.intent list;
+}
+
 module Int64_set = Set.Make (Int64)
 
 let ( let* ) result function_ =
@@ -648,3 +665,81 @@ let of_string document =
 let read_file path =
   try In_channel.with_open_bin path In_channel.input_all |> of_string
   with Sys_error message -> Error ("could not read scenario: " ^ message)
+
+let stream_header_of_yojson ~contract_version json =
+  let* fields =
+    object_fields ~name:"scenario stream header payload"
+      ~expected:
+        [
+          "metadata";
+          "run_id";
+          "base_currency";
+          "initial_cash";
+          "instruments";
+          "risk";
+          "execution";
+          "max_internal_events";
+        ]
+      json
+  in
+  let scenario_json =
+    `Assoc
+      ((("contract_version", `String contract_version) :: fields)
+      @ [ ("schedule", `List []); ("slices", `List []) ])
+  in
+  let* scenario = of_yojson scenario_json in
+  Ok
+    {
+      contract_version = scenario.contract_version;
+      metadata = scenario.metadata;
+      run_id = scenario.run_id;
+      base_currency = scenario.base_currency;
+      initial_cash = scenario.initial_cash;
+      instruments = scenario.instruments;
+      risk = scenario.risk;
+      execution = scenario.execution;
+      max_internal_events = scenario.max_internal_events;
+    }
+
+let stream_item_of_yojson header ~previous json =
+  let* fields =
+    object_fields ~name:"scenario stream slice payload"
+      ~expected:[ "market_slice"; "intents" ]
+      json
+  in
+  let* slice_json = field fields "market_slice" in
+  let* market_slice = parse_slice slice_json in
+  let* intents_json = field fields "intents" in
+  let* intents_json = list ~name:"intents" intents_json in
+  let* intents = map_list parse_intent intents_json in
+  let catalog =
+    List.map (fun instrument -> instrument.Instrument.id) header.instruments
+    |> Id.Instrument.Set.of_list
+  in
+  let slices =
+    match previous with
+    | None -> [ market_slice ]
+    | Some item -> [ item.market_slice; market_slice ]
+  in
+  let* () = validate_slices catalog slices in
+  let* () =
+    List.fold_left
+      (fun result intent ->
+        let* () = result in
+        validate_portfolio_target header.risk catalog intent)
+      (Ok ()) intents
+  in
+  let* () =
+    match previous with
+    | Some item
+      when List.exists changes_orders item.intents
+           && Ptime.compare item.market_slice.received_at market_slice.start_at
+              > 0 ->
+        Error
+          (Printf.sprintf
+             "scheduled order intent after slice %Ld is received after the \
+              next executable market slice starts"
+             item.market_slice.slice_sequence)
+    | None | Some _ -> Ok ()
+  in
+  Ok { market_slice; intents }

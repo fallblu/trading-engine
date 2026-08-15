@@ -17,7 +17,7 @@ journal files, and the runtime shell.
 | `Execution` | Synchronized-slice matching, capacity allocation, and fees |
 | `Account` | Cash, positions, average cost, fees, P&L, and valuation |
 | `Engine` | Sequencing, portfolio reconciliation, and pure orchestration |
-| `Scenario`, `Replay` | Strict input contract and deterministic batch runner |
+| `Scenario`, `Scenario_stream`, `Replay` | Strict batch and bounded-memory input runners |
 | `Sha256`, `Codec`, `Journal` | Input identity, stable audit JSON, and file publication |
 
 ## Reducer phases
@@ -77,6 +77,10 @@ Determinism depends on:
 - The exact scenario-byte SHA-256 in both terminal audit records
 
 Running the same scenario bytes produces byte-identical audit lines.
+
+The JSON Lines runner hashes and validates the complete stream before journal creation. It then
+replays one slice-plus-intents record at a time and does not accumulate market slices, schedule
+maps, or audit events. A required terminal record distinguishes completion from truncation.
 
 ## Invariants
 

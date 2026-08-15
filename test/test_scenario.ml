@@ -7,6 +7,73 @@ let demo_document () =
 
 let demo () = T.Scenario.of_string (demo_document ()) |> ok
 let demo_hash () = T.Sha256.digest_string (demo_document ())
+let stream_path = "../contracts/v1/fixtures/demo.scenario.jsonl"
+
+let stream_document () =
+  In_channel.with_open_bin stream_path In_channel.input_all
+
+let stream_records () =
+  stream_document () |> String.split_on_char '\n'
+  |> List.filter (fun line -> not (String.equal line ""))
+
+let with_stream records function_ =
+  let path = Filename.temp_file "trading-engine-scenario" ".jsonl" in
+  Fun.protect
+    ~finally:(fun () -> if Sys.file_exists path then Sys.remove path)
+    (fun () ->
+      Out_channel.with_open_bin path (fun channel ->
+          output_string channel (String.concat "\n" records ^ "\n"));
+      function_ path)
+
+let add_seconds timestamp seconds =
+  Ptime.add_span timestamp (Ptime.Span.of_int_s seconds) |> Option.get
+
+let stream_record sequence record_type payload =
+  `Assoc
+    [
+      ("contract_version", `String T.Contract.version);
+      ("scenario_sequence", `String (Int64.to_string sequence));
+      ("record_type", `String record_type);
+      ("payload", payload);
+    ]
+  |> Yojson.Safe.to_string
+
+let write_large_stream path slice_count =
+  let header = List.hd (stream_records ()) in
+  let base = timestamp "2026-02-01T00:00:00Z" in
+  Out_channel.with_open_bin path (fun channel ->
+      output_string channel (header ^ "\n");
+      for index = 1 to slice_count do
+        let offset = (index - 1) * 4 in
+        let market_slice =
+          T.Market_slice.create ~slice_sequence:(Int64.of_int index)
+            ~start_at:(add_seconds base offset)
+            ~end_at:(add_seconds base (offset + 1))
+            ~available_at:(add_seconds base (offset + 2))
+            ~received_at:(add_seconds base (offset + 3))
+            ~bars:
+              [
+                bar
+                  ~instrument:(instrument_id "demo-equity-acme")
+                  (Int64.of_int index);
+              ]
+          |> ok
+        in
+        let payload =
+          `Assoc
+            [
+              ("market_slice", T.Codec.market_slice_to_yojson market_slice);
+              ("intents", `List []);
+            ]
+        in
+        stream_record (Int64.of_int (index + 1)) "market_slice" payload
+        |> fun line -> output_string channel (line ^ "\n")
+      done;
+      stream_record
+        (Int64.of_int (slice_count + 2))
+        "scenario_end"
+        (`Assoc [ ("slice_count", `String (string_of_int slice_count)) ])
+      |> fun line -> output_string channel (line ^ "\n"))
 
 let demo_contract_parses () =
   let scenario = demo () in
@@ -38,6 +105,7 @@ let schema_artifacts_parse () =
     | _ -> Alcotest.fail (path ^ " must contain a JSON object")
   in
   check_schema "../contracts/v1/scenario.schema.json";
+  check_schema "../contracts/v1/scenario-stream.schema.json";
   check_schema "../contracts/v1/journal.schema.json"
 
 let timestamp_precision_is_bounded () =
@@ -156,6 +224,15 @@ let change_field key value = function
         (List.map
            (fun (name, json) ->
              if String.equal name key then (name, value) else (name, json))
+           fields)
+  | _ -> Alcotest.fail "expected object"
+
+let map_field key change = function
+  | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (name, json) ->
+             if String.equal name key then (name, change json) else (name, json))
            fields)
   | _ -> Alcotest.fail "expected object"
 
@@ -386,6 +463,108 @@ let journal_matches_in_memory_events () =
         "partial removed" false
         (Sys.file_exists (path ^ ".partial")))
 
+let streamed_replay_matches_batch_semantics () =
+  let scenario_sha256 = T.Sha256.digest_file stream_path |> ok in
+  let expected =
+    T.Replay.run ~scenario_sha256 (demo ()) |> ok |> fun result ->
+    result.audits |> List.map T.Codec.audit_to_string |> String.concat "\n"
+    |> fun value -> value ^ "\n"
+  in
+  let journal = Filename.temp_file "trading-engine-stream" ".jsonl" in
+  Sys.remove journal;
+  Fun.protect
+    ~finally:(fun () ->
+      if Sys.file_exists journal then Sys.remove journal;
+      if Sys.file_exists (journal ^ ".partial") then
+        Sys.remove (journal ^ ".partial"))
+    (fun () ->
+      let result =
+        T.Replay.run_stream ~journal_path:journal stream_path |> ok
+      in
+      Alcotest.(check int64) "four streamed slices" 4L result.slice_count;
+      Alcotest.(check int64) "two schedule batches" 2L result.schedule_count;
+      Alcotest.(check int) "one instrument" 1 result.instrument_count;
+      Alcotest.(check int64) "twenty audits" 20L result.audit_count;
+      Alcotest.check money_testable "same equity" (money "10005.576")
+        result.valuation.equity;
+      Alcotest.(check string)
+        "stream and batch journals agree" expected
+        (In_channel.with_open_bin journal In_channel.input_all))
+
+let streamed_contract_requires_ordered_terminal_records () =
+  let records = stream_records () in
+  let truncated = List.rev records |> List.tl |> List.rev in
+  with_stream truncated (fun path ->
+      let journal =
+        Filename.temp_file "trading-engine-invalid-stream" ".jsonl"
+      in
+      Sys.remove journal;
+      Fun.protect
+        ~finally:(fun () ->
+          if Sys.file_exists journal then Sys.remove journal;
+          if Sys.file_exists (journal ^ ".partial") then
+            Sys.remove (journal ^ ".partial"))
+        (fun () ->
+          Alcotest.(check string)
+            "truncation diagnosed"
+            "scenario_end must terminate the scenario stream"
+            (T.Replay.run_stream ~journal_path:journal path |> error);
+          Alcotest.(check bool)
+            "invalid stream has no journal" false (Sys.file_exists journal);
+          Alcotest.(check bool)
+            "invalid stream has no partial journal" false
+            (Sys.file_exists (journal ^ ".partial"))));
+  let skipped =
+    List.mapi
+      (fun index line ->
+        if index = 2 then
+          Yojson.Safe.from_string line
+          |> change_field "scenario_sequence" (`String "9")
+          |> Yojson.Safe.to_string
+        else line)
+      records
+  in
+  with_stream skipped (fun path ->
+      Alcotest.(check string)
+        "sequence gap diagnosed"
+        "scenario_sequence must be contiguous and start at one"
+        (T.Replay.run_stream path |> error))
+
+let streamed_intents_are_causal_before_execution () =
+  let changed =
+    stream_records ()
+    |> List.mapi (fun index line ->
+        if index = 2 then
+          Yojson.Safe.from_string line
+          |> map_field "payload"
+               (map_field "market_slice"
+                  (change_field "start_at" (`String "2026-01-02T21:00:01Z")))
+          |> Yojson.Safe.to_string
+        else line)
+  in
+  with_stream changed (fun path ->
+      Alcotest.(check string)
+        "lookahead intent rejected"
+        "scheduled order intent after slice 1 is received after the next \
+         executable market slice starts"
+        (T.Replay.run_stream path |> error))
+
+let large_stream_replay_does_not_retain_audit_history () =
+  let slice_count = 10_000 in
+  let path = Filename.temp_file "trading-engine-large" ".jsonl" in
+  Fun.protect
+    ~finally:(fun () -> if Sys.file_exists path then Sys.remove path)
+    (fun () ->
+      write_large_stream path slice_count;
+      let result = T.Replay.run_stream path |> ok in
+      Alcotest.(check int64)
+        "all slices consumed" (Int64.of_int slice_count) result.slice_count;
+      Alcotest.(check int64)
+        "events counted without an audit list"
+        (Int64.of_int ((2 * slice_count) + 2))
+        result.audit_count;
+      Alcotest.(check int) "no orders accumulated" 0 (List.length result.orders))
+
 let tests =
   [
     Alcotest.test_case "demo contract parses" `Quick demo_contract_parses;
@@ -419,4 +598,12 @@ let tests =
       failed_replay_preserves_partial;
     Alcotest.test_case "journal matches events" `Quick
       journal_matches_in_memory_events;
+    Alcotest.test_case "stream replay matches batch semantics" `Quick
+      streamed_replay_matches_batch_semantics;
+    Alcotest.test_case "stream requires ordered terminal records" `Quick
+      streamed_contract_requires_ordered_terminal_records;
+    Alcotest.test_case "streamed intents are causal" `Quick
+      streamed_intents_are_causal_before_execution;
+    Alcotest.test_case "large stream avoids retained audit history" `Slow
+      large_stream_replay_does_not_retain_audit_history;
   ]

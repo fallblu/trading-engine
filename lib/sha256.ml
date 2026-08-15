@@ -111,24 +111,6 @@ let small_sigma1 x =
     (Int32.logxor (rotate_right x 17) (rotate_right x 19))
     (Int32.shift_right_logical x 10)
 
-let padded value =
-  let length = String.length value in
-  let with_marker = length + 1 in
-  let zeroes = (56 - (with_marker mod 64) + 64) mod 64 in
-  let result = Bytes.make (with_marker + zeroes + 8) '\000' in
-  Bytes.blit_string value 0 result 0 length;
-  Bytes.set result length (Char.chr 0x80);
-  let bit_length = Int64.mul (Int64.of_int length) 8L in
-  for index = 0 to 7 do
-    let shift = (7 - index) * 8 in
-    let byte =
-      Int64.shift_right_logical bit_length shift
-      |> Int64.logand 0xffL |> Int64.to_int
-    in
-    Bytes.set result (Bytes.length result - 8 + index) (Char.chr byte)
-  done;
-  result
-
 let word bytes offset =
   let byte index =
     Char.code (Bytes.get bytes (offset + index)) |> Int32.of_int
@@ -139,62 +121,130 @@ let word bytes offset =
        (Int32.shift_left (byte 1) 16)
        (Int32.logor (Int32.shift_left (byte 2) 8) (byte 3)))
 
-let digest_string value =
-  let bytes = padded value in
-  let hash = Array.copy initial in
-  let chunks = Bytes.length bytes / 64 in
-  for chunk = 0 to chunks - 1 do
-    let words = Array.make 64 0l in
-    for index = 0 to 15 do
-      words.(index) <- word bytes ((chunk * 64) + (index * 4))
-    done;
-    for index = 16 to 63 do
-      words.(index) <-
-        Int32.add
-          (Int32.add
-             (Int32.add words.(index - 16) (small_sigma0 words.(index - 15)))
-             words.(index - 7))
-          (small_sigma1 words.(index - 2))
-    done;
-    let a = ref hash.(0) in
-    let b = ref hash.(1) in
-    let c = ref hash.(2) in
-    let d = ref hash.(3) in
-    let e = ref hash.(4) in
-    let f = ref hash.(5) in
-    let g = ref hash.(6) in
-    let h = ref hash.(7) in
-    for index = 0 to 63 do
-      let first =
-        Int32.add
-          (Int32.add
-             (Int32.add (Int32.add !h (big_sigma1 !e)) (choose !e !f !g))
-             constants.(index))
-          words.(index)
-      in
-      let second = Int32.add (big_sigma0 !a) (majority !a !b !c) in
-      h := !g;
-      g := !f;
-      f := !e;
-      e := Int32.add !d first;
-      d := !c;
-      c := !b;
-      b := !a;
-      a := Int32.add first second
-    done;
-    hash.(0) <- Int32.add hash.(0) !a;
-    hash.(1) <- Int32.add hash.(1) !b;
-    hash.(2) <- Int32.add hash.(2) !c;
-    hash.(3) <- Int32.add hash.(3) !d;
-    hash.(4) <- Int32.add hash.(4) !e;
-    hash.(5) <- Int32.add hash.(5) !f;
-    hash.(6) <- Int32.add hash.(6) !g;
-    hash.(7) <- Int32.add hash.(7) !h
+type context = {
+  hash : int32 array;
+  block : bytes;
+  mutable block_length : int;
+  mutable total_length : int64;
+}
+
+let compress hash bytes offset =
+  let words = Array.make 64 0l in
+  for index = 0 to 15 do
+    words.(index) <- word bytes (offset + (index * 4))
   done;
+  for index = 16 to 63 do
+    words.(index) <-
+      Int32.add
+        (Int32.add
+           (Int32.add words.(index - 16) (small_sigma0 words.(index - 15)))
+           words.(index - 7))
+        (small_sigma1 words.(index - 2))
+  done;
+  let a = ref hash.(0) in
+  let b = ref hash.(1) in
+  let c = ref hash.(2) in
+  let d = ref hash.(3) in
+  let e = ref hash.(4) in
+  let f = ref hash.(5) in
+  let g = ref hash.(6) in
+  let h = ref hash.(7) in
+  for index = 0 to 63 do
+    let first =
+      Int32.add
+        (Int32.add
+           (Int32.add (Int32.add !h (big_sigma1 !e)) (choose !e !f !g))
+           constants.(index))
+        words.(index)
+    in
+    let second = Int32.add (big_sigma0 !a) (majority !a !b !c) in
+    h := !g;
+    g := !f;
+    f := !e;
+    e := Int32.add !d first;
+    d := !c;
+    c := !b;
+    b := !a;
+    a := Int32.add first second
+  done;
+  hash.(0) <- Int32.add hash.(0) !a;
+  hash.(1) <- Int32.add hash.(1) !b;
+  hash.(2) <- Int32.add hash.(2) !c;
+  hash.(3) <- Int32.add hash.(3) !d;
+  hash.(4) <- Int32.add hash.(4) !e;
+  hash.(5) <- Int32.add hash.(5) !f;
+  hash.(6) <- Int32.add hash.(6) !g;
+  hash.(7) <- Int32.add hash.(7) !h
+
+let create () =
+  {
+    hash = Array.copy initial;
+    block = Bytes.make 64 '\000';
+    block_length = 0;
+    total_length = 0L;
+  }
+
+let feed context bytes offset length =
+  context.total_length <- Int64.add context.total_length (Int64.of_int length);
+  let rec copy offset remaining =
+    if remaining > 0 then (
+      let count = min remaining (64 - context.block_length) in
+      Bytes.blit bytes offset context.block context.block_length count;
+      context.block_length <- context.block_length + count;
+      if context.block_length = 64 then (
+        compress context.hash context.block 0;
+        context.block_length <- 0);
+      copy (offset + count) (remaining - count))
+  in
+  copy offset length
+
+let finish context =
+  let bit_length = Int64.mul context.total_length 8L in
+  Bytes.set context.block context.block_length (Char.chr 0x80);
+  context.block_length <- context.block_length + 1;
+  if context.block_length > 56 then (
+    Bytes.fill context.block context.block_length
+      (64 - context.block_length)
+      '\000';
+    compress context.hash context.block 0;
+    context.block_length <- 0);
+  Bytes.fill context.block context.block_length
+    (56 - context.block_length)
+    '\000';
+  for index = 0 to 7 do
+    let shift = (7 - index) * 8 in
+    let byte =
+      Int64.shift_right_logical bit_length shift
+      |> Int64.logand 0xffL |> Int64.to_int
+    in
+    Bytes.set context.block (56 + index) (Char.chr byte)
+  done;
+  compress context.hash context.block 0;
+  context.hash
+
+let encode hash =
   Array.to_list hash |> List.map (Printf.sprintf "%08lx") |> String.concat ""
+
+let digest_string value =
+  let context = create () in
+  let bytes = Bytes.unsafe_of_string value in
+  feed context bytes 0 (Bytes.length bytes);
+  finish context |> encode
+
+let digest_channel channel =
+  let context = create () in
+  let buffer = Bytes.create (64 * 1024) in
+  let rec read () =
+    match input channel buffer 0 (Bytes.length buffer) with
+    | 0 -> finish context |> encode
+    | count ->
+        feed context buffer 0 count;
+        read ()
+  in
+  read ()
 
 let digest_file path =
   try
-    In_channel.with_open_bin path In_channel.input_all
-    |> digest_string |> Result.ok
+    In_channel.with_open_bin path (fun channel ->
+        digest_channel channel |> Result.ok)
   with Sys_error message -> Error ("could not hash scenario: " ^ message)

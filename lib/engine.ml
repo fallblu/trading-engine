@@ -81,6 +81,7 @@ module Make (Strategy_impl : Strategy.S) = struct
     Id.Instrument.Map.find_opt instrument_id state.latest_bars
 
   let strategy_state state = state.strategy_state
+  let with_strategy_state state strategy_state = { state with strategy_state }
 
   let next_sequence value =
     if Int64.equal value Int64.max_int then Error "engine sequence is exhausted"

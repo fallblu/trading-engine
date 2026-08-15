@@ -57,15 +57,9 @@ explicit engine events before adjusted histories can support share-and-cash acco
 
 ## Larger artifacts
 
-JSON is suitable for small and moderate scenarios. Larger histories can use an immutable bundle:
-
-```text
-run-bundle/
-  manifest.json
-  instruments.json
-  market-slices.parquet
-  targets.parquet
-```
-
-Keep the manifest normative, hash every artifact, and preserve the same catalog, slice, target,
-and audit semantics. A columnar reader must not couple the engine to Persistra's database tables.
+JSON is suitable for small and moderate scenarios. Use the versioned JSON Lines scenario stream
+for larger histories. It carries one static header, one slice with its causally adjacent intents
+per record, and a required terminal count. The engine validates and replays it with bounded input
+and audit memory. Persistra should retain and hash that immutable stream beside the journal and
+run manifest. The stream remains a file boundary; it does not couple the engine to Persistra's
+database tables.

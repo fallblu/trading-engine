@@ -7,6 +7,27 @@ type result = {
   audits : Audit.t list;
 }
 
+type streamed_result = {
+  run_id : Id.Run.t;
+  scenario_sha256 : string;
+  instrument_count : int;
+  schedule_count : int64;
+  account : Account.t;
+  orders : Order.t list;
+  valuation : Account.valuation;
+  audit_count : int64;
+  slice_count : int64;
+}
+
+type stream_state = {
+  run_id : Id.Run.t;
+  instrument_count : int;
+  runner : Runner.t;
+  journal : Journal.t option;
+  audit_count : int64;
+  schedule_count : int64;
+}
+
 let append_events journal events =
   match journal with
   | None -> Ok ()
@@ -17,6 +38,12 @@ let append_events journal events =
           | Error _ as error -> error
           | Ok () -> Journal.append journal event)
         (Ok ()) events
+
+let add_audit_count count events =
+  let added = Int64.of_int (List.length events) in
+  if Int64.compare count (Int64.sub Int64.max_int added) > 0 then
+    Error "audit event count is exhausted"
+  else Ok (Int64.add count added)
 
 let run ~scenario_sha256 ?journal_path scenario =
   let journal_result =
@@ -88,3 +115,116 @@ let run ~scenario_sha256 ?journal_path scenario =
                                      valuation;
                                      audits = List.rev audits_rev;
                                    })))))))
+
+let run_stream_pass ~scenario_sha256 ~journal channel =
+  Scenario_stream.fold_channel channel
+    ~init:(fun header ->
+      match Scripted_strategy.create [] with
+      | Error _ as error -> error
+      | Ok strategy_state -> (
+          match
+            Engine.config ~risk:header.Scenario.risk ~execution:header.execution
+              ~max_internal_events:header.max_internal_events
+          with
+          | Error _ as error -> error
+          | Ok config -> (
+              match
+                Runner.create ~run_id:header.run_id ~scenario_sha256 ~config
+                  ~initial_cash:header.initial_cash ~strategy_state
+              with
+              | Error _ as error -> error
+              | Ok runner ->
+                  Ok
+                    {
+                      run_id = header.run_id;
+                      instrument_count = List.length header.instruments;
+                      runner;
+                      journal;
+                      audit_count = 0L;
+                      schedule_count = 0L;
+                    })))
+    ~step:(fun state item ->
+      match
+        Scripted_strategy.create
+          [ (item.Scenario.market_slice.slice_sequence, item.intents) ]
+      with
+      | Error _ as error -> error
+      | Ok strategy_state -> (
+          let runner = Runner.with_strategy_state state.runner strategy_state in
+          match Runner.process_slice runner item.market_slice with
+          | Error _ as error -> error
+          | Ok (runner, events) -> (
+              match append_events state.journal events with
+              | Error _ as error -> error
+              | Ok () ->
+                  let schedule_count =
+                    if item.intents = [] then state.schedule_count
+                    else Int64.succ state.schedule_count
+                  in
+                  add_audit_count state.audit_count events
+                  |> Result.map (fun audit_count ->
+                      { state with runner; audit_count; schedule_count }))))
+    ~finish:(fun state ~slice_count ->
+      match Runner.complete state.runner with
+      | Error _ as error -> error
+      | Ok (runner, valuation, events) -> (
+          match append_events state.journal events with
+          | Error _ as error -> error
+          | Ok () ->
+              add_audit_count state.audit_count events
+              |> Result.map (fun audit_count ->
+                  {
+                    run_id = state.run_id;
+                    scenario_sha256;
+                    instrument_count = state.instrument_count;
+                    schedule_count = state.schedule_count;
+                    account = Runner.account runner;
+                    orders = Oms.orders (Runner.oms runner);
+                    valuation;
+                    audit_count;
+                    slice_count;
+                  })))
+
+let run_stream ?journal_path path =
+  let journal = ref None in
+  let fail result =
+    Option.iter Journal.close_preserving_partial !journal;
+    result
+  in
+  try
+    In_channel.with_open_bin path (fun channel ->
+        let scenario_sha256 = Sha256.digest_channel channel in
+        seek_in channel 0;
+        match run_stream_pass ~scenario_sha256 ~journal:None channel with
+        | Error _ as error -> error
+        | Ok validated -> (
+            seek_in channel 0;
+            let validated_sha256 = Sha256.digest_channel channel in
+            if not (String.equal scenario_sha256 validated_sha256) then
+              Error "scenario stream changed during validation"
+            else
+              match journal_path with
+              | None -> Ok validated
+              | Some path -> (
+                  match Journal.create path with
+                  | Error _ as error -> error
+                  | Ok created -> (
+                      journal := Some created;
+                      seek_in channel 0;
+                      match
+                        run_stream_pass ~scenario_sha256 ~journal:!journal
+                          channel
+                      with
+                      | Error _ as error -> fail error
+                      | Ok replayed -> (
+                          seek_in channel 0;
+                          let replayed_sha256 = Sha256.digest_channel channel in
+                          if not (String.equal scenario_sha256 replayed_sha256)
+                          then
+                            fail (Error "scenario stream changed during replay")
+                          else
+                            match Journal.commit created with
+                            | Error _ as error -> error
+                            | Ok () -> Ok replayed)))))
+  with Sys_error message ->
+    fail (Error ("could not read scenario stream: " ^ message))

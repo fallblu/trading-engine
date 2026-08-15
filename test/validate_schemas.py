@@ -10,6 +10,7 @@ from pathlib import Path
 
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError
+from referencing import Registry, Resource
 
 
 def load(path: Path) -> object:
@@ -39,17 +40,28 @@ def expect_invalid(validator: Draft202012Validator, instance: object) -> None:
 
 
 def main() -> None:
-    if len(sys.argv) != 5:
+    if len(sys.argv) != 7:
         raise SystemExit(
-            "usage: validate_schemas.py SCENARIO_SCHEMA JOURNAL_SCHEMA SCENARIO JOURNAL"
+            "usage: validate_schemas.py SCENARIO_SCHEMA STREAM_SCHEMA JOURNAL_SCHEMA "
+            "SCENARIO STREAM JOURNAL"
         )
-    scenario_schema_path, journal_schema_path, scenario_path, journal_path = map(
-        Path, sys.argv[1:]
-    )
+    (
+        scenario_schema_path,
+        stream_schema_path,
+        journal_schema_path,
+        scenario_path,
+        stream_path,
+        journal_path,
+    ) = map(Path, sys.argv[1:])
     scenario_schema = load(scenario_schema_path)
+    stream_schema = load(stream_schema_path)
     journal_schema = load(journal_schema_path)
     Draft202012Validator.check_schema(scenario_schema)
+    Draft202012Validator.check_schema(stream_schema)
     Draft202012Validator.check_schema(journal_schema)
+    registry = Registry().with_resource(
+        scenario_schema["$id"], Resource.from_contents(scenario_schema)
+    )
     scenario_validator = Draft202012Validator(
         scenario_schema,
         format_checker=Draft202012Validator.FORMAT_CHECKER,
@@ -58,9 +70,24 @@ def main() -> None:
         journal_schema,
         format_checker=Draft202012Validator.FORMAT_CHECKER,
     )
+    stream_validator = Draft202012Validator(
+        stream_schema,
+        format_checker=Draft202012Validator.FORMAT_CHECKER,
+        registry=registry,
+    )
 
     scenario = load(scenario_path)
     scenario_validator.validate(scenario)
+    stream_records = [
+        json.loads(line) for line in stream_path.read_text(encoding="utf-8").splitlines()
+    ]
+    for line_number, record in enumerate(stream_records, start=1):
+        try:
+            stream_validator.validate(record)
+        except ValidationError as error:
+            raise AssertionError(
+                f"{stream_path}:{line_number} does not satisfy the stream schema"
+            ) from error
     for line_number, line in enumerate(
         journal_path.read_text(encoding="utf-8").splitlines(), start=1
     ):
@@ -80,6 +107,15 @@ def main() -> None:
     unsupported_scenario = copy.deepcopy(scenario)
     unsupported_scenario["contract_version"] = "2"
     expect_invalid(scenario_validator, unsupported_scenario)
+    unversioned_stream_record = copy.deepcopy(stream_records[0])
+    del unversioned_stream_record["contract_version"]
+    expect_invalid(stream_validator, unversioned_stream_record)
+    unsupported_stream_record = copy.deepcopy(stream_records[1])
+    unsupported_stream_record["contract_version"] = "2"
+    expect_invalid(stream_validator, unsupported_stream_record)
+    malformed_stream_slice = copy.deepcopy(stream_records[1])
+    malformed_stream_slice["payload"]["market_slice"]["unexpected"] = True
+    expect_invalid(stream_validator, malformed_stream_slice)
     noncanonical = copy.deepcopy(scenario)
     noncanonical["initial_cash"] = "10000.0"
     expect_invalid(scenario_validator, noncanonical)

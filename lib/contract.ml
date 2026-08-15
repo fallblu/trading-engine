@@ -8,7 +8,7 @@ let capabilities_to_yojson () =
       ("engine_version", `String engine_version);
       ("scenario_contract_versions", strings [ version ]);
       ("journal_contract_versions", strings [ version ]);
-      ("scenario_formats", strings [ "json" ]);
+      ("scenario_formats", strings [ "json"; "jsonl" ]);
       ("journal_formats", strings [ "jsonl" ]);
       ("execution_models", strings [ "completed_bar_v1" ]);
     ]

@@ -44,7 +44,7 @@ scenario slices and scheduled intents
 - Cash buying power with whole-lot clipping and structured `cash_limited` records
 - Fixed and notional fees with explicit rounding
 - Average-cost accounting, realized and unrealized P&L, and equity reconciliation
-- Strict scenario parsing, JSON Schema artifacts, and stable audit JSON
+- Strict batch JSON and bounded-memory JSON Lines scenario parsing with JSON Schemas
 - Scenario SHA-256 binding in `run_started` and `run_completed`
 - Exclusive partial journal creation and atomic no-replace finalization
 - Unit, schema-conformance, scenario, golden-contract, and property tests
@@ -77,6 +77,15 @@ opam exec -- dune exec trading-engine -- \
   --journal demo.journal.jsonl
 ```
 
+For larger histories, validate and replay the equivalent stream one slice at a time:
+
+```sh
+opam exec -- dune exec trading-engine -- \
+  --input contracts/v1/fixtures/demo.scenario.jsonl \
+  --input-format jsonl \
+  --journal demo.journal.jsonl
+```
+
 Discover the executable version and machine-readable compatibility surface:
 
 ```sh
@@ -87,10 +96,12 @@ opam exec -- dune exec trading-engine -- --capabilities
 Clients must confirm that both `scenario_contract_versions` and `journal_contract_versions`
 contain the scenario's `contract_version` before starting a replay.
 
-The final and `.partial` journal paths must not already exist. The CLI reads the scenario once,
-hashes those exact bytes, parses the same bytes, and binds the hash into the journal. It writes to
-the partial path and publishes the requested path only after `run_completed` is fully written and
-the partial file is closed. An error preserves the partial artifact for diagnosis.
+The final and `.partial` journal paths must not already exist. Batch JSON hashes the same complete
+document it parses. JSON Lines input is hashed and validated in a bounded-memory pass before the
+journal is created, then replayed from the same open file and hashed again before publication. The
+CLI binds that exact-byte hash into the journal. It writes to the partial path and publishes the
+requested path only after `run_completed` is fully written and the partial file is closed. An
+error preserves the partial artifact for diagnosis.
 
 ## Execution summary
 
@@ -136,6 +147,7 @@ production recovery log.
 - [Scenario contract](docs/scenario.md)
 - [Contract v1 and conformance fixtures](contracts/v1/README.md)
 - [Scenario JSON Schema](contracts/v1/scenario.schema.json)
+- [Scenario stream record JSON Schema](contracts/v1/scenario-stream.schema.json)
 - [Journal record JSON Schema](contracts/v1/journal.schema.json)
 - [Execution model](docs/execution-model.md)
 - [Persistra integration](docs/persistra.md)

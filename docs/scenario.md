@@ -1,8 +1,8 @@
 # Scenario contract
 
-A replay scenario is one strict JSON object. Exact prices, weights, quantities, money, and
-sequences are canonical JSON strings. Counts and basis points are JSON integers. Unknown,
-missing, duplicate, noncanonical, and non-finite values fail parsing.
+A replay scenario uses either one strict JSON object or a strict JSON Lines stream. Exact prices,
+weights, quantities, money, and sequences are canonical JSON strings. Counts and basis points are
+JSON integers. Unknown, missing, duplicate, noncanonical, and non-finite values fail parsing.
 
 Use [the v1 demo](../contracts/v1/fixtures/demo.scenario.json) as the canonical complete example.
 The [scenario JSON Schema](../contracts/v1/scenario.schema.json) provides structural validation.
@@ -10,7 +10,28 @@ The engine parser also enforces cross-field and cross-record invariants.
 
 ```sh
 trading-engine --input scenario.json --validate-only
+trading-engine --input scenario.jsonl --input-format jsonl --validate-only
 ```
+
+## JSON Lines stream
+
+Use the stream for histories that should not be materialized inside the engine. The first record
+is `scenario_header` and carries the static top-level fields. Each `market_slice` record carries
+one complete slice and the intents evaluated after that slice. The final `scenario_end` record
+declares the number of slices. It is required even for an empty stream, so a truncated valid
+prefix cannot be mistaken for a complete scenario.
+
+Every record has exactly `contract_version`, `scenario_sequence`, `record_type`, and `payload`.
+The contract version is repeated, and `scenario_sequence` is contiguous from one. Intents are
+adjacent to their decision slice rather than stored in a future-looking global schedule. Before
+replay, the reader checks each intent-bearing slice against the next slice's start time while
+retaining only those two records.
+
+The [stream record JSON Schema](../contracts/v1/scenario-stream.schema.json) validates each line,
+and [the v1 stream fixture](../contracts/v1/fixtures/demo.scenario.jsonl) is the canonical example.
+The engine validates the entire stream before creating a journal. It then replays one record at a
+time without retaining prior slices, scheduled batches, or audit events. Reducer state still
+retains current account, order, target, and latest-bar state required by execution semantics.
 
 ## Top-level fields
 
@@ -124,7 +145,8 @@ Every record contains `contract_version`, `engine_sequence`, `run_id`, `recorded
 and an event-specific `payload`. The version is repeated on every record so a journal remains
 self-describing when it is streamed or split.
 
-The first record is `run_started` with `scenario_sha256`. The CLI hashes the same bytes it parses.
+The first record is `run_started` with `scenario_sha256`. The CLI hashes the exact batch document
+or stream bytes it parses.
 `market_slice_received` contains the complete normalized slice. Portfolio requests record their
 basis, original weight when applicable, computed quantity, and sizing reference price. Orders use
 `eligible_after_slice_sequence`; fills use `slice_sequence`. `cash_limited` records the execution
