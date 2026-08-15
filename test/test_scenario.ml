@@ -37,6 +37,20 @@ let schema_artifacts_parse () =
   check_schema "../schemas/scenario.schema.json";
   check_schema "../schemas/journal.schema.json"
 
+let timestamp_precision_is_bounded () =
+  Alcotest.(check bool)
+    "whole seconds accepted" true
+    (Result.is_ok (T.Codec.ptime_of_string "2026-01-02T14:30:00Z"));
+  Alcotest.(check bool)
+    "microseconds accepted" true
+    (Result.is_ok (T.Codec.ptime_of_string "2026-01-02T14:30:00.123456+00:00"));
+  match T.Codec.ptime_of_string "2026-01-02T14:30:00.1234567Z" with
+  | Ok _ -> Alcotest.fail "sub-microsecond timestamp accepted"
+  | Error message ->
+      Alcotest.(check string)
+        "precision diagnosis"
+        "RFC3339 timestamp must not exceed microsecond precision" message
+
 let map_root change =
   match Yojson.Safe.from_string (demo_document ()) with
   | `Assoc fields -> `Assoc (change fields)
@@ -333,6 +347,8 @@ let tests =
   [
     Alcotest.test_case "demo contract parses" `Quick demo_contract_parses;
     Alcotest.test_case "schema artifacts parse" `Quick schema_artifacts_parse;
+    Alcotest.test_case "timestamp precision is bounded" `Quick
+      timestamp_precision_is_bounded;
     Alcotest.test_case "unknown fields rejected" `Quick
       unknown_fields_are_rejected;
     Alcotest.test_case "duplicate fields rejected" `Quick

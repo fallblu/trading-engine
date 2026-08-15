@@ -1,9 +1,25 @@
 let ptime_to_string value = Ptime.to_rfc3339 ~frac_s:6 ~tz_offset_s:0 value
 
+let fractional_second_digits value =
+  match String.index_opt value '.' with
+  | None -> 0
+  | Some separator ->
+      let rec count index =
+        if index >= String.length value then index - separator - 1
+        else
+          match value.[index] with
+          | '0' .. '9' -> count (index + 1)
+          | _ -> index - separator - 1
+      in
+      count (separator + 1)
+
 let ptime_of_string value =
-  match Ptime.of_rfc3339 value |> Ptime.rfc3339_error_to_msg with
-  | Ok (timestamp, _, _) -> Ok timestamp
-  | Error (`Msg message) -> Error ("invalid RFC3339 timestamp: " ^ message)
+  if fractional_second_digits value > 6 then
+    Error "RFC3339 timestamp must not exceed microsecond precision"
+  else
+    match Ptime.of_rfc3339 value |> Ptime.rfc3339_error_to_msg with
+    | Ok (timestamp, _, _) -> Ok timestamp
+    | Error (`Msg message) -> Error ("invalid RFC3339 timestamp: " ^ message)
 
 let string value = `String value
 let int64 value = `String (Int64.to_string value)

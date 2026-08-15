@@ -84,6 +84,9 @@ checks run during parsing; position and outstanding-order checks run in the redu
 
 Each slice has common timing and one bar per configured instrument:
 
+Timestamps use RFC3339 and carry at most six fractional-second digits. Audit timestamps use the
+same microsecond boundary.
+
 ```json
 {
   "slice_sequence": "1",

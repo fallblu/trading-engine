@@ -77,6 +77,16 @@ def main() -> None:
     noncanonical = copy.deepcopy(scenario)
     noncanonical["initial_cash"] = "10000.0"
     expect_invalid(scenario_validator, noncanonical)
+    excessive_scenario_precision = copy.deepcopy(scenario)
+    excessive_scenario_precision["slices"][0]["start_at"] = (
+        "2026-01-02T14:30:00.1234567Z"
+    )
+    expect_invalid(scenario_validator, excessive_scenario_precision)
+    first_journal_record = json.loads(
+        journal_path.read_text(encoding="utf-8").splitlines()[0]
+    )
+    first_journal_record["recorded_at"] = "2026-01-02T14:30:00.1234567Z"
+    expect_invalid(journal_validator, first_journal_record)
     stale_intent = copy.deepcopy(scenario)
     stale_intent["schedule"][0]["intents"][0] = {
         "type": "unsupported_intent",
