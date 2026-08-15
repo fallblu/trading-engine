@@ -10,6 +10,24 @@ let demo_contract_parses () =
   Alcotest.(check int) "one instrument" 1 (List.length scenario.instruments);
   Alcotest.(check int) "four bars" 4 (List.length scenario.bars)
 
+let schema_artifacts_parse () =
+  let check_schema path =
+    match Yojson.Safe.from_file path with
+    | `Assoc fields ->
+        Alcotest.(check (option string))
+          (path ^ " draft")
+          (Some "https://json-schema.org/draft/2020-12/schema")
+          (Option.bind (List.assoc_opt "$schema" fields) (function
+            | `String value -> Some value
+            | _ -> None));
+        Alcotest.(check bool)
+          (path ^ " definitions") true
+          (List.mem_assoc "$defs" fields)
+    | _ -> Alcotest.fail (path ^ " must contain a JSON object")
+  in
+  check_schema "../schemas/scenario-v1.schema.json";
+  check_schema "../schemas/journal-v1.schema.json"
+
 let unknown_fields_are_rejected () =
   let document =
     In_channel.with_open_bin "../examples/demo.json" In_channel.input_all
@@ -79,6 +97,42 @@ let invalid_schedule_sequences_are_rejected () =
     "missing sequence diagnosed"
     "scheduled intents refer to missing bar source sequence 999" message
 
+let schedule_cannot_retroactively_change_next_open () =
+  let document =
+    In_channel.with_open_bin "../examples/demo.json" In_channel.input_all
+  in
+  let replace_start = function
+    | `Assoc fields ->
+        `Assoc
+          (List.map
+             (fun (name, json) ->
+               if String.equal name "start_at" then
+                 (name, `String "2026-01-02T21:00:00Z")
+               else (name, json))
+             fields)
+    | _ -> Alcotest.fail "bar must be an object"
+  in
+  let changed =
+    match Yojson.Safe.from_string document with
+    | `Assoc fields ->
+        `Assoc
+          (List.map
+             (fun (name, json) ->
+               if String.equal name "bars" then
+                 match json with
+                 | `List (first :: second :: rest) ->
+                     (name, `List (first :: replace_start second :: rest))
+                 | _ -> Alcotest.fail "demo must have at least two bars"
+               else (name, json))
+             fields)
+    | _ -> Alcotest.fail "demo must be an object"
+  in
+  let message = T.Scenario.of_yojson changed |> error in
+  Alcotest.(check bool)
+    "retroactive next-open change rejected" true
+    (String.starts_with
+       ~prefix:"scheduled order intent after bar 1 is received after" message)
+
 let deterministic_replay () =
   let scenario = demo () in
   let first = T.Replay.run scenario |> ok in
@@ -94,7 +148,27 @@ let deterministic_replay () =
     first.valuation.realized_pnl;
   Alcotest.check money_testable "final unrealized" (money "5.710666")
     first.valuation.unrealized_pnl;
-  Alcotest.(check int) "sixteen events" 16 (List.length first.audits)
+  Alcotest.(check int) "seventeen events" 17 (List.length first.audits)
+
+let replay_ends_with_completion_summary () =
+  let result = T.Replay.run (demo ()) |> ok in
+  let completion = List.rev result.audits |> List.hd in
+  Alcotest.(check string)
+    "terminal event" "run_completed"
+    (T.Audit.event_name completion.event);
+  Alcotest.(check string)
+    "completion time uses final receipt" "2026-01-07T21:00:02.000000Z"
+    (T.Codec.ptime_to_string completion.recorded_at);
+  match completion.event with
+  | T.Audit.Run_completed { valuation; order_counts } ->
+      Alcotest.check money_testable "summary equity" result.valuation.equity
+        valuation.equity;
+      Alcotest.(check int) "total orders" 2 order_counts.total;
+      Alcotest.(check int) "active orders" 0 order_counts.active;
+      Alcotest.(check int) "filled orders" 1 order_counts.filled;
+      Alcotest.(check int) "rejected orders" 0 order_counts.rejected;
+      Alcotest.(check int) "cancelled orders" 1 order_counts.cancelled
+  | _ -> Alcotest.fail "expected run completion payload"
 
 let replay_matches_golden_file () =
   let result = T.Replay.run (demo ()) |> ok in
@@ -142,13 +216,18 @@ let receipt_time_drives_audit_time () =
 let tests =
   [
     Alcotest.test_case "demo contract parses" `Quick demo_contract_parses;
+    Alcotest.test_case "schema artifacts parse" `Quick schema_artifacts_parse;
     Alcotest.test_case "unknown fields rejected" `Quick
       unknown_fields_are_rejected;
     Alcotest.test_case "duplicate fields rejected" `Quick
       duplicate_fields_are_rejected;
     Alcotest.test_case "invalid schedule sequences rejected" `Quick
       invalid_schedule_sequences_are_rejected;
+    Alcotest.test_case "schedule preserves next-open causality" `Quick
+      schedule_cannot_retroactively_change_next_open;
     Alcotest.test_case "deterministic replay" `Quick deterministic_replay;
+    Alcotest.test_case "terminal completion summary" `Quick
+      replay_ends_with_completion_summary;
     Alcotest.test_case "replay matches golden file" `Quick
       replay_matches_golden_file;
     Alcotest.test_case "exclusive journal creation" `Quick

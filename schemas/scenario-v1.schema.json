@@ -1,0 +1,396 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Trading Engine replay scenario version 1",
+  "description": "The strict JSON input contract parsed by Trading Engine. Cross-record ordering, catalog identity, currency, tick, lot, time, and OHLC invariants are checked by the engine after structural validation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "run_id",
+    "base_currency",
+    "initial_cash",
+    "instruments",
+    "risk",
+    "execution",
+    "max_internal_events",
+    "schedule",
+    "bars"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "run_id": {
+      "$ref": "#/$defs/identifier"
+    },
+    "base_currency": {
+      "$ref": "#/$defs/nonemptyString"
+    },
+    "initial_cash": {
+      "$ref": "#/$defs/unsignedDecimal"
+    },
+    "instruments": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/instrument"
+      }
+    },
+    "risk": {
+      "$ref": "#/$defs/risk"
+    },
+    "execution": {
+      "$ref": "#/$defs/execution"
+    },
+    "max_internal_events": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "schedule": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/scheduleItem"
+      }
+    },
+    "bars": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/bar"
+      }
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^\\S+$"
+    },
+    "nonemptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "unsignedDecimal": {
+      "type": "string",
+      "pattern": "^[0-9]+(?:[.][0-9]{1,6})?$"
+    },
+    "positiveDecimal": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/unsignedDecimal"
+        }
+      ],
+      "description": "A decimal string that the engine additionally checks is greater than zero."
+    },
+    "quantity": {
+      "type": "string",
+      "pattern": "^[0-9]+$"
+    },
+    "positiveQuantity": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/quantity"
+        }
+      ],
+      "description": "A whole-number string that the engine additionally checks is greater than zero."
+    },
+    "sequence": {
+      "type": "string",
+      "pattern": "^[0-9]+$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "instrument": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "instrument_id",
+        "symbol",
+        "quote_currency",
+        "tick_size",
+        "lot_size"
+      ],
+      "properties": {
+        "instrument_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "symbol": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "quote_currency": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "tick_size": {
+          "$ref": "#/$defs/positiveDecimal"
+        },
+        "lot_size": {
+          "$ref": "#/$defs/positiveQuantity"
+        }
+      }
+    },
+    "risk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_order_quantity",
+        "max_position"
+      ],
+      "properties": {
+        "max_order_quantity": {
+          "$ref": "#/$defs/positiveQuantity"
+        },
+        "max_position": {
+          "$ref": "#/$defs/positiveQuantity"
+        }
+      }
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "participation_bps",
+        "fixed_fee",
+        "fee_bps"
+      ],
+      "properties": {
+        "participation_bps": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "fixed_fee": {
+          "$ref": "#/$defs/unsignedDecimal"
+        },
+        "fee_bps": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        }
+      }
+    },
+    "scheduleItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "after_bar_sequence",
+        "intents"
+      ],
+      "properties": {
+        "after_bar_sequence": {
+          "$ref": "#/$defs/sequence"
+        },
+        "intents": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/intent"
+          }
+        }
+      }
+    },
+    "intent": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/targetPositionIntent"
+        },
+        {
+          "$ref": "#/$defs/marketOrderIntent"
+        },
+        {
+          "$ref": "#/$defs/limitOrderIntent"
+        },
+        {
+          "$ref": "#/$defs/cancelOrderIntent"
+        },
+        {
+          "$ref": "#/$defs/metricIntent"
+        }
+      ]
+    },
+    "targetPositionIntent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "instrument_id",
+        "quantity"
+      ],
+      "properties": {
+        "type": {
+          "const": "target_position"
+        },
+        "instrument_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "quantity": {
+          "$ref": "#/$defs/quantity"
+        }
+      }
+    },
+    "marketOrderIntent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "instrument_id",
+        "side",
+        "quantity",
+        "order_kind",
+        "limit_price"
+      ],
+      "properties": {
+        "type": {
+          "const": "submit_order"
+        },
+        "instrument_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "side": {
+          "enum": [
+            "buy",
+            "sell"
+          ]
+        },
+        "quantity": {
+          "$ref": "#/$defs/positiveQuantity"
+        },
+        "order_kind": {
+          "const": "market"
+        },
+        "limit_price": {
+          "type": "null"
+        }
+      }
+    },
+    "limitOrderIntent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "instrument_id",
+        "side",
+        "quantity",
+        "order_kind",
+        "limit_price"
+      ],
+      "properties": {
+        "type": {
+          "const": "submit_order"
+        },
+        "instrument_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "side": {
+          "enum": [
+            "buy",
+            "sell"
+          ]
+        },
+        "quantity": {
+          "$ref": "#/$defs/positiveQuantity"
+        },
+        "order_kind": {
+          "const": "limit"
+        },
+        "limit_price": {
+          "$ref": "#/$defs/positiveDecimal"
+        }
+      }
+    },
+    "cancelOrderIntent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "order_id"
+      ],
+      "properties": {
+        "type": {
+          "const": "cancel_order"
+        },
+        "order_id": {
+          "$ref": "#/$defs/identifier"
+        }
+      }
+    },
+    "metricIntent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "name",
+        "value"
+      ],
+      "properties": {
+        "type": {
+          "const": "emit_metric"
+        },
+        "name": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      }
+    },
+    "bar": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_sequence",
+        "instrument_id",
+        "start_at",
+        "end_at",
+        "available_at",
+        "received_at",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume"
+      ],
+      "properties": {
+        "source_sequence": {
+          "$ref": "#/$defs/sequence"
+        },
+        "instrument_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "start_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "end_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "available_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "received_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "open": {
+          "$ref": "#/$defs/positiveDecimal"
+        },
+        "high": {
+          "$ref": "#/$defs/positiveDecimal"
+        },
+        "low": {
+          "$ref": "#/$defs/positiveDecimal"
+        },
+        "close": {
+          "$ref": "#/$defs/positiveDecimal"
+        },
+        "volume": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/quantity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

@@ -8,5 +8,12 @@
   test_reducer
   test_scenario
   test_engine)
- (deps ../examples/demo.json fixtures/demo.journal.jsonl)
+ (deps
+  ../examples/demo.json
+  ../schemas/journal-v1.schema.json
+  ../schemas/scenario-v1.schema.json
+  fixtures/demo.journal.jsonl)
  (libraries trading_engine yojson alcotest qcheck-core qcheck-alcotest))
+
+(cram
+ (deps ../bin/main.exe ../examples/demo.json))

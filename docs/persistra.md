@@ -32,11 +32,18 @@ The current handoff is the version 1 JSON scenario. A small Persistra-side adapt
 4. Convert research target weights into scheduled target quantities under an explicit sizing
    policy.
 5. Record the scenario file hash in the Persistra research manifest.
-6. Run the OCaml CLI as a separate process.
-7. Import orders, fills, valuations, and risk decisions from the audit journal for analysis.
+6. Validate the scenario through the CLI's `--validate-only` mode.
+7. Run the OCaml CLI as a separate process.
+8. Import orders, fills, valuations, and risk decisions from the audit journal for analysis.
+9. Require the final `run_completed` record before accepting the replay as successful.
 
 Do not let the engine read Persistra's internal DuckDB tables. Their schema and connection
 lifecycle belong to Persistra.
+
+Use the committed [scenario](../schemas/scenario-v1.schema.json) and
+[journal](../schemas/journal-v1.schema.json) JSON Schemas for producer and consumer contract
+checks. Keep the engine parser authoritative for semantic invariants that JSON Schema cannot
+express.
 
 ## Time mapping
 
@@ -49,6 +56,9 @@ Preserve Persistra's temporal distinctions:
 - Persistra retrieval time remains acquisition provenance. It is not replay availability.
 - Scenario `available_at` states when a strategy may use the completed bar.
 - Scenario `received_at` states when this engine run receives it.
+- An order cannot execute from a completed bar whose `start_at` predates the order's `created_at`.
+- A scheduled target or direct order must arrive no later than the next bar start for its
+  instrument. Contiguous next-open bars require zero delivery delay.
 
 Use raw executable prices for fills. Adjusted values can feed strategy features, but splits and
 dividends need explicit engine events before adjusted histories can support share-and-cash

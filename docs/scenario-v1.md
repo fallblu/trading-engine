@@ -4,7 +4,15 @@ A replay scenario is one strict JSON object. Every exact price, quantity, money 
 sequence is a JSON string. Configuration counts and basis points are JSON integers. Unknown or
 missing fields fail parsing.
 
-Use [the demo](../examples/demo.json) as the canonical complete example.
+Use [the demo](../examples/demo.json) as the canonical complete example. The
+[scenario JSON Schema](../schemas/scenario-v1.schema.json) supports producer-side structural
+validation. The engine parser remains authoritative for cross-field and cross-record invariants.
+
+Run the parser and all replay invariants in memory without creating a journal:
+
+```sh
+trading-engine --input scenario.json --validate-only
+```
 
 ## Top-level fields
 
@@ -110,7 +118,8 @@ bar end must increase. OHLC values must satisfy their usual range relationships.
 
 ## Audit journal
 
-Each JSON Lines record has:
+The [journal JSON Schema](../schemas/journal-v1.schema.json) describes one JSON Lines record. Each
+record has:
 
 ```json
 {
@@ -125,4 +134,19 @@ Each JSON Lines record has:
 
 `engine_sequence` orders external and derived events. `recorded_at` is the current receipt time in
 replay. Generated order IDs use `<run-id>-order-<12-digit-number>`. Fill IDs use the corresponding
-`fill` form.
+`fill` form. Each order payload includes `created_at`, which equals the replay time when the order
+was accepted or rejected and constrains causal bar eligibility.
+
+For every scheduled target, submitted order, or cancellation, the engine requires the anchor
+bar's `received_at` to be no later than the affected instrument's next bar `start_at`. This keeps
+completed-bar callbacks from retroactively changing an opening execution. The parser checks this
+cross-record rule in addition to the JSON Schema.
+
+A successful replay writes exactly one `run_completed` record after all bar, strategy, order,
+fill, and valuation records. Its payload contains the final reconciled valuation and counts for
+total, active, filled, rejected, and cancelled orders. These status counts are mutually exclusive
+and sum to the total. The completion time equals the last bar's `received_at`. A valid replay with
+no bars uses the Unix epoch because it has no source receipt time.
+
+The journal writer flushes the completion line before reporting success. Treat a journal without
+that terminal record as incomplete, even if its preceding records are valid.

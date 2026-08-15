@@ -9,10 +9,18 @@ An order records the bar sequence after which it is eligible. The matcher requir
 
 ```text
 eligible_after_bar_sequence < current source_sequence
+created_at <= current bar start_at
 ```
 
 This rule prevents an order emitted in response to a completed bar from filling inside that same
-bar.
+bar or at a later bar open that predates the order. The simulator skips an overlapping bar when
+the order was created after its start because completed OHLCV data cannot establish whether an
+intrabar price occurred before or after the order.
+
+The scenario validator also requires each scheduled order-changing intent to be received by the
+start of its instrument's next bar. Without this condition, a later callback could cancel or
+replace an order after a future open occurred but before that completed bar reached the reducer.
+This is a deliberate completed-bar limitation, not an event-queue simulation.
 
 ## Market orders
 

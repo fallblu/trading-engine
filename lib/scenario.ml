@@ -306,6 +306,63 @@ let validate_schedule schedule bars =
       (fun sequences bar -> Int64_set.add bar.Bar.source_sequence sequences)
       Int64_set.empty bars
   in
+  let all_instruments =
+    List.fold_left
+      (fun instruments bar ->
+        Id.Instrument.Set.add bar.Bar.instrument_id instruments)
+      Id.Instrument.Set.empty bars
+  in
+  let bar_at sequence =
+    List.find_opt (fun bar -> Int64.equal bar.Bar.source_sequence sequence) bars
+  in
+  let next_bar sequence instrument_id =
+    let choose (current : Bar.t option) (bar : Bar.t) =
+      if
+        Id.Instrument.equal bar.Bar.instrument_id instrument_id
+        && Int64.compare bar.source_sequence sequence > 0
+      then
+        match current with
+        | None -> Some bar
+        | Some selected
+          when Int64.compare bar.source_sequence selected.Bar.source_sequence
+               < 0 ->
+            Some bar
+        | Some _ -> current
+      else current
+    in
+    List.fold_left choose None bars
+  in
+  let intent_instruments = function
+    | Strategy.Target_position { instrument_id; _ } ->
+        Id.Instrument.Set.singleton instrument_id
+    | Strategy.Submit_order request ->
+        Id.Instrument.Set.singleton request.Order.instrument_id
+    | Strategy.Cancel_order _ -> all_instruments
+    | Strategy.Emit_metric _ -> Id.Instrument.Set.empty
+  in
+  let validate_causal_start sequence anchor intents =
+    let instruments =
+      List.fold_left
+        (fun instruments intent ->
+          Id.Instrument.Set.union instruments (intent_instruments intent))
+        Id.Instrument.Set.empty intents
+    in
+    Id.Instrument.Set.fold
+      (fun instrument_id result ->
+        let* () = result in
+        match next_bar sequence instrument_id with
+        | None -> Ok ()
+        | Some bar ->
+            if Ptime.compare anchor.Bar.received_at bar.start_at <= 0 then Ok ()
+            else
+              Error
+                (Printf.sprintf
+                   "scheduled order intent after bar %Ld is received after the \
+                    next executable bar starts for instrument %s"
+                   sequence
+                   (Id.Instrument.to_string instrument_id)))
+      instruments (Ok ())
+  in
   let validate result (sequence, intents) =
     let* () = result in
     if Int64.compare sequence 0L < 0 then
@@ -314,7 +371,10 @@ let validate_schedule schedule bars =
       Error
         (Printf.sprintf
            "scheduled intents refer to missing bar source sequence %Ld" sequence)
-    else Ok ()
+    else
+      match bar_at sequence with
+      | None -> Ok ()
+      | Some anchor -> validate_causal_start sequence anchor intents
   in
   List.fold_left validate (Ok ()) schedule
 

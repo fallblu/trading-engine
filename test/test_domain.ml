@@ -119,6 +119,14 @@ let oms_rejects_overfill () =
     "overfill rejected" true
     (Result.is_error (T.Oms.apply_fill oms excessive))
 
+let oms_rejects_fill_before_order () =
+  let created_at = timestamp "2026-01-03T14:30:00Z" in
+  let oms, order = oms_with_order ~created_at (request ()) in
+  let early = fill ~executed_at:(timestamp "2026-01-03T14:29:59Z") order in
+  Alcotest.(check bool)
+    "time-travel fill rejected" true
+    (Result.is_error (T.Oms.apply_fill oms early))
+
 let risk_checks_lot_and_tick_alignment () =
   let configured = instrument ~tick_size:"0.05" ~lot_size:"10" () in
   let risk = risk ~instruments:[ configured ] () in
@@ -161,6 +169,8 @@ let tests =
     Alcotest.test_case "OMS partial and duplicate fills" `Quick
       oms_partial_fill_and_duplicate;
     Alcotest.test_case "OMS rejects overfill" `Quick oms_rejects_overfill;
+    Alcotest.test_case "OMS rejects time-travel fill" `Quick
+      oms_rejects_fill_before_order;
     Alcotest.test_case "risk lot and tick alignment" `Quick
       risk_checks_lot_and_tick_alignment;
     Alcotest.test_case "risk enforces one currency" `Quick

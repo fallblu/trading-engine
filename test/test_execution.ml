@@ -33,6 +33,48 @@ let order_waits_for_later_bar () =
   Alcotest.check order_id_testable "market expires after eligible bar" order.id
     (List.hd later.market_ioc_orders)
 
+let order_waits_for_a_bar_that_starts_after_creation () =
+  let created_at = timestamp "2026-01-02T09:35:02Z" in
+  let request = request () in
+  let oms, _ = oms_with_order ~created_at request in
+  let overlapping =
+    bar
+      ~start_at:(timestamp "2026-01-02T09:35:00Z")
+      ~end_at:(timestamp "2026-01-02T09:40:00Z")
+      ~available_at:(timestamp "2026-01-02T09:40:01Z")
+      ~received_at:(timestamp "2026-01-02T09:40:02Z")
+      2L
+  in
+  let skipped =
+    T.Execution.match_bar (execution ()) ~instrument:(instrument ()) ~oms
+      overlapping
+    |> ok
+  in
+  Alcotest.(check int)
+    "overlapping bar does not fill" 0
+    (List.length skipped.fills);
+  Alcotest.(check int)
+    "order remains live" 0
+    (List.length skipped.market_ioc_orders);
+  let causal =
+    bar
+      ~start_at:(timestamp "2026-01-02T09:40:00Z")
+      ~end_at:(timestamp "2026-01-02T09:45:00Z")
+      ~available_at:(timestamp "2026-01-02T09:45:01Z")
+      ~received_at:(timestamp "2026-01-02T09:45:02Z")
+      3L
+  in
+  let matched =
+    T.Execution.match_bar (execution ()) ~instrument:(instrument ()) ~oms causal
+    |> ok
+  in
+  match matched.fills with
+  | [ fill ] ->
+      Alcotest.(check string)
+        "fill uses causal bar open" "2026-01-02T09:40:00.000000Z"
+        (T.Codec.ptime_to_string fill.executed_at)
+  | _ -> Alcotest.fail "expected one causally eligible fill"
+
 let buy_limit_gap_and_touch () =
   let limit = T.Order.Limit (price "100") in
   let gap =
@@ -89,6 +131,7 @@ let volume_is_allocated_fifo () =
   let second_request = request ~quantity_value:"5" () in
   let oms, second =
     T.Oms.accept oms ~id:(order_id "order-second") ~accepted_sequence:2L
+      ~created_at:(timestamp "2026-01-02T21:00:02Z")
       ~eligible_after_bar_sequence:1L second_request
     |> ok
   in
@@ -119,6 +162,7 @@ let participation_cap_is_shared () =
   in
   let oms, _ =
     T.Oms.accept oms ~id:(order_id "order-b") ~accepted_sequence:2L
+      ~created_at:(timestamp "2026-01-02T21:00:02Z")
       ~eligible_after_bar_sequence:1L second_request
     |> ok
   in
@@ -168,6 +212,8 @@ let tests =
   [
     Alcotest.test_case "order waits for later bar" `Quick
       order_waits_for_later_bar;
+    Alcotest.test_case "order waits for causal bar time" `Quick
+      order_waits_for_a_bar_that_starts_after_creation;
     Alcotest.test_case "buy limit gap and touch" `Quick buy_limit_gap_and_touch;
     Alcotest.test_case "sell limit gap and touch" `Quick
       sell_limit_gap_and_touch;

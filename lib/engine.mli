@@ -23,6 +23,7 @@ module Make (Strategy_impl : Strategy.S) : sig
     t
 
   val process_bar : t -> Bar.t -> (t * Audit.t list, string) result
+  val complete : t -> (t * Account.valuation * Audit.t list, string) result
   val account : t -> Account.t
   val oms : t -> Oms.t
   val latest_bar : t -> Id.Instrument.t -> Bar.t option

@@ -32,12 +32,25 @@ let day sequence = Int64.to_int sequence + 1
 
 let bar ?(instrument = instrument_id "test-equity") ?(open_price = "100")
     ?(high_price = "120") ?(low_price = "80") ?(close_price = "105")
-    ?(volume = Some "100") sequence =
+    ?(volume = Some "100") ?start_at ?end_at ?available_at ?received_at sequence
+    =
   let day = day sequence in
-  let start_at = timestamp (Printf.sprintf "2026-01-%02dT14:30:00Z" day) in
-  let end_at = timestamp (Printf.sprintf "2026-01-%02dT21:00:00Z" day) in
-  let available_at = timestamp (Printf.sprintf "2026-01-%02dT21:00:01Z" day) in
-  let received_at = timestamp (Printf.sprintf "2026-01-%02dT21:00:02Z" day) in
+  let start_at =
+    Option.value start_at
+      ~default:(timestamp (Printf.sprintf "2026-01-%02dT14:30:00Z" day))
+  in
+  let end_at =
+    Option.value end_at
+      ~default:(timestamp (Printf.sprintf "2026-01-%02dT21:00:00Z" day))
+  in
+  let available_at =
+    Option.value available_at
+      ~default:(timestamp (Printf.sprintf "2026-01-%02dT21:00:01Z" day))
+  in
+  let received_at =
+    Option.value received_at
+      ~default:(timestamp (Printf.sprintf "2026-01-%02dT21:00:02Z" day))
+  in
   let volume = Option.map quantity volume in
   T.Bar.create ~source_sequence:sequence ~instrument_id:instrument ~start_at
     ~end_at ~available_at ~received_at ~open_price:(price open_price)
@@ -53,25 +66,26 @@ let request ?(instrument = instrument_id "test-equity") ?(side = T.Order.Buy)
   |> ok
 
 let accepted_order ?(id = "order-1") ?(accepted_sequence = 1L)
+    ?(created_at = timestamp "2026-01-02T21:00:02Z")
     ?(eligible_after_bar_sequence = 1L) request =
-  T.Order.accept ~id:(order_id id) ~accepted_sequence
+  T.Order.accept ~id:(order_id id) ~accepted_sequence ~created_at
     ~eligible_after_bar_sequence request
   |> ok
 
 let oms_with_order ?(id = "order-1") ?(accepted_sequence = 1L)
+    ?(created_at = timestamp "2026-01-02T21:00:02Z")
     ?(eligible_after_bar_sequence = 1L) request =
-  T.Oms.accept T.Oms.empty ~id:(order_id id) ~accepted_sequence
+  T.Oms.accept T.Oms.empty ~id:(order_id id) ~accepted_sequence ~created_at
     ~eligible_after_bar_sequence request
   |> ok
 
 let fill ?(id = "fill-1") ?(price_value = "100") ?(quantity_value = "1")
-    ?(fee_value = "0") ?(bar_sequence = 2L) order =
+    ?(fee_value = "0") ?(executed_at = timestamp "2026-01-03T14:30:00Z")
+    ?(bar_sequence = 2L) order =
   T.Fill.create ~id:(fill_id id) ~order_id:order.T.Order.id
     ~instrument_id:order.request.instrument_id ~side:order.request.side
     ~quantity:(quantity quantity_value) ~price:(price price_value)
-    ~fee:(money fee_value)
-    ~executed_at:(timestamp "2026-01-03T14:30:00Z")
-    ~bar_sequence
+    ~fee:(money fee_value) ~executed_at ~bar_sequence
   |> ok
 
 let execution ?(participation_bps = 10_000) ?(fixed_fee = "0") ?(fee_bps = 0) ()

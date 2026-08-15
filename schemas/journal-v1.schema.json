@@ -1,0 +1,643 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Trading Engine audit journal record version 1",
+  "description": "The schema for one JSON Lines record. A successful replay ends with exactly one run_completed record.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "engine_sequence",
+    "run_id",
+    "recorded_at",
+    "event_type",
+    "payload"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "engine_sequence": {
+      "$ref": "#/$defs/sequence"
+    },
+    "run_id": {
+      "$ref": "#/$defs/identifier"
+    },
+    "recorded_at": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "event_type": {
+      "enum": [
+        "bar_received",
+        "target_requested",
+        "order_accepted",
+        "order_rejected",
+        "order_cancelled",
+        "fill_applied",
+        "intent_rejected",
+        "metric_emitted",
+        "valuation",
+        "run_completed"
+      ]
+    },
+    "payload": {
+      "type": "object"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "bar_received"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/bar"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "target_requested"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/target"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "order_accepted"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/order"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "order_rejected"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/order"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "order_cancelled"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/cancellation"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "fill_applied"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/fill"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "intent_rejected"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/rejection"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "metric_emitted"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/metric"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "valuation"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/valuation"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "run_completed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/completion"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^\\S+$"
+    },
+    "money": {
+      "type": "string",
+      "pattern": "^-?(?:0|[1-9][0-9]*)(?:[.][0-9]{1,6})?$"
+    },
+    "nonnegativeMoney": {
+      "type": "string",
+      "pattern": "^(?:0|[1-9][0-9]*)(?:[.][0-9]{1,6})?$"
+    },
+    "price": {
+      "type": "string",
+      "pattern": "^(?:0|[1-9][0-9]*)(?:[.][0-9]{1,6})?$"
+    },
+    "quantity": {
+      "type": "string",
+      "pattern": "^(?:0|[1-9][0-9]*)$"
+    },
+    "sequence": {
+      "type": "string",
+      "pattern": "^(?:0|[1-9][0-9]*)$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "bar": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_sequence",
+        "instrument_id",
+        "start_at",
+        "end_at",
+        "available_at",
+        "received_at",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume"
+      ],
+      "properties": {
+        "source_sequence": {
+          "$ref": "#/$defs/sequence"
+        },
+        "instrument_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "start_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "end_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "available_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "received_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "open": {
+          "$ref": "#/$defs/price"
+        },
+        "high": {
+          "$ref": "#/$defs/price"
+        },
+        "low": {
+          "$ref": "#/$defs/price"
+        },
+        "close": {
+          "$ref": "#/$defs/price"
+        },
+        "volume": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/quantity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "instrument_id",
+        "quantity"
+      ],
+      "properties": {
+        "instrument_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "quantity": {
+          "$ref": "#/$defs/quantity"
+        }
+      }
+    },
+    "order": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "order_id",
+        "instrument_id",
+        "side",
+        "quantity",
+        "order_kind",
+        "limit_price",
+        "origin",
+        "created_sequence",
+        "created_at",
+        "eligible_after_bar_sequence",
+        "filled_quantity",
+        "filled_notional",
+        "status",
+        "rejection_reason"
+      ],
+      "properties": {
+        "order_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "instrument_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "side": {
+          "enum": [
+            "buy",
+            "sell"
+          ]
+        },
+        "quantity": {
+          "$ref": "#/$defs/quantity"
+        },
+        "order_kind": {
+          "enum": [
+            "market",
+            "limit"
+          ]
+        },
+        "limit_price": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/price"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "origin": {
+          "enum": [
+            "direct",
+            "target_rebalance"
+          ]
+        },
+        "created_sequence": {
+          "$ref": "#/$defs/sequence"
+        },
+        "created_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "eligible_after_bar_sequence": {
+          "$ref": "#/$defs/sequence"
+        },
+        "filled_quantity": {
+          "$ref": "#/$defs/quantity"
+        },
+        "filled_notional": {
+          "$ref": "#/$defs/nonnegativeMoney"
+        },
+        "status": {
+          "enum": [
+            "working",
+            "partially_filled",
+            "filled",
+            "cancelled",
+            "rejected"
+          ]
+        },
+        "rejection_reason": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "order_kind": {
+                "const": "market"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "limit_price": {
+                "type": "null"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "limit_price": {
+                "$ref": "#/$defs/price"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "rejected"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "rejection_reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "rejection_reason": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "cancellation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "order",
+        "reason"
+      ],
+      "properties": {
+        "order": {
+          "$ref": "#/$defs/order"
+        },
+        "reason": {
+          "enum": [
+            "strategy_requested",
+            "target_replaced",
+            "market_ioc"
+          ]
+        }
+      }
+    },
+    "fill": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fill_id",
+        "order_id",
+        "instrument_id",
+        "side",
+        "quantity",
+        "price",
+        "notional",
+        "fee",
+        "executed_at",
+        "bar_sequence"
+      ],
+      "properties": {
+        "fill_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "order_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "instrument_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "side": {
+          "enum": [
+            "buy",
+            "sell"
+          ]
+        },
+        "quantity": {
+          "$ref": "#/$defs/quantity"
+        },
+        "price": {
+          "$ref": "#/$defs/price"
+        },
+        "notional": {
+          "$ref": "#/$defs/nonnegativeMoney"
+        },
+        "fee": {
+          "$ref": "#/$defs/nonnegativeMoney"
+        },
+        "executed_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "bar_sequence": {
+          "$ref": "#/$defs/sequence"
+        }
+      }
+    },
+    "rejection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reason"
+      ],
+      "properties": {
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "value"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "value": {
+          "type": "string"
+        }
+      }
+    },
+    "valuation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cash",
+        "market_value",
+        "cost_basis",
+        "realized_pnl",
+        "unrealized_pnl",
+        "equity",
+        "total_fees"
+      ],
+      "properties": {
+        "cash": {
+          "$ref": "#/$defs/money"
+        },
+        "market_value": {
+          "$ref": "#/$defs/money"
+        },
+        "cost_basis": {
+          "$ref": "#/$defs/money"
+        },
+        "realized_pnl": {
+          "$ref": "#/$defs/money"
+        },
+        "unrealized_pnl": {
+          "$ref": "#/$defs/money"
+        },
+        "equity": {
+          "$ref": "#/$defs/money"
+        },
+        "total_fees": {
+          "$ref": "#/$defs/nonnegativeMoney"
+        }
+      }
+    },
+    "orderCounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "total",
+        "active",
+        "filled",
+        "rejected",
+        "cancelled"
+      ],
+      "properties": {
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "active": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "filled": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rejected": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cancelled": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "completion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "valuation",
+        "order_counts"
+      ],
+      "properties": {
+        "valuation": {
+          "$ref": "#/$defs/valuation"
+        },
+        "order_counts": {
+          "$ref": "#/$defs/orderCounts"
+        }
+      }
+    }
+  }
+}

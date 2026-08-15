@@ -1,5 +1,13 @@
 type cancellation_reason = Strategy_requested | Target_replaced | Market_ioc
 
+type order_counts = {
+  total : int;
+  active : int;
+  filled : int;
+  rejected : int;
+  cancelled : int;
+}
+
 type event =
   | Bar_received of Bar.t
   | Target_requested of {
@@ -13,6 +21,10 @@ type event =
   | Intent_rejected of string
   | Metric_emitted of { name : string; value : string }
   | Valuation of Account.valuation
+  | Run_completed of {
+      valuation : Account.valuation;
+      order_counts : order_counts;
+    }
 
 type t = {
   schema_version : int;
@@ -40,3 +52,4 @@ let event_name = function
   | Intent_rejected _ -> "intent_rejected"
   | Metric_emitted _ -> "metric_emitted"
   | Valuation _ -> "valuation"
+  | Run_completed _ -> "run_completed"

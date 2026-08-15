@@ -26,24 +26,26 @@ let ensure_new_id state order_id =
 let insert state order =
   { state with orders = Id.Order.Map.add order.Order.id order state.orders }
 
-let accept state ~id ~accepted_sequence ~eligible_after_bar_sequence request =
+let accept state ~id ~accepted_sequence ~created_at ~eligible_after_bar_sequence
+    request =
   match ensure_new_id state id with
   | Error _ as error -> error
   | Ok () -> (
       match
-        Order.accept ~id ~accepted_sequence ~eligible_after_bar_sequence request
+        Order.accept ~id ~accepted_sequence ~created_at
+          ~eligible_after_bar_sequence request
       with
       | Error _ as error -> error
       | Ok order -> Ok (insert state order, order))
 
-let reject state ~id ~rejected_sequence ~eligible_after_bar_sequence request
-    ~reason =
+let reject state ~id ~rejected_sequence ~created_at ~eligible_after_bar_sequence
+    request ~reason =
   match ensure_new_id state id with
   | Error _ as error -> error
   | Ok () -> (
       match
-        Order.reject ~id ~rejected_sequence ~eligible_after_bar_sequence request
-          ~reason
+        Order.reject ~id ~rejected_sequence ~created_at
+          ~eligible_after_bar_sequence request ~reason
       with
       | Error _ as error -> error
       | Ok order -> Ok (insert state order, order))
@@ -71,6 +73,8 @@ let apply_fill state fill =
           then Error "fill instrument differs from its order"
           else if order.request.side <> fill.side then
             Error "fill side differs from its order"
+          else if Ptime.compare fill.executed_at order.created_at < 0 then
+            Error "fill execution time predates its order"
           else
             match
               Order.apply_fill order ~quantity:fill.quantity

@@ -59,24 +59,20 @@ let run ?journal_path scenario =
               match List.fold_left step (Ok (initial, [])) scenario.bars with
               | Error _ as error -> finish error
               | Ok (state, audits_rev) -> (
-                  let marks =
-                    List.filter_map
-                      (fun instrument ->
-                        match
-                          Runner.latest_bar state instrument.Instrument.id
-                        with
-                        | None -> None
-                        | Some bar -> Some (instrument.id, bar.Bar.close_price))
-                      scenario.instruments
-                  in
-                  match Account.value (Runner.account state) ~marks with
+                  match Runner.complete state with
                   | Error _ as error -> finish error
-                  | Ok valuation ->
-                      finish
-                        (Ok
-                           {
-                             account = Runner.account state;
-                             orders = Oms.orders (Runner.oms state);
-                             valuation;
-                             audits = List.rev audits_rev;
-                           })))))
+                  | Ok (state, valuation, completion_events) -> (
+                      match append_events journal completion_events with
+                      | Error _ as error -> finish error
+                      | Ok () ->
+                          let audits_rev =
+                            List.rev_append completion_events audits_rev
+                          in
+                          finish
+                            (Ok
+                               {
+                                 account = Runner.account state;
+                                 orders = Oms.orders (Runner.oms state);
+                                 valuation;
+                                 audits = List.rev audits_rev;
+                               }))))))

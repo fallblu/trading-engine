@@ -26,13 +26,16 @@ For each completed bar, the engine:
 
 1. Validates the instrument, source sequence, receipt order, and per-instrument end time.
 2. Emits `bar_received`.
-3. Matches only orders accepted after an earlier bar.
+3. Matches only orders accepted after an earlier bar and no later than the executable bar start.
 4. Applies fills through the OMS and account.
 5. Cancels remaining quantities for eligible market orders.
 6. Stores the new close as the current mark.
 7. Delivers captured fill and order-update callbacks to the strategy.
 8. Delivers `Bar_closed` and processes the resulting intents in list order.
 9. Emits a reconciled valuation.
+
+After the last bar, the batch runner closes the pure reducer and emits `run_completed` with the
+final valuation and order-status counts. The reducer rejects later bars and duplicate completion.
 
 The simulator computes one deterministic venue batch from the OMS state at the start of the bar.
 Each callback receives a context captured immediately after its own transition. Strategy actions
@@ -52,7 +55,9 @@ The bar contract keeps four dimensions visible:
 - `source_sequence` provides stable source order.
 
 `engine_sequence` orders every external and derived audit event. The replay clock uses
-`received_at`. It never substitutes file retrieval time for market availability.
+`received_at`. Each order records this replay time as `created_at`. A bar that starts before the
+order is skipped, even if its source sequence is later. The replay never substitutes file
+retrieval time for market availability.
 
 The version 1 source sequence is global within a scenario. Receipt time cannot move backward.
 Each instrument's bar end must increase.
@@ -69,6 +74,7 @@ Determinism depends on:
 - Explicit fee, participation, and fill rules
 - Stable generated order and fill IDs derived from the run ID
 - Stable JSON field and event order
+- An explicit terminal completion event
 
 Running the same scenario with the same run ID produces byte-identical audit lines.
 
@@ -86,6 +92,7 @@ The implementation and tests enforce:
 - Equity equals cash plus marked position value.
 - Equity change equals realized plus unrealized P&L when there are no external cash flows.
 - Fills respect order size, bar capacity, lot size, and tick size.
+- A fill never predates its order.
 - Every configured instrument uses the engine's single base currency.
 
 ## Path to paper and live operation

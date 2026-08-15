@@ -22,6 +22,7 @@ module Make (Strategy_impl : Strategy.S) = struct
     account : Account.t;
     oms : Oms.t;
     strategy_state : Strategy_impl.state;
+    completed : bool;
   }
 
   type pending =
@@ -50,6 +51,7 @@ module Make (Strategy_impl : Strategy.S) = struct
       account = Account.create ~initial_cash;
       oms = Oms.empty;
       strategy_state;
+      completed = false;
     }
 
   let account state = state.account
@@ -143,7 +145,7 @@ module Make (Strategy_impl : Strategy.S) = struct
             | Ok () -> (
                 match
                   Oms.accept reduction.state.oms ~id
-                    ~accepted_sequence:order_sequence
+                    ~accepted_sequence:order_sequence ~created_at:reduction.now
                     ~eligible_after_bar_sequence:reduction.current_bar_sequence
                     request
                 with
@@ -164,7 +166,7 @@ module Make (Strategy_impl : Strategy.S) = struct
             | Error reason -> (
                 match
                   Oms.reject reduction.state.oms ~id
-                    ~rejected_sequence:order_sequence
+                    ~rejected_sequence:order_sequence ~created_at:reduction.now
                     ~eligible_after_bar_sequence:reduction.current_bar_sequence
                     request ~reason
                 with
@@ -359,79 +361,126 @@ module Make (Strategy_impl : Strategy.S) = struct
             | Error _ as error -> error
             | Ok reduction -> cancel_market_remainders reduction remaining))
 
-  let valuation reduction =
+  let value state =
     let marks =
-      Id.Instrument.Map.bindings reduction.state.latest_bars
+      Id.Instrument.Map.bindings state.latest_bars
       |> List.map (fun (instrument_id, bar) ->
           (instrument_id, bar.Bar.close_price))
     in
-    match Account.value reduction.state.account ~marks with
+    Account.value state.account ~marks
+
+  let valuation reduction =
+    match value reduction.state with
     | Error _ as error -> error
     | Ok valuation -> emit reduction (Audit.Valuation valuation)
 
   let process_bar state bar =
-    match validate_bar state bar with
-    | Error _ as error -> error
-    | Ok () -> (
-        let state =
-          {
-            state with
-            last_source_sequence = Some bar.Bar.source_sequence;
-            last_received_at = Some bar.received_at;
-          }
-        in
-        let reduction =
-          {
-            state;
-            now = bar.received_at;
-            current_bar_sequence = bar.source_sequence;
-            audits_rev = [];
-            pending = [];
-            processed = 0;
-          }
-        in
-        match emit reduction (Audit.Bar_received bar) with
-        | Error _ as error -> error
-        | Ok reduction -> (
-            match Risk.instrument state.config.risk bar.instrument_id with
-            | None ->
-                Error
-                  "validated bar instrument disappeared from risk configuration"
-            | Some instrument -> (
-                match
-                  Execution.match_bar state.config.execution ~instrument
-                    ~oms:state.oms bar
-                with
-                | Error _ as error -> error
-                | Ok matched -> (
-                    match apply_fills reduction bar matched.fills with
-                    | Error _ as error -> error
-                    | Ok reduction -> (
-                        match
-                          cancel_market_remainders reduction
-                            matched.market_ioc_orders
-                        with
-                        | Error _ as error -> error
-                        | Ok reduction -> (
-                            let latest_bars =
-                              Id.Instrument.Map.add bar.instrument_id bar
-                                reduction.state.latest_bars
-                            in
-                            let state = { reduction.state with latest_bars } in
-                            let reduction =
-                              enqueue { reduction with state }
-                                [
-                                  notification { reduction with state }
-                                    (Strategy.Bar_closed bar);
-                                ]
-                            in
-                            match drain reduction with
-                            | Error _ as error -> error
-                            | Ok reduction -> (
-                                match valuation reduction with
-                                | Error _ as error -> error
-                                | Ok reduction ->
-                                    Ok
-                                      ( reduction.state,
-                                        List.rev reduction.audits_rev ))))))))
+    if state.completed then Error "completed engine cannot process another bar"
+    else
+      match validate_bar state bar with
+      | Error _ as error -> error
+      | Ok () -> (
+          let state =
+            {
+              state with
+              last_source_sequence = Some bar.Bar.source_sequence;
+              last_received_at = Some bar.received_at;
+            }
+          in
+          let reduction =
+            {
+              state;
+              now = bar.received_at;
+              current_bar_sequence = bar.source_sequence;
+              audits_rev = [];
+              pending = [];
+              processed = 0;
+            }
+          in
+          match emit reduction (Audit.Bar_received bar) with
+          | Error _ as error -> error
+          | Ok reduction -> (
+              match Risk.instrument state.config.risk bar.instrument_id with
+              | None ->
+                  Error
+                    "validated bar instrument disappeared from risk \
+                     configuration"
+              | Some instrument -> (
+                  match
+                    Execution.match_bar state.config.execution ~instrument
+                      ~oms:state.oms bar
+                  with
+                  | Error _ as error -> error
+                  | Ok matched -> (
+                      match apply_fills reduction bar matched.fills with
+                      | Error _ as error -> error
+                      | Ok reduction -> (
+                          match
+                            cancel_market_remainders reduction
+                              matched.market_ioc_orders
+                          with
+                          | Error _ as error -> error
+                          | Ok reduction -> (
+                              let latest_bars =
+                                Id.Instrument.Map.add bar.instrument_id bar
+                                  reduction.state.latest_bars
+                              in
+                              let state =
+                                { reduction.state with latest_bars }
+                              in
+                              let reduction =
+                                enqueue { reduction with state }
+                                  [
+                                    notification { reduction with state }
+                                      (Strategy.Bar_closed bar);
+                                  ]
+                              in
+                              match drain reduction with
+                              | Error _ as error -> error
+                              | Ok reduction -> (
+                                  match valuation reduction with
+                                  | Error _ as error -> error
+                                  | Ok reduction ->
+                                      Ok
+                                        ( reduction.state,
+                                          List.rev reduction.audits_rev ))))))))
+
+  let order_counts orders =
+    List.fold_left
+      (fun (counts : Audit.order_counts) order ->
+        let counts = { counts with total = counts.total + 1 } in
+        match order.Order.status with
+        | Working | Partially_filled ->
+            { counts with active = counts.active + 1 }
+        | Filled -> { counts with filled = counts.filled + 1 }
+        | Rejected _ -> { counts with rejected = counts.rejected + 1 }
+        | Cancelled -> { counts with cancelled = counts.cancelled + 1 })
+      Audit.{ total = 0; active = 0; filled = 0; rejected = 0; cancelled = 0 }
+      orders
+
+  let complete state =
+    if state.completed then Error "engine run is already complete"
+    else
+      match value state with
+      | Error _ as error -> error
+      | Ok valuation -> (
+          let order_counts = Oms.orders state.oms |> order_counts in
+          let state = { state with completed = true } in
+          let reduction =
+            {
+              state;
+              now = Option.value state.last_received_at ~default:Ptime.epoch;
+              current_bar_sequence =
+                Option.value state.last_source_sequence ~default:0L;
+              audits_rev = [];
+              pending = [];
+              processed = 0;
+            }
+          in
+          match
+            emit reduction (Audit.Run_completed { valuation; order_counts })
+          with
+          | Error _ as error -> error
+          | Ok reduction ->
+              Ok (reduction.state, valuation, List.rev reduction.audits_rev))
 end

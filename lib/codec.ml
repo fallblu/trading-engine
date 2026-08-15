@@ -56,6 +56,7 @@ let order_to_yojson order =
     ((("order_id", order_id order.id) :: request_fields order.request)
     @ [
         ("created_sequence", int64 order.created_sequence);
+        ("created_at", timestamp order.created_at);
         ("eligible_after_bar_sequence", int64 order.eligible_after_bar_sequence);
         ("filled_quantity", quantity order.filled_quantity);
         ("filled_notional", money order.filled_notional);
@@ -90,6 +91,16 @@ let valuation_to_yojson valuation =
       ("total_fees", money valuation.total_fees);
     ]
 
+let order_counts_to_yojson counts =
+  `Assoc
+    [
+      ("total", `Int counts.Audit.total);
+      ("active", `Int counts.active);
+      ("filled", `Int counts.filled);
+      ("rejected", `Int counts.rejected);
+      ("cancelled", `Int counts.cancelled);
+    ]
+
 let payload_to_yojson = function
   | Audit.Bar_received bar -> bar_to_yojson bar
   | Audit.Target_requested { instrument_id = id; quantity = target } ->
@@ -108,6 +119,12 @@ let payload_to_yojson = function
   | Audit.Metric_emitted { name; value } ->
       `Assoc [ ("name", string name); ("value", string value) ]
   | Audit.Valuation valuation -> valuation_to_yojson valuation
+  | Audit.Run_completed { valuation; order_counts } ->
+      `Assoc
+        [
+          ("valuation", valuation_to_yojson valuation);
+          ("order_counts", order_counts_to_yojson order_counts);
+        ]
 
 let audit_to_yojson audit =
   `Assoc

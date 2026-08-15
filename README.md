@@ -42,7 +42,8 @@ scenario bars and scheduled intents
 - Fixed and notional fees with explicit rounding
 - Average-cost accounting, realized and unrealized P&L, and equity reconciliation
 - Idempotent fills with conflicting duplicate detection
-- Strict versioned scenario parsing and stable audit JSON
+- Strict versioned scenario parsing, JSON Schema artifacts, and stable audit JSON
+- Validation-only CLI mode and a terminal replay-completion record
 - Unit, scenario, golden-contract, and property-based tests
 
 ## Quick start
@@ -59,6 +60,14 @@ make check
 The committed `trading_engine.opam.locked` captures the verified dependency set. Omit `--locked`
 only when intentionally resolving a newer compatible set.
 
+Validate the included scenario with an in-memory dry replay that does not create a journal:
+
+```sh
+opam exec -- dune exec trading-engine -- \
+  --input examples/demo.json \
+  --validate-only
+```
+
 Run the included replay:
 
 ```sh
@@ -68,12 +77,18 @@ opam exec -- dune exec trading-engine -- \
 ```
 
 The journal path must not already exist. A successful run prints the order counts and reconciled
-final valuation.
+final valuation. Its final journal line is a deterministic `run_completed` record. A missing
+completion record means that the replay did not finish successfully.
 
 ## Execution rules
 
 An order emitted after bar sequence `n` cannot execute on bar `n`. It first becomes eligible on a
-later bar.
+later bar whose start is not earlier than the order creation time.
+
+Because the simulator consumes completed bars, a scheduled order-changing intent must be received
+no later than that instrument's next bar start. Contiguous bars therefore require zero delivery
+delay for next-open research; a positive delay is valid when a real gap remains before the next
+bar starts.
 
 - A market order fills at the next eligible bar's open. Volume can create a partial fill. Any
   remainder is cancelled after that bar.
@@ -117,6 +132,8 @@ does not call `fsync`, so it is an audit artifact rather than a production recov
 
 - [Architecture](docs/architecture.md)
 - [Scenario version 1](docs/scenario-v1.md)
+- [Scenario version 1 JSON Schema](schemas/scenario-v1.schema.json)
+- [Journal record version 1 JSON Schema](schemas/journal-v1.schema.json)
 - [Execution model](docs/execution-model.md)
 - [Persistra integration](docs/persistra.md)
 - [Contributing](CONTRIBUTING.md)

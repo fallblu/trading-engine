@@ -21,6 +21,7 @@ type t = {
   id : Id.Order.t;
   request : request;
   created_sequence : int64;
+  created_at : Ptime.t;
   eligible_after_bar_sequence : int64;
   filled_quantity : Scalar.Quantity.t;
   filled_notional : Scalar.Money.t;
@@ -32,7 +33,8 @@ let request ~instrument_id ~side ~quantity ~kind ~origin =
     Error "order quantity must be positive"
   else Ok { instrument_id; side; quantity; kind; origin }
 
-let make ~id ~sequence ~eligible_after_bar_sequence ~request ~status =
+let make ~id ~sequence ~created_at ~eligible_after_bar_sequence ~request ~status
+    =
   if Int64.compare sequence 0L < 0 then
     Error "order sequence must be nonnegative"
   else if Int64.compare eligible_after_bar_sequence 0L < 0 then
@@ -43,22 +45,25 @@ let make ~id ~sequence ~eligible_after_bar_sequence ~request ~status =
         id;
         request;
         created_sequence = sequence;
+        created_at;
         eligible_after_bar_sequence;
         filled_quantity = Scalar.Quantity.zero;
         filled_notional = Scalar.Money.zero;
         status;
       }
 
-let accept ~id ~accepted_sequence ~eligible_after_bar_sequence request =
-  make ~id ~sequence:accepted_sequence ~eligible_after_bar_sequence ~request
-    ~status:Working
+let accept ~id ~accepted_sequence ~created_at ~eligible_after_bar_sequence
+    request =
+  make ~id ~sequence:accepted_sequence ~created_at ~eligible_after_bar_sequence
+    ~request ~status:Working
 
-let reject ~id ~rejected_sequence ~eligible_after_bar_sequence request ~reason =
+let reject ~id ~rejected_sequence ~created_at ~eligible_after_bar_sequence
+    request ~reason =
   if String.length reason = 0 then
     Error "order rejection reason must not be empty"
   else
-    make ~id ~sequence:rejected_sequence ~eligible_after_bar_sequence ~request
-      ~status:(Rejected reason)
+    make ~id ~sequence:rejected_sequence ~created_at
+      ~eligible_after_bar_sequence ~request ~status:(Rejected reason)
 
 let remaining_quantity order =
   match

@@ -187,6 +187,24 @@ let exact_internal_event_limit_succeeds () =
     "one callback fits a limit of one" true
     (Result.is_ok (Runner.process_bar state (bar 1L)))
 
+let completed_run_is_terminal () =
+  let state = runner [] in
+  let state, valuation, events = Runner.complete state |> ok in
+  Alcotest.(check (list string))
+    "one completion event" [ "run_completed" ] (event_names events);
+  Alcotest.check money_testable "initial equity" (money "10000")
+    valuation.equity;
+  let completion = List.hd events in
+  Alcotest.(check string)
+    "empty replay uses epoch" "1970-01-01T00:00:00.000000Z"
+    (T.Codec.ptime_to_string completion.recorded_at);
+  Alcotest.(check bool)
+    "later bar rejected" true
+    (Result.is_error (Runner.process_bar state (bar 1L)));
+  Alcotest.(check bool)
+    "second completion rejected" true
+    (Result.is_error (Runner.complete state))
+
 module Context_strategy = struct
   type state = {
     requests : T.Order.request list;
@@ -256,6 +274,8 @@ let tests =
       internal_feedback_is_capped;
     Alcotest.test_case "exact internal event limit" `Quick
       exact_internal_event_limit_succeeds;
+    Alcotest.test_case "completed run is terminal" `Quick
+      completed_run_is_terminal;
     Alcotest.test_case "causal notification contexts" `Quick
       notification_context_is_causal;
   ]

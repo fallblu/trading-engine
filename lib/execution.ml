@@ -96,7 +96,8 @@ let match_bar state ~instrument ~oms bar =
             |> List.filter (fun order ->
                 Int64.compare order.Order.eligible_after_bar_sequence
                   bar.source_sequence
-                < 0)
+                < 0
+                && Ptime.compare order.created_at bar.start_at <= 0)
           in
           let step result order =
             match result with

@@ -1,0 +1,4 @@
+(install
+ (section share)
+ (package trading_engine)
+ (files journal-v1.schema.json scenario-v1.schema.json))
