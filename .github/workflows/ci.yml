@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: "5.5.0"
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv venv .venv-schema
+      - run: >-
+          uv pip install --python .venv-schema/bin/python
+          "jsonschema[format-nongpl]==4.26.0"
+      - run: echo "$GITHUB_WORKSPACE/.venv-schema/bin" >> "$GITHUB_PATH"
+      - run: opam install . --deps-only --with-test --locked
+      - run: make check
