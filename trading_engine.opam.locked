@@ -25,6 +25,8 @@ depends: [
   "compiler-cloning" {= "enabled"}
   "conf-gmp" {= "5"}
   "conf-pkg-config" {= "5"}
+  "cppo" {= "1.8.0" & with-doc}
+  "crunch" {= "4.1.0" & with-doc}
   "csexp" {= "1.5.2"}
   "cstruct" {= "6.2.0"}
   "domain-local-await" {= "1.0.1"}
@@ -61,6 +63,8 @@ depends: [
   "ocamlformat" {= "0.29.0" & with-test}
   "ocamlformat-lib" {= "0.29.0" & with-test}
   "ocp-indent" {= "1.9.0" & with-test}
+  "odoc" {= "3.2.1" & with-doc}
+  "odoc-parser" {= "3.2.1" & with-doc}
   "optint" {= "0.3.0"}
   "psq" {= "0.2.1"}
   "ptime" {= "1.2.0"}
@@ -73,6 +77,7 @@ depends: [
   "stdlib-shims" {= "0.3.0" & with-test}
   "thread-table" {= "1.0.0"}
   "topkg" {= "1.1.1"}
+  "tyxml" {= "4.6.0" & with-doc}
   "uring" {= "2.15.0"}
   "uucp" {= "17.0.0" & with-test}
   "uuseg" {= "17.0.0" & with-test}
@@ -84,3 +89,6 @@ build: [
   ["dune" "subst"] {dev}
   ["dune" "build" "-p" name "-j" jobs]
 ]
+license: "MIT"
+homepage: "https://github.com/fallblu/trading-engine"
+bug-reports: "https://github.com/fallblu/trading-engine/issues"

@@ -9,6 +9,8 @@ an append-only audit journal.
 maintainer: "James Mallette <jamesmallmw@gmail.com>"
 authors: ["James Mallette <jamesmallmw@gmail.com>"]
 license: "MIT"
+homepage: "https://github.com/fallblu/trading-engine"
+bug-reports: "https://github.com/fallblu/trading-engine/issues"
 build: [
   ["dune" "subst"] {dev}
   ["dune" "build" "-p" name "-j" jobs]
@@ -28,4 +30,5 @@ depends: [
   "alcotest" {with-test & >= "1.9.1" & < "2.0"}
   "qcheck-core" {with-test & >= "0.91" & < "1.0"}
   "qcheck-alcotest" {with-test & >= "0.91" & < "1.0"}
+  "odoc" {with-doc}
 ]

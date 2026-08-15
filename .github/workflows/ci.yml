@@ -12,11 +12,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: ocaml/setup-ocaml@v3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ocaml/setup-ocaml@605a7e998e76e035b82c14d618a6e1010732c4ce # v3.7.1
         with:
           ocaml-compiler: "5.5.0"
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           python-version: "3.12"
       - run: uv venv .venv-schema
@@ -31,18 +33,20 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           path: trading-engine
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           repository: fallblu/persistra
-          ref: ${{ vars.PERSISTRA_COMPAT_REF || 'develop' }}
+          ref: ${{ vars.PERSISTRA_COMPAT_REF || '6cf02d01b20ba135b966362a9a66547802e13288' }}
           path: persistra
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           python-version: "3.12"
-      - uses: ocaml/setup-ocaml@v3
+      - uses: ocaml/setup-ocaml@605a7e998e76e035b82c14d618a6e1010732c4ce # v3.7.1
         with:
           ocaml-compiler: "5.5.0"
       - working-directory: trading-engine
@@ -54,5 +58,5 @@ jobs:
       - working-directory: persistra
         env:
           PERSISTRA_TRADING_ENGINE_BINARY: ${{ github.workspace }}/trading-engine/_build/default/bin/main.exe
-          PERSISTRA_TRADING_ENGINE_CONTRACT_DIR: ${{ github.workspace }}/trading-engine/contracts/v1
+          PERSISTRA_TRADING_ENGINE_CONTRACT_DIR: ${{ github.workspace }}/trading-engine/contracts/v3
         run: uv run pytest --no-cov tests/integration/test_trading_engine.py
