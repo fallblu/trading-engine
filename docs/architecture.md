@@ -27,9 +27,11 @@ For each synchronized market slice, the engine:
 1. Validates catalog coverage, slice order, receipt order, and market time.
 2. Emits `run_started` once and then `market_slice_received`.
 3. Builds one matching batch from orders that became eligible after an earlier slice.
-4. Allocates each instrument's capacity to sells first, then buys, using FIFO within each side.
+4. Offers each instrument's remaining capacity to sells first, then buys, using FIFO within each
+   side.
 5. Applies sell fills before evaluating buy affordability.
-6. Clips buy fills to affordable lots and emits `cash_limited` when clipping occurs.
+6. Clips buy fills to affordable lots, consumes only applied capacity, and emits `cash_limited`
+   when clipping occurs.
 7. Cancels eligible market-order remainders.
 8. Stores every synchronized close as the current mark.
 9. Delivers captured fill, order, and `Market_slice_closed` callbacks.

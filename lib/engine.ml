@@ -564,6 +564,7 @@ module Make (Strategy_impl : Strategy.S) = struct
         | Order.Sell ->
             apply_fill reduction market_slice proposed proposed.quantity
               proposed.fee
+            |> Result.map (fun reduction -> (reduction, proposed.quantity))
         | Order.Buy -> (
             match
               Risk.instrument reduction.state.config.risk
@@ -599,7 +600,7 @@ module Make (Strategy_impl : Strategy.S) = struct
                     | Error _ as error -> error
                     | Ok reduction -> (
                         if Scalar.Quantity.is_zero affordable_quantity then
-                          Ok reduction
+                          Ok (reduction, affordable_quantity)
                         else
                           match
                             fill_cost reduction.state.config.execution
@@ -608,14 +609,9 @@ module Make (Strategy_impl : Strategy.S) = struct
                           | Error _ as error -> error
                           | Ok (fee, _) ->
                               apply_fill reduction market_slice proposed
-                                affordable_quantity fee)))))
-
-  let rec apply_fills reduction market_slice = function
-    | [] -> Ok reduction
-    | proposed :: remaining -> (
-        match apply_proposed_fill reduction market_slice proposed with
-        | Error _ as error -> error
-        | Ok reduction -> apply_fills reduction market_slice remaining)
+                                affordable_quantity fee
+                              |> Result.map (fun reduction ->
+                                  (reduction, affordable_quantity)))))))
 
   let rec cancel_market_remainders reduction = function
     | [] -> Ok reduction
@@ -741,56 +737,50 @@ module Make (Strategy_impl : Strategy.S) = struct
               | Error _ as error -> error
               | Ok reduction -> (
                   match
-                    Execution.match_slice state.config.execution
+                    Execution.fold_slice state.config.execution
                       ~instruments:(configured_instruments state)
-                      ~oms:state.oms market_slice
+                      ~oms:state.oms market_slice ~init:reduction
+                      ~apply:(fun reduction proposed ->
+                        apply_proposed_fill reduction market_slice proposed)
                   with
                   | Error _ as error -> error
-                  | Ok matched -> (
+                  | Ok (reduction, market_ioc_orders) -> (
                       match
-                        apply_fills reduction market_slice matched.fills
+                        cancel_market_remainders reduction market_ioc_orders
                       with
                       | Error _ as error -> error
                       | Ok reduction -> (
-                          match
-                            cancel_market_remainders reduction
-                              matched.market_ioc_orders
-                          with
+                          let latest_bars =
+                            List.fold_left
+                              (fun bars bar ->
+                                Id.Instrument.Map.add bar.Bar.instrument_id bar
+                                  bars)
+                              reduction.state.latest_bars market_slice.bars
+                          in
+                          let state = { reduction.state with latest_bars } in
+                          let reduction =
+                            enqueue { reduction with state }
+                              [
+                                notification { reduction with state }
+                                  (Strategy.Market_slice_closed market_slice);
+                              ]
+                          in
+                          match drain reduction with
                           | Error _ as error -> error
                           | Ok reduction -> (
-                              let latest_bars =
-                                List.fold_left
-                                  (fun bars bar ->
-                                    Id.Instrument.Map.add bar.Bar.instrument_id
-                                      bar bars)
-                                  reduction.state.latest_bars market_slice.bars
-                              in
-                              let state =
-                                { reduction.state with latest_bars }
-                              in
-                              let reduction =
-                                enqueue { reduction with state }
-                                  [
-                                    notification { reduction with state }
-                                      (Strategy.Market_slice_closed market_slice);
-                                  ]
-                              in
-                              match drain reduction with
+                              match reconcile_targets reduction with
                               | Error _ as error -> error
                               | Ok reduction -> (
-                                  match reconcile_targets reduction with
+                                  match drain reduction with
                                   | Error _ as error -> error
                                   | Ok reduction -> (
-                                      match drain reduction with
+                                      match valuation reduction with
                                       | Error _ as error -> error
-                                      | Ok reduction -> (
-                                          match valuation reduction with
-                                          | Error _ as error -> error
-                                          | Ok reduction ->
-                                              Ok
-                                                ( reduction.state,
-                                                  List.rev reduction.audits_rev
-                                                ))))))))))
+                                      | Ok reduction ->
+                                          Ok
+                                            ( reduction.state,
+                                              List.rev reduction.audits_rev ))))
+                          )))))
 
   let order_counts orders =
     List.fold_left

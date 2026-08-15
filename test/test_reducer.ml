@@ -216,6 +216,103 @@ let cash_limit_clips_buy_to_whole_lots () =
       Alcotest.check price_testable "actual price" (price "100") fill_price
   | _ -> Alcotest.fail "expected cash limit audit"
 
+let cash_clipping_releases_capacity_to_later_buys () =
+  let expensive =
+    T.Strategy.Submit_order
+      (request ~quantity_value:"5" ~kind:(T.Order.Limit (price "100")) ())
+  in
+  let cheaper =
+    T.Strategy.Submit_order
+      (request ~quantity_value:"5" ~kind:(T.Order.Limit (price "50")) ())
+  in
+  let state = runner ~initial_cash:"150" [ (1L, [ expensive; cheaper ]) ] in
+  let state, _ = Runner.process_slice state (market_slice 1L) |> ok in
+  let first_order, second_order =
+    match T.Oms.orders (Runner.oms state) with
+    | [ first; second ] -> (first, second)
+    | _ -> Alcotest.fail "expected two working buy orders"
+  in
+  let state, events =
+    Runner.process_slice state
+      (market_slice
+         ~bars:
+           [
+             bar ~open_price:"120" ~high_price:"120" ~low_price:"40"
+               ~close_price:"60" ~volume:(Some "5") 2L;
+           ]
+         2L)
+    |> ok
+  in
+  Alcotest.check quantity_testable "both orders receive affordable fills"
+    (quantity "2")
+    (T.Account.position_quantity (Runner.account state)
+       (instrument_id "test-equity"));
+  Alcotest.check money_testable "later cheaper fill uses remaining cash"
+    (money "0")
+    (T.Account.cash (Runner.account state));
+  let fills =
+    List.filter_map
+      (fun audit ->
+        match audit.T.Audit.event with
+        | T.Audit.Fill_applied fill -> Some fill
+        | _ -> None)
+      events
+  in
+  (match fills with
+  | [ first_fill; second_fill ] ->
+      Alcotest.check order_id_testable "expensive order remains FIFO"
+        first_order.id first_fill.order_id;
+      Alcotest.check quantity_testable "expensive order is clipped to one"
+        (quantity "1") first_fill.quantity;
+      Alcotest.check price_testable "expensive limit price" (price "100")
+        first_fill.price;
+      Alcotest.check order_id_testable
+        "cheaper order receives released capacity" second_order.id
+        second_fill.order_id;
+      Alcotest.check quantity_testable "cheaper order fills one" (quantity "1")
+        second_fill.quantity;
+      Alcotest.check price_testable "cheaper limit price" (price "50")
+        second_fill.price
+  | _ -> Alcotest.fail "expected one fill for each FIFO buy order");
+  let cash_limits =
+    List.filter_map
+      (fun audit ->
+        match audit.T.Audit.event with
+        | T.Audit.Cash_limited
+            {
+              order_id;
+              requested_quantity;
+              affordable_quantity;
+              price = fill_price;
+              _;
+            } ->
+            Some (order_id, requested_quantity, affordable_quantity, fill_price)
+        | _ -> None)
+      events
+  in
+  match cash_limits with
+  | [
+   (first_id, first_requested, first_affordable, first_price);
+   (second_id, second_requested, second_affordable, second_price);
+  ] ->
+      Alcotest.check order_id_testable "first cash limit order" first_order.id
+        first_id;
+      Alcotest.check quantity_testable "first proposal sees full capacity"
+        (quantity "5") first_requested;
+      Alcotest.check quantity_testable "first affordable quantity"
+        (quantity "1") first_affordable;
+      Alcotest.check price_testable "first cash limit price" (price "100")
+        first_price;
+      Alcotest.check order_id_testable "second cash limit order" second_order.id
+        second_id;
+      Alcotest.check quantity_testable "second proposal sees restored capacity"
+        (quantity "4") second_requested;
+      Alcotest.check quantity_testable "second affordable quantity"
+        (quantity "1") second_affordable;
+      Alcotest.check price_testable "second cash limit price" (price "50")
+        second_price
+  | _ -> Alcotest.fail "expected one cash-limit audit per buy order"
+
 let sells_fund_buys_in_the_same_slice () =
   let a = instrument ~id:"asset-a" ~symbol:"A" () in
   let b = instrument ~id:"asset-b" ~symbol:"B" () in
@@ -370,6 +467,8 @@ let tests =
       superseding_target_replaces_retry;
     Alcotest.test_case "cash limit clips buys" `Quick
       cash_limit_clips_buy_to_whole_lots;
+    Alcotest.test_case "cash clipping releases slice capacity" `Quick
+      cash_clipping_releases_capacity_to_later_buys;
     Alcotest.test_case "same-slice sells fund buys" `Quick
       sells_fund_buys_in_the_same_slice;
     Alcotest.test_case "external ordering validation" `Quick

@@ -73,8 +73,10 @@ fixed_fee + ceil(fill_notional × fee_bps / 10,000)
 Sell fills are applied before buys across the slice, making their net proceeds available to later
 buys. For each buy, the engine finds the largest whole-lot quantity whose actual-price notional
 plus fee fits current cash. It emits `cash_limited` when this is below the execution proposal. A
-zero affordable quantity produces no fill. Account transitions independently reject any fill that
-would make cash negative, including a sell whose fee exceeds cash plus proceeds.
+zero affordable quantity produces no fill. Only the quantity actually applied consumes shared
+slice capacity, so cash-clipped capacity remains available to later eligible buys for the same
+instrument. Account transitions independently reject any fill that would make cash negative,
+including a sell whose fee exceeds cash plus proceeds.
 
 Each partial fill pays its own fixed fee, so fragmentation affects total cost.
 

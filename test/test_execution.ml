@@ -216,6 +216,63 @@ let participation_cap_is_shared () =
   in
   Alcotest.check quantity_testable "25 percent of twenty" (quantity "5") total
 
+let applied_quantity_controls_shared_capacity () =
+  let first_request = request ~quantity_value:"5" () in
+  let oms, first = oms_with_order ~id:"order-first" first_request in
+  let second_request = request ~quantity_value:"5" () in
+  let oms, second =
+    T.Oms.accept oms ~id:(order_id "order-second") ~accepted_sequence:2L
+      ~created_at:(timestamp "2026-01-02T21:00:02Z")
+      ~eligible_after_slice_sequence:1L second_request
+    |> ok
+  in
+  let apply proposals proposed =
+    let applied =
+      if proposals = [] then quantity "1" else proposed.T.Execution.quantity
+    in
+    Ok ((proposed.order_id, proposed.quantity) :: proposals, applied)
+  in
+  let proposals, _ =
+    T.Execution.fold_slice (execution ())
+      ~instruments:[ instrument () ]
+      ~oms
+      (market_slice ~bars:[ bar ~volume:(Some "5") 2L ] 2L)
+      ~init:[] ~apply
+    |> ok
+  in
+  match List.rev proposals with
+  | [ (first_id, first_quantity); (second_id, second_quantity) ] ->
+      Alcotest.check order_id_testable "first order remains FIFO" first.id
+        first_id;
+      Alcotest.check quantity_testable "first sees full capacity" (quantity "5")
+        first_quantity;
+      Alcotest.check order_id_testable "second order follows" second.id
+        second_id;
+      Alcotest.check quantity_testable "second sees unused capacity"
+        (quantity "4") second_quantity
+  | _ -> Alcotest.fail "expected two capacity-aware proposals"
+
+let applied_quantity_is_validated () =
+  let oms, _ = oms_with_order (request ~quantity_value:"2" ()) in
+  let slice = market_slice ~bars:[ bar ~volume:(Some "2") 2L ] 2L in
+  let excessive =
+    T.Execution.fold_slice (execution ())
+      ~instruments:[ instrument () ]
+      ~oms slice ~init:()
+      ~apply:(fun () _ -> Ok ((), quantity "3"))
+  in
+  Alcotest.(check bool)
+    "quantity cannot exceed proposal" true
+    (Result.is_error excessive);
+  let configured = instrument ~lot_size:"2" () in
+  let misaligned =
+    T.Execution.fold_slice (execution ()) ~instruments:[ configured ] ~oms slice
+      ~init:() ~apply:(fun () _ -> Ok ((), quantity "1"))
+  in
+  Alcotest.(check bool)
+    "quantity must remain lot aligned" true
+    (Result.is_error misaligned)
+
 let fills_respect_lot_size () =
   let configured = instrument ~lot_size:"10" () in
   let oms, _ = oms_with_order (request ~quantity_value:"20" ()) in
@@ -266,6 +323,10 @@ let tests =
       sells_have_capacity_priority;
     Alcotest.test_case "participation cap shared" `Quick
       participation_cap_is_shared;
+    Alcotest.test_case "applied quantity controls shared capacity" `Quick
+      applied_quantity_controls_shared_capacity;
+    Alcotest.test_case "applied quantity validation" `Quick
+      applied_quantity_is_validated;
     Alcotest.test_case "fills respect lot size" `Quick fills_respect_lot_size;
     Alcotest.test_case "off-tick market slice rejected" `Quick
       off_tick_market_slice_is_rejected;

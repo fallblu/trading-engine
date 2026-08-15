@@ -95,7 +95,8 @@ slice whose start is not earlier than its creation time.
   order breaks ties within a side.
 - Sell fills across the slice update cash before any buy affordability check.
 - A buy proposal is clipped to the largest affordable whole-lot quantity at its actual fill price,
-  including fees. Cash never becomes negative.
+  including fees. Only the applied quantity consumes slice capacity, leaving clipped capacity for
+  later eligible same-instrument buys. Cash never becomes negative.
 - The engine emits exactly one valuation after each complete synchronized slice.
 
 Read [Execution model](docs/execution-model.md) for the full phase, price, fee, cash, and accounting

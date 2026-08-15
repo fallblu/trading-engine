@@ -25,6 +25,18 @@ val participation_bps : t -> int
 val fixed_fee : t -> Scalar.Money.t
 val fee_bps : t -> int
 
+val fold_slice :
+  t ->
+  instruments:Instrument.t list ->
+  oms:Oms.t ->
+  Market_slice.t ->
+  init:'a ->
+  apply:('a -> proposed_fill -> ('a * Scalar.Quantity.t, string) result) ->
+  ('a * Id.Order.t list, string) result
+(** Fold executable orders in sell-first/FIFO order. The callback returns the
+    quantity it actually applied; only that quantity consumes the shared
+    per-instrument slice capacity. *)
+
 val match_slice :
   t ->
   instruments:Instrument.t list ->
