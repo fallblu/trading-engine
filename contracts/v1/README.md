@@ -1,7 +1,8 @@
 # Trading Engine contract v1
 
-This directory is the authoritative process and file contract shared by Trading Engine and its
-clients.
+This frozen directory preserves the historical v1 process and file contract. The current runtime
+emits and advertises v2 only; these artifacts remain available for provenance and compatibility
+testing by older consumers.
 
 - `scenario.schema.json` validates batch replay inputs.
 - `scenario-stream.schema.json` validates each JSON Lines scenario-stream record.

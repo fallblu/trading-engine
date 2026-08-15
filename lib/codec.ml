@@ -128,6 +128,7 @@ let order_to_yojson order =
   `Assoc
     ((("order_id", order_id order.id) :: request_fields order.request)
     @ [
+        ("created_event_id", string (Id.Event.to_string order.created_event_id));
         ("created_sequence", int64 order.created_sequence);
         ("created_at", timestamp order.created_at);
         ( "eligible_after_slice_sequence",
@@ -153,6 +154,19 @@ let fill_to_yojson fill =
       ("slice_sequence", int64 fill.slice_sequence);
     ]
 
+let position_attribution_to_yojson position =
+  `Assoc
+    [
+      ("instrument_id", instrument_id position.Account.instrument_id);
+      ("quantity", quantity position.quantity);
+      ("mark", price position.mark);
+      ("market_value", money position.market_value);
+      ("cost_basis", money position.cost_basis);
+      ("realized_pnl", money position.realized_pnl);
+      ("unrealized_pnl", money position.unrealized_pnl);
+      ("total_fees", money position.total_fees);
+    ]
+
 let valuation_to_yojson valuation =
   `Assoc
     [
@@ -163,6 +177,8 @@ let valuation_to_yojson valuation =
       ("unrealized_pnl", money valuation.unrealized_pnl);
       ("equity", money valuation.equity);
       ("total_fees", money valuation.total_fees);
+      ( "positions",
+        `List (List.map position_attribution_to_yojson valuation.positions) );
     ]
 
 let order_counts_to_yojson counts =
@@ -186,8 +202,12 @@ let requested_target_to_yojson target =
     ]
 
 let payload_to_yojson = function
-  | Audit.Run_started { scenario_sha256 } ->
-      `Assoc [ ("scenario_sha256", string scenario_sha256) ]
+  | Audit.Run_started { scenario_sha256; execution_model } ->
+      `Assoc
+        [
+          ("scenario_sha256", string scenario_sha256);
+          ("execution_model", string execution_model);
+        ]
   | Audit.Market_slice_received market_slice ->
       market_slice_to_yojson market_slice
   | Audit.Target_portfolio_requested { basis; targets } ->
@@ -225,10 +245,12 @@ let payload_to_yojson = function
   | Audit.Metric_emitted { name; value } ->
       `Assoc [ ("name", string name); ("value", string value) ]
   | Audit.Valuation valuation -> valuation_to_yojson valuation
-  | Audit.Run_completed { scenario_sha256; valuation; order_counts } ->
+  | Audit.Run_completed
+      { scenario_sha256; execution_model; valuation; order_counts } ->
       `Assoc
         [
           ("scenario_sha256", string scenario_sha256);
+          ("execution_model", string execution_model);
           ("valuation", valuation_to_yojson valuation);
           ("order_counts", order_counts_to_yojson order_counts);
         ]
@@ -238,6 +260,12 @@ let audit_to_yojson audit =
     [
       ("contract_version", string audit.Audit.contract_version);
       ("engine_sequence", int64 audit.Audit.engine_sequence);
+      ("event_id", string (Id.Event.to_string audit.Audit.event_id));
+      ( "causation_ids",
+        `List
+          (List.map
+             (fun value -> string (Id.Event.to_string value))
+             audit.Audit.causation_ids) );
       ("run_id", string (Id.Run.to_string audit.run_id));
       ("recorded_at", timestamp audit.recorded_at);
       ("event_type", string (Audit.event_name audit.event));

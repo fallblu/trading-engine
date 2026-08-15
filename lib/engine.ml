@@ -1,13 +1,14 @@
 type config = {
   risk : Risk.t;
+  execution_model : Execution_model.t;
   execution : Execution.t;
   max_internal_events : int;
 }
 
-let config ~risk ~execution ~max_internal_events =
+let config ~risk ~execution_model ~execution ~max_internal_events =
   if max_internal_events <= 0 then
     Error "maximum internal events must be positive"
-  else Ok { risk; execution; max_internal_events }
+  else Ok { risk; execution_model; execution; max_internal_events }
 
 let valid_sha256 value =
   String.length value = 64
@@ -16,6 +17,11 @@ let valid_sha256 value =
        value
 
 module Make (Strategy_impl : Strategy.S) = struct
+  type desired_targets = {
+    quantities : Scalar.Quantity.t Id.Instrument.Map.t;
+    cause_id : Id.Event.t;
+  }
+
   type t = {
     run_id : Id.Run.t;
     scenario_sha256 : string;
@@ -27,7 +33,7 @@ module Make (Strategy_impl : Strategy.S) = struct
     last_slice_end : Ptime.t option;
     last_received_at : Ptime.t option;
     latest_bars : Bar.t Id.Instrument.Map.t;
-    desired_targets : Scalar.Quantity.t Id.Instrument.Map.t option;
+    desired_targets : desired_targets option;
     account : Account.t;
     oms : Oms.t;
     strategy_state : Strategy_impl.state;
@@ -36,13 +42,15 @@ module Make (Strategy_impl : Strategy.S) = struct
   }
 
   type pending =
-    | Notify of Strategy.context * Strategy.event
-    | Act of Strategy.intent
+    | Notify of Id.Event.t list * Strategy.context * Strategy.event
+    | Act of Id.Event.t list * Strategy.intent
 
   type reduction = {
     state : t;
     now : Ptime.t;
     current_slice_sequence : int64;
+    slice_event_id : Id.Event.t option;
+    causation_ids : Id.Event.t list;
     audits_rev : Audit.t list;
     pending : pending list;
     processed : int;
@@ -87,23 +95,44 @@ module Make (Strategy_impl : Strategy.S) = struct
     if Int64.equal value Int64.max_int then Error "engine sequence is exhausted"
     else Ok (Int64.succ value)
 
-  let emit reduction event =
+  let normalize_causes causes = List.sort_uniq Id.Event.compare causes
+
+  let with_causes reduction causes =
+    { reduction with causation_ids = normalize_causes causes }
+
+  let emit_with_id reduction event =
     match next_sequence reduction.state.engine_sequence with
     | Error _ as error -> error
     | Ok engine_sequence ->
+        let event_id =
+          Audit.event_id ~run_id:reduction.state.run_id ~engine_sequence
+        in
         let audit =
-          Audit.create ~engine_sequence ~run_id:reduction.state.run_id
-            ~recorded_at:reduction.now event
+          Audit.create ~engine_sequence
+            ~causation_ids:(normalize_causes reduction.causation_ids)
+            ~run_id:reduction.state.run_id ~recorded_at:reduction.now event
         in
         let state = { reduction.state with engine_sequence } in
-        Ok { reduction with state; audits_rev = audit :: reduction.audits_rev }
+        Ok
+          ( { reduction with state; audits_rev = audit :: reduction.audits_rev },
+            event_id )
+
+  let emit reduction event = emit_with_id reduction event |> Result.map fst
 
   let ensure_started reduction =
     if reduction.state.started then Ok reduction
     else
       let state = { reduction.state with started = true } in
-      emit { reduction with state }
-        (Audit.Run_started { scenario_sha256 = reduction.state.scenario_sha256 })
+      emit_with_id
+        (with_causes { reduction with state } [])
+        (Audit.Run_started
+           {
+             scenario_sha256 = reduction.state.scenario_sha256;
+             execution_model =
+               Execution_model.name reduction.state.config.execution_model;
+           })
+      |> Result.map (fun (reduction, event_id) ->
+          with_causes reduction [ event_id ])
 
   let enqueue reduction items =
     { reduction with pending = reduction.pending @ items }
@@ -116,8 +145,8 @@ module Make (Strategy_impl : Strategy.S) = struct
       ~working_orders:(Oms.active_orders state.oms)
       ~latest_bars
 
-  let notification reduction event =
-    Notify (strategy_context reduction.state reduction.now, event)
+  let notification reduction ~causation_ids event =
+    Notify (causation_ids, strategy_context reduction.state reduction.now, event)
 
   let order_id state =
     let value =
@@ -146,12 +175,15 @@ module Make (Strategy_impl : Strategy.S) = struct
     | Ok next_fill_number -> Ok { state with next_fill_number }
 
   let reject_intent reduction reason =
-    match emit reduction (Audit.Intent_rejected reason) with
+    match emit_with_id reduction (Audit.Intent_rejected reason) with
     | Error _ as error -> error
-    | Ok reduction ->
+    | Ok (reduction, event_id) ->
         Ok
           (enqueue reduction
-             [ notification reduction (Strategy.Intent_rejected reason) ])
+             [
+               notification reduction ~causation_ids:[ event_id ]
+                 (Strategy.Intent_rejected reason);
+             ])
 
   let submit_order reduction request =
     let id = order_id reduction.state in
@@ -165,6 +197,10 @@ module Make (Strategy_impl : Strategy.S) = struct
         match event_sequence_result with
         | Error _ as error -> error
         | Ok order_sequence -> (
+            let created_event_id =
+              Audit.event_id ~run_id:reduction.state.run_id
+                ~engine_sequence:order_sequence
+            in
             match
               Risk.check reduction.state.config.risk
                 ~account:reduction.state.account ~oms:reduction.state.oms
@@ -172,7 +208,7 @@ module Make (Strategy_impl : Strategy.S) = struct
             with
             | Ok () -> (
                 match
-                  Oms.accept reduction.state.oms ~id
+                  Oms.accept reduction.state.oms ~id ~created_event_id
                     ~accepted_sequence:order_sequence ~created_at:reduction.now
                     ~eligible_after_slice_sequence:
                       reduction.current_slice_sequence request
@@ -182,18 +218,21 @@ module Make (Strategy_impl : Strategy.S) = struct
                     let reduction =
                       { reduction with state = { reduction.state with oms } }
                     in
-                    match emit reduction (Audit.Order_accepted order) with
+                    match
+                      emit_with_id reduction (Audit.Order_accepted order)
+                    with
                     | Error _ as error -> error
-                    | Ok reduction ->
+                    | Ok (reduction, event_id) ->
                         Ok
                           (enqueue reduction
                              [
                                notification reduction
+                                 ~causation_ids:[ event_id ]
                                  (Strategy.Order_updated order);
                              ])))
             | Error reason -> (
                 match
-                  Oms.reject reduction.state.oms ~id
+                  Oms.reject reduction.state.oms ~id ~created_event_id
                     ~rejected_sequence:order_sequence ~created_at:reduction.now
                     ~eligible_after_slice_sequence:
                       reduction.current_slice_sequence request ~reason
@@ -203,15 +242,19 @@ module Make (Strategy_impl : Strategy.S) = struct
                     let reduction =
                       { reduction with state = { reduction.state with oms } }
                     in
-                    match emit reduction (Audit.Order_rejected order) with
+                    match
+                      emit_with_id reduction (Audit.Order_rejected order)
+                    with
                     | Error _ as error -> error
-                    | Ok reduction ->
+                    | Ok (reduction, event_id) ->
                         Ok
                           (enqueue reduction
                              [
                                notification reduction
+                                 ~causation_ids:[ event_id ]
                                  (Strategy.Order_updated order);
                                notification reduction
+                                 ~causation_ids:[ event_id ]
                                  (Strategy.Intent_rejected reason);
                              ])))))
 
@@ -221,20 +264,34 @@ module Make (Strategy_impl : Strategy.S) = struct
     | Ok (oms, order) -> (
         let reduction =
           { reduction with state = { reduction.state with oms } }
+          |> fun reduction ->
+          with_causes reduction
+            (order.Order.created_event_id :: reduction.causation_ids)
         in
-        match emit reduction (Audit.Order_cancelled { order; reason }) with
+        match
+          emit_with_id reduction (Audit.Order_cancelled { order; reason })
+        with
         | Error _ as error -> error
-        | Ok reduction ->
+        | Ok (reduction, event_id) ->
             Ok
               (enqueue reduction
-                 [ notification reduction (Strategy.Order_updated order) ]))
+                 [
+                   notification reduction ~causation_ids:[ event_id ]
+                     (Strategy.Order_updated order);
+                 ]))
 
-  let rec cancel_orders reduction ~reason = function
-    | [] -> Ok reduction
-    | order_id :: remaining -> (
-        match cancel_order reduction ~reason order_id with
-        | Error _ as error -> error
-        | Ok reduction -> cancel_orders reduction ~reason remaining)
+  let cancel_orders reduction ~reason order_ids =
+    let causation_ids = reduction.causation_ids in
+    let rec cancel reduction = function
+      | [] -> Ok (with_causes reduction causation_ids)
+      | order_id :: remaining -> (
+          match
+            cancel_order (with_causes reduction causation_ids) ~reason order_id
+          with
+          | Error _ as error -> error
+          | Ok reduction -> cancel reduction remaining)
+    in
+    cancel reduction order_ids
 
   let configured_instruments state =
     Risk.instruments state.config.risk
@@ -366,11 +423,12 @@ module Make (Strategy_impl : Strategy.S) = struct
 
   let replace_targets reduction basis desired requested =
     match
-      emit reduction
+      emit_with_id reduction
         (Audit.Target_portfolio_requested { basis; targets = requested })
     with
     | Error _ as error -> error
-    | Ok reduction -> (
+    | Ok (reduction, target_event_id) -> (
+        let reduction = with_causes reduction [ target_event_id ] in
         let target_orders =
           Oms.active_orders reduction.state.oms
           |> List.filter (fun order ->
@@ -385,7 +443,12 @@ module Make (Strategy_impl : Strategy.S) = struct
             Ok
               {
                 reduction with
-                state = { reduction.state with desired_targets = Some desired };
+                state =
+                  {
+                    reduction.state with
+                    desired_targets =
+                      Some { quantities = desired; cause_id = target_event_id };
+                  };
               })
 
   let set_quantity_targets reduction targets =
@@ -418,12 +481,14 @@ module Make (Strategy_impl : Strategy.S) = struct
         cancel_order reduction ~reason:Audit.Strategy_requested order_id
     | Strategy.Emit_metric { name; value } -> metric reduction name value
 
-  let handle_notification reduction context event =
+  let handle_notification reduction causation_ids context event =
     let strategy_state, intents =
       Strategy_impl.on_event reduction.state.strategy_state context event
     in
     let state = { reduction.state with strategy_state } in
-    let actions = List.map (fun intent -> Act intent) intents in
+    let actions =
+      List.map (fun intent -> Act (causation_ids, intent)) intents
+    in
     Ok (enqueue { reduction with state } actions)
 
   let rec drain reduction =
@@ -438,9 +503,12 @@ module Make (Strategy_impl : Strategy.S) = struct
         in
         let result =
           match item with
-          | Notify (context, event) ->
-              handle_notification reduction context event
-          | Act intent -> handle_intent reduction intent
+          | Notify (causation_ids, context, event) ->
+              handle_notification
+                (with_causes reduction causation_ids)
+                causation_ids context event
+          | Act (causation_ids, intent) ->
+              handle_intent (with_causes reduction causation_ids) intent
         in
         match result with
         | Error _ as error -> error
@@ -545,15 +613,19 @@ module Make (Strategy_impl : Strategy.S) = struct
                     | Ok account -> (
                         let state = { reduction.state with oms; account } in
                         let reduction = { reduction with state } in
-                        match emit reduction (Audit.Fill_applied fill) with
+                        match
+                          emit_with_id reduction (Audit.Fill_applied fill)
+                        with
                         | Error _ as error -> error
-                        | Ok reduction ->
+                        | Ok (reduction, event_id) ->
                             Ok
                               (enqueue reduction
                                  [
                                    notification reduction
+                                     ~causation_ids:[ event_id ]
                                      (Strategy.Fill_received fill);
                                    notification reduction
+                                     ~causation_ids:[ event_id ]
                                      (Strategy.Order_updated order);
                                  ]))))))
 
@@ -561,6 +633,13 @@ module Make (Strategy_impl : Strategy.S) = struct
     match Oms.find reduction.state.oms proposed.Execution.order_id with
     | None -> Error "execution proposal refers to an unknown order"
     | Some order -> (
+        let causes =
+          match reduction.slice_event_id with
+          | None -> [ order.Order.created_event_id ]
+          | Some slice_event_id ->
+              [ order.Order.created_event_id; slice_event_id ]
+        in
+        let reduction = with_causes reduction causes in
         match order.Order.request.side with
         | Order.Sell ->
             apply_fill reduction market_slice proposed proposed.quantity
@@ -614,20 +693,26 @@ module Make (Strategy_impl : Strategy.S) = struct
                               |> Result.map (fun reduction ->
                                   (reduction, affordable_quantity)))))))
 
-  let rec cancel_market_remainders reduction = function
-    | [] -> Ok reduction
-    | order_id :: remaining -> (
-        match Oms.find reduction.state.oms order_id with
-        | None -> Error "market IOC order disappeared during matching"
-        | Some order -> (
-            let result =
-              if Order.is_active order then
-                cancel_order reduction ~reason:Audit.Market_ioc order_id
-              else Ok reduction
-            in
-            match result with
-            | Error _ as error -> error
-            | Ok reduction -> cancel_market_remainders reduction remaining))
+  let cancel_market_remainders reduction order_ids =
+    let causation_ids = reduction.causation_ids in
+    let rec cancel reduction = function
+      | [] -> Ok (with_causes reduction causation_ids)
+      | order_id :: remaining -> (
+          match Oms.find reduction.state.oms order_id with
+          | None -> Error "market IOC order disappeared during matching"
+          | Some order -> (
+              let result =
+                if Order.is_active order then
+                  cancel_order
+                    (with_causes reduction causation_ids)
+                    ~reason:Audit.Market_ioc order_id
+                else Ok reduction
+              in
+              match result with
+              | Error _ as error -> error
+              | Ok reduction -> cancel reduction remaining))
+    in
+    cancel reduction order_ids
 
   let value state =
     let marks =
@@ -640,7 +725,9 @@ module Make (Strategy_impl : Strategy.S) = struct
   let valuation reduction =
     match value reduction.state with
     | Error _ as error -> error
-    | Ok valuation -> emit reduction (Audit.Valuation valuation)
+    | Ok valuation ->
+        let causes = Option.to_list reduction.slice_event_id in
+        emit (with_causes reduction causes) (Audit.Valuation valuation)
 
   let bounded_target_request state instrument_id target =
     let active = Oms.active_for_instrument state.oms instrument_id in
@@ -690,7 +777,7 @@ module Make (Strategy_impl : Strategy.S) = struct
     match reduction.state.desired_targets with
     | None -> Ok reduction
     | Some desired ->
-        Id.Instrument.Map.bindings desired
+        Id.Instrument.Map.bindings desired.quantities
         |> List.fold_left
              (fun result (instrument_id, target) ->
                match result with
@@ -701,7 +788,14 @@ module Make (Strategy_impl : Strategy.S) = struct
                    with
                    | Error _ as error -> error
                    | Ok None -> Ok reduction
-                   | Ok (Some request) -> submit_order reduction request))
+                   | Ok (Some request) ->
+                       let causes =
+                         match reduction.slice_event_id with
+                         | None -> [ desired.cause_id ]
+                         | Some slice_event_id ->
+                             [ desired.cause_id; slice_event_id ]
+                       in
+                       submit_order (with_causes reduction causes) request))
              (Ok reduction)
 
   let process_slice state market_slice =
@@ -724,6 +818,8 @@ module Make (Strategy_impl : Strategy.S) = struct
               state;
               now = market_slice.received_at;
               current_slice_sequence = market_slice.slice_sequence;
+              slice_event_id = None;
+              causation_ids = [];
               audits_rev = [];
               pending = [];
               processed = 0;
@@ -733,12 +829,21 @@ module Make (Strategy_impl : Strategy.S) = struct
           | Error _ as error -> error
           | Ok reduction -> (
               match
-                emit reduction (Audit.Market_slice_received market_slice)
+                emit_with_id (with_causes reduction [])
+                  (Audit.Market_slice_received market_slice)
               with
               | Error _ as error -> error
-              | Ok reduction -> (
+              | Ok (reduction, slice_event_id) -> (
+                  let reduction =
+                    {
+                      reduction with
+                      slice_event_id = Some slice_event_id;
+                      causation_ids = [ slice_event_id ];
+                    }
+                  in
                   match
-                    Execution.fold_slice state.config.execution
+                    Execution_model.fold_slice state.config.execution_model
+                      state.config.execution
                       ~instruments:(configured_instruments state)
                       ~oms:state.oms market_slice ~init:reduction
                       ~apply:(fun reduction proposed ->
@@ -746,6 +851,9 @@ module Make (Strategy_impl : Strategy.S) = struct
                   with
                   | Error _ as error -> error
                   | Ok (reduction, market_ioc_orders) -> (
+                      let reduction =
+                        with_causes reduction [ slice_event_id ]
+                      in
                       match
                         cancel_market_remainders reduction market_ioc_orders
                       with
@@ -763,6 +871,7 @@ module Make (Strategy_impl : Strategy.S) = struct
                             enqueue { reduction with state }
                               [
                                 notification { reduction with state }
+                                  ~causation_ids:[ slice_event_id ]
                                   (Strategy.Market_slice_closed market_slice);
                               ]
                           in
@@ -804,12 +913,22 @@ module Make (Strategy_impl : Strategy.S) = struct
       | Ok valuation -> (
           let order_counts = Oms.orders state.oms |> order_counts in
           let state = { state with completed = true } in
+          let causation_ids =
+            if Int64.equal state.engine_sequence 0L then []
+            else
+              [
+                Audit.event_id ~run_id:state.run_id
+                  ~engine_sequence:state.engine_sequence;
+              ]
+          in
           let reduction =
             {
               state;
               now = Option.value state.last_received_at ~default:Ptime.epoch;
               current_slice_sequence =
                 Option.value state.last_slice_sequence ~default:0L;
+              slice_event_id = None;
+              causation_ids;
               audits_rev = [];
               pending = [];
               processed = 0;
@@ -823,6 +942,8 @@ module Make (Strategy_impl : Strategy.S) = struct
                   (Audit.Run_completed
                      {
                        scenario_sha256 = state.scenario_sha256;
+                       execution_model =
+                         Execution_model.name state.config.execution_model;
                        valuation;
                        order_counts;
                      })

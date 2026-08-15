@@ -20,6 +20,7 @@ type status =
 type t = {
   id : Id.Order.t;
   request : request;
+  created_event_id : Id.Event.t;
   created_sequence : int64;
   created_at : Ptime.t;
   eligible_after_slice_sequence : int64;
@@ -33,8 +34,8 @@ let request ~instrument_id ~side ~quantity ~kind ~origin =
     Error "order quantity must be positive"
   else Ok { instrument_id; side; quantity; kind; origin }
 
-let make ~id ~sequence ~created_at ~eligible_after_slice_sequence ~request
-    ~status =
+let make ~id ~created_event_id ~sequence ~created_at
+    ~eligible_after_slice_sequence ~request ~status =
   if Int64.compare sequence 0L < 0 then
     Error "order sequence must be nonnegative"
   else if Int64.compare eligible_after_slice_sequence 0L < 0 then
@@ -44,6 +45,7 @@ let make ~id ~sequence ~created_at ~eligible_after_slice_sequence ~request
       {
         id;
         request;
+        created_event_id;
         created_sequence = sequence;
         created_at;
         eligible_after_slice_sequence;
@@ -52,17 +54,17 @@ let make ~id ~sequence ~created_at ~eligible_after_slice_sequence ~request
         status;
       }
 
-let accept ~id ~accepted_sequence ~created_at ~eligible_after_slice_sequence
-    request =
-  make ~id ~sequence:accepted_sequence ~created_at
+let accept ~id ~created_event_id ~accepted_sequence ~created_at
+    ~eligible_after_slice_sequence request =
+  make ~id ~created_event_id ~sequence:accepted_sequence ~created_at
     ~eligible_after_slice_sequence ~request ~status:Working
 
-let reject ~id ~rejected_sequence ~created_at ~eligible_after_slice_sequence
-    request ~reason =
+let reject ~id ~created_event_id ~rejected_sequence ~created_at
+    ~eligible_after_slice_sequence request ~reason =
   if String.length reason = 0 then
     Error "order rejection reason must not be empty"
   else
-    make ~id ~sequence:rejected_sequence ~created_at
+    make ~id ~created_event_id ~sequence:rejected_sequence ~created_at
       ~eligible_after_slice_sequence ~request ~status:(Rejected reason)
 
 let remaining_quantity order =

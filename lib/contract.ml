@@ -1,4 +1,4 @@
-let version = "1"
+let version = "2"
 let engine_version = "0.1.0-dev"
 let strings values = `List (List.map (fun value -> `String value) values)
 
@@ -10,7 +10,7 @@ let capabilities_to_yojson () =
       ("journal_contract_versions", strings [ version ]);
       ("scenario_formats", strings [ "json"; "jsonl" ]);
       ("journal_formats", strings [ "jsonl" ]);
-      ("execution_models", strings [ "completed_bar_v1" ]);
+      ("execution_models", strings Execution_model.supported);
     ]
 
 let capabilities_to_string () =

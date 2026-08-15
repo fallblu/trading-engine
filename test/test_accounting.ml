@@ -31,6 +31,15 @@ let exact_cost_basis_and_pnl () =
   Alcotest.check money_testable "open equity" (money "10099") marked.equity;
   Alcotest.check money_testable "open unrealized" (money "99")
     marked.unrealized_pnl;
+  (match marked.positions with
+  | [ attribution ] ->
+      Alcotest.check quantity_testable "attributed open quantity"
+        (quantity "10") attribution.quantity;
+      Alcotest.check money_testable "attributed open basis" (money "1001")
+        attribution.cost_basis;
+      Alcotest.check money_testable "attributed buy fee" (money "1")
+        attribution.total_fees
+  | _ -> Alcotest.fail "expected one attributed position");
   let account =
     apply_trade account ~id:"sell-one" ~side:T.Order.Sell ~quantity_value:"4"
       ~price_value:"120" ~fee_value:"0.5"
@@ -55,7 +64,26 @@ let exact_cost_basis_and_pnl () =
   Alcotest.check money_testable "all fees" (money "2")
     (T.Account.total_fees account);
   Alcotest.check quantity_testable "position closed" T.Scalar.Quantity.zero
-    (T.Account.position_quantity account (instrument_id "test-equity"))
+    (T.Account.position_quantity account (instrument_id "test-equity"));
+  let closed =
+    T.Account.value account ~marks:[ (instrument_id "test-equity", price "95") ]
+    |> ok
+  in
+  match closed.positions with
+  | [ attribution ] ->
+      Alcotest.check quantity_testable "closed attributed quantity"
+        T.Scalar.Quantity.zero attribution.quantity;
+      Alcotest.check money_testable "closed attributed basis"
+        T.Scalar.Money.zero attribution.cost_basis;
+      Alcotest.check money_testable "instrument realized P&L" (money "18")
+        attribution.realized_pnl;
+      Alcotest.check money_testable "instrument cumulative fees" (money "2")
+        attribution.total_fees;
+      Alcotest.check money_testable "closed attribution reconciles realized"
+        closed.realized_pnl attribution.realized_pnl;
+      Alcotest.check money_testable "closed attribution reconciles fees"
+        closed.total_fees attribution.total_fees
+  | _ -> Alcotest.fail "expected the closed position attribution to persist"
 
 let sell_cannot_make_position_negative () =
   let account = T.Account.create ~initial_cash:(money "1000") in

@@ -4,8 +4,8 @@ A replay scenario uses either one strict JSON object or a strict JSON Lines stre
 weights, quantities, money, and sequences are canonical JSON strings. Counts and basis points are
 JSON integers. Unknown, missing, duplicate, noncanonical, and non-finite values fail parsing.
 
-Use [the v1 demo](../contracts/v1/fixtures/demo.scenario.json) as the canonical complete example.
-The [scenario JSON Schema](../contracts/v1/scenario.schema.json) provides structural validation.
+Use [the v2 demo](../contracts/v2/fixtures/demo.scenario.json) as the canonical complete example.
+The [scenario JSON Schema](../contracts/v2/scenario.schema.json) provides structural validation.
 The engine parser also enforces cross-field and cross-record invariants.
 
 ```sh
@@ -27,8 +27,8 @@ adjacent to their decision slice rather than stored in a future-looking global s
 replay, the reader checks each intent-bearing slice against the next slice's start time while
 retaining only those two records.
 
-The [stream record JSON Schema](../contracts/v1/scenario-stream.schema.json) validates each line,
-and [the v1 stream fixture](../contracts/v1/fixtures/demo.scenario.jsonl) is the canonical example.
+The [stream record JSON Schema](../contracts/v2/scenario-stream.schema.json) validates each line,
+and [the v2 stream fixture](../contracts/v2/fixtures/demo.scenario.jsonl) is the canonical example.
 The engine validates the entire stream before creating a journal. It then replays one record at a
 time without retaining prior slices, scheduled batches, or audit events. Reducer state still
 retains current account, order, target, and latest-bar state required by execution semantics.
@@ -37,7 +37,7 @@ retains current account, order, target, and latest-bar state required by executi
 
 | Field | Meaning |
 |---|---|
-| `contract_version` | Required string identifying this file contract; v1 is `"1"` |
+| `contract_version` | Required string identifying this file contract; v2 is `"2"` |
 | `metadata` | Required arbitrary JSON object preserved for provenance and ignored by execution |
 | `run_id` | Stable identity used in generated IDs |
 | `base_currency` | Single cash and quote currency |
@@ -63,6 +63,8 @@ least one lot for every instrument. Direct and computed target orders respect th
 
 Execution contains:
 
+- `model`, the compiled execution module selected by contract name; v2 supports
+  `completed_bar_v1`
 - `participation_bps`, from 0 through 10,000
 - `fixed_fee`, a nonnegative money string
 - `fee_bps`, from 0 through 10,000
@@ -140,17 +142,21 @@ than the next slice `start_at`.
 
 ## Audit journal
 
-The [journal JSON Schema](../contracts/v1/journal.schema.json) validates each JSON Lines record.
-Every record contains `contract_version`, `engine_sequence`, `run_id`, `recorded_at`, `event_type`,
-and an event-specific `payload`. The version is repeated on every record so a journal remains
-self-describing when it is streamed or split.
+The [journal JSON Schema](../contracts/v2/journal.schema.json) validates each JSON Lines record.
+Every record contains `contract_version`, `engine_sequence`, deterministic `event_id`, ordered
+`causation_ids`, `run_id`, `recorded_at`, `event_type`, and an event-specific `payload`. Causal
+references are unique prior event IDs from the same run. The version is repeated on every record
+so a journal remains self-describing when it is streamed or split.
 
-The first record is `run_started` with `scenario_sha256`. The CLI hashes the exact batch document
-or stream bytes it parses.
+The first record is `run_started` with `scenario_sha256` and the selected execution model. The CLI
+hashes the exact batch document or stream bytes it parses.
 `market_slice_received` contains the complete normalized slice. Portfolio requests record their
 basis, original weight when applicable, computed quantity, and sizing reference price. Orders use
 `eligible_after_slice_sequence`; fills use `slice_sequence`. `cash_limited` records the execution
-proposal, affordable quantity, instrument, order, and actual price.
+proposal, affordable quantity, instrument, order, and actual price. Each order snapshot retains
+its `created_event_id`. Every valuation includes per-instrument quantity, mark, market value, cost
+basis, realized and unrealized P&L, and cumulative fees; those rows reconcile exactly to the
+valuation aggregates.
 
 A successful replay ends with exactly one `run_completed` record containing the same scenario
 hash, reconciled valuation, and mutually exclusive order-status counts. A journal without that

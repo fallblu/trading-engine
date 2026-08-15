@@ -19,7 +19,7 @@ type order_counts = {
 }
 
 type event =
-  | Run_started of { scenario_sha256 : string }
+  | Run_started of { scenario_sha256 : string; execution_model : string }
   | Market_slice_received of Market_slice.t
   | Target_portfolio_requested of {
       basis : target_basis;
@@ -41,6 +41,7 @@ type event =
   | Valuation of Account.valuation
   | Run_completed of {
       scenario_sha256 : string;
+      execution_model : string;
       valuation : Account.valuation;
       order_counts : order_counts;
     }
@@ -48,13 +49,22 @@ type event =
 type t = private {
   contract_version : string;
   engine_sequence : int64;
+  event_id : Id.Event.t;
+  causation_ids : Id.Event.t list;
   run_id : Id.Run.t;
   recorded_at : Ptime.t;
   event : event;
 }
 
+val event_id : run_id:Id.Run.t -> engine_sequence:int64 -> Id.Event.t
+
 val create :
-  engine_sequence:int64 -> run_id:Id.Run.t -> recorded_at:Ptime.t -> event -> t
+  engine_sequence:int64 ->
+  causation_ids:Id.Event.t list ->
+  run_id:Id.Run.t ->
+  recorded_at:Ptime.t ->
+  event ->
+  t
 
 val cancellation_reason_to_string : cancellation_reason -> string
 val target_basis_to_string : target_basis -> string

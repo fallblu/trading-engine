@@ -144,6 +144,7 @@ let volume_is_allocated_fifo () =
   let second_request = request ~quantity_value:"5" () in
   let oms, second =
     T.Oms.accept oms ~id:(order_id "order-second") ~accepted_sequence:2L
+      ~created_event_id:(event_id "order-second-event")
       ~created_at:(timestamp "2026-01-02T21:00:02Z")
       ~eligible_after_slice_sequence:1L second_request
     |> ok
@@ -169,6 +170,7 @@ let sells_have_capacity_priority () =
   let sell_request = request ~side:T.Order.Sell ~quantity_value:"5" () in
   let oms, sell =
     T.Oms.accept oms ~id:(order_id "order-sell") ~accepted_sequence:2L
+      ~created_event_id:(event_id "order-sell-event")
       ~created_at:(timestamp "2026-01-02T21:00:02Z")
       ~eligible_after_slice_sequence:1L sell_request
     |> ok
@@ -198,6 +200,7 @@ let participation_cap_is_shared () =
   in
   let oms, _ =
     T.Oms.accept oms ~id:(order_id "order-b") ~accepted_sequence:2L
+      ~created_event_id:(event_id "order-b-event")
       ~created_at:(timestamp "2026-01-02T21:00:02Z")
       ~eligible_after_slice_sequence:1L second_request
     |> ok
@@ -222,6 +225,7 @@ let applied_quantity_controls_shared_capacity () =
   let second_request = request ~quantity_value:"5" () in
   let oms, second =
     T.Oms.accept oms ~id:(order_id "order-second") ~accepted_sequence:2L
+      ~created_event_id:(event_id "order-second-event")
       ~created_at:(timestamp "2026-01-02T21:00:02Z")
       ~eligible_after_slice_sequence:1L second_request
     |> ok

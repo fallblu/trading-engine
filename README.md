@@ -44,6 +44,9 @@ scenario slices and scheduled intents
 - Cash buying power with whole-lot clipping and structured `cash_limited` records
 - Fixed and notional fees with explicit rounding
 - Average-cost accounting, realized and unrealized P&L, and equity reconciliation
+- Per-instrument quantity, mark, value, basis, P&L, and fee attribution on every valuation
+- Deterministic event IDs, ordered causal references, and order-creation attribution
+- Contract-selected compiled execution modules; v2 currently exposes `completed_bar_v1`
 - Strict batch JSON and bounded-memory JSON Lines scenario parsing with JSON Schemas
 - Scenario SHA-256 binding in `run_started` and `run_completed`
 - Exclusive partial journal creation and atomic no-replace finalization
@@ -65,7 +68,7 @@ Validate the included scenario with an in-memory replay:
 
 ```sh
 opam exec -- dune exec trading-engine -- \
-  --input contracts/v1/fixtures/demo.scenario.json \
+  --input contracts/v2/fixtures/demo.scenario.json \
   --validate-only
 ```
 
@@ -73,7 +76,7 @@ Run it and create a journal:
 
 ```sh
 opam exec -- dune exec trading-engine -- \
-  --input contracts/v1/fixtures/demo.scenario.json \
+  --input contracts/v2/fixtures/demo.scenario.json \
   --journal demo.journal.jsonl
 ```
 
@@ -81,7 +84,7 @@ For larger histories, validate and replay the equivalent stream one slice at a t
 
 ```sh
 opam exec -- dune exec trading-engine -- \
-  --input contracts/v1/fixtures/demo.scenario.jsonl \
+  --input contracts/v2/fixtures/demo.scenario.jsonl \
   --input-format jsonl \
   --journal demo.journal.jsonl
 ```
@@ -145,10 +148,11 @@ production recovery log.
 
 - [Architecture](docs/architecture.md)
 - [Scenario contract](docs/scenario.md)
-- [Contract v1 and conformance fixtures](contracts/v1/README.md)
-- [Scenario JSON Schema](contracts/v1/scenario.schema.json)
-- [Scenario stream record JSON Schema](contracts/v1/scenario-stream.schema.json)
-- [Journal record JSON Schema](contracts/v1/journal.schema.json)
+- [Current contract v2 and conformance fixtures](contracts/v2/README.md)
+- [Historical contract v1](contracts/v1/README.md)
+- [Scenario JSON Schema](contracts/v2/scenario.schema.json)
+- [Scenario stream record JSON Schema](contracts/v2/scenario-stream.schema.json)
+- [Journal record JSON Schema](contracts/v2/journal.schema.json)
 - [Execution model](docs/execution-model.md)
 - [Persistra integration](docs/persistra.md)
 - [Contributing](CONTRIBUTING.md)

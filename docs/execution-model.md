@@ -1,6 +1,11 @@
 # Execution model
 
-The simulator consumes synchronized slices of completed OHLCV bars. Every slice contains exactly
+The engine selects a compiled execution module by the scenario's stable `execution.model` name.
+Contract v2 advertises and accepts `completed_bar_v1`; embedders can inject another module through
+the typed engine configuration without introducing runtime shared-library loading. The selected
+name is repeated in both terminal audit records.
+
+The completed-bar model consumes synchronized slices of OHLCV bars. Every slice contains exactly
 one bar for each configured instrument and produces one matching batch and one closing valuation.
 
 ## Eligibility
@@ -116,3 +121,8 @@ market value   = sum(mark × quantity)
 unrealized P&L = market value - remaining cost basis
 equity         = cash + market value
 ```
+
+Each valuation also emits one deterministic attribution row per marked instrument. Row market
+value, basis, realized P&L, unrealized P&L, and cumulative fees sum exactly to the corresponding
+account totals. Closed instruments retain cumulative realized P&L and fees with zero quantity and
+basis.

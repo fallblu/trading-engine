@@ -3,6 +3,19 @@
 type position = private {
   quantity : Scalar.Quantity.t;
   cost_basis : Scalar.Money.t;
+  realized_pnl : Scalar.Money.t;
+  total_fees : Scalar.Money.t;
+}
+
+type position_attribution = private {
+  instrument_id : Id.Instrument.t;
+  quantity : Scalar.Quantity.t;
+  mark : Scalar.Price.t;
+  market_value : Scalar.Money.t;
+  cost_basis : Scalar.Money.t;
+  realized_pnl : Scalar.Money.t;
+  unrealized_pnl : Scalar.Money.t;
+  total_fees : Scalar.Money.t;
 }
 
 type t
@@ -15,6 +28,7 @@ type valuation = private {
   unrealized_pnl : Scalar.Money.t;
   equity : Scalar.Money.t;
   total_fees : Scalar.Money.t;
+  positions : position_attribution list;
 }
 
 val create : initial_cash:Scalar.Money.t -> t

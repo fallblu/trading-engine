@@ -13,6 +13,7 @@ let money value = T.Scalar.Money.of_decimal_string value |> ok
 let instrument_id value = T.Id.Instrument.of_string_exn value
 let order_id value = T.Id.Order.of_string_exn value
 let fill_id value = T.Id.Fill.of_string_exn value
+let event_id value = T.Id.Event.of_string_exn value
 let run_id value = T.Id.Run.of_string_exn value
 let timestamp value = T.Codec.ptime_of_string value |> ok
 let scenario_sha256 = String.make 64 '0'
@@ -74,15 +75,17 @@ let request ?(instrument = instrument_id "test-equity") ?(side = T.Order.Buy)
 let accepted_order ?(id = "order-1") ?(accepted_sequence = 1L)
     ?(created_at = timestamp "2026-01-02T21:00:02Z")
     ?(eligible_after_slice_sequence = 1L) request =
-  T.Order.accept ~id:(order_id id) ~accepted_sequence ~created_at
-    ~eligible_after_slice_sequence request
+  T.Order.accept ~id:(order_id id)
+    ~created_event_id:(event_id (id ^ "-event"))
+    ~accepted_sequence ~created_at ~eligible_after_slice_sequence request
   |> ok
 
 let oms_with_order ?(id = "order-1") ?(accepted_sequence = 1L)
     ?(created_at = timestamp "2026-01-02T21:00:02Z")
     ?(eligible_after_slice_sequence = 1L) request =
-  T.Oms.accept T.Oms.empty ~id:(order_id id) ~accepted_sequence ~created_at
-    ~eligible_after_slice_sequence request
+  T.Oms.accept T.Oms.empty ~id:(order_id id)
+    ~created_event_id:(event_id (id ^ "-event"))
+    ~accepted_sequence ~created_at ~eligible_after_slice_sequence request
   |> ok
 
 let fill ?(id = "fill-1") ?(price_value = "100") ?(quantity_value = "1")
@@ -106,6 +109,10 @@ let risk ?(base_currency = "USD") ?(instruments = [ instrument () ])
     ~max_position:(quantity max_position)
   |> ok
 
-let engine_config ?(risk = risk ()) ?(execution = execution ())
+let engine_config ?(risk = risk ()) ?execution_model ?(execution = execution ())
     ?(max_internal_events = 1000) () =
-  T.Engine.config ~risk ~execution ~max_internal_events |> ok
+  let execution_model =
+    Option.value execution_model
+      ~default:(T.Execution_model.find "completed_bar_v1" |> ok)
+  in
+  T.Engine.config ~risk ~execution_model ~execution ~max_internal_events |> ok

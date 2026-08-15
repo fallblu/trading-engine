@@ -105,13 +105,19 @@ def main() -> None:
     del unversioned_scenario["contract_version"]
     expect_invalid(scenario_validator, unversioned_scenario)
     unsupported_scenario = copy.deepcopy(scenario)
-    unsupported_scenario["contract_version"] = "2"
+    unsupported_scenario["contract_version"] = "3"
     expect_invalid(scenario_validator, unsupported_scenario)
+    missing_execution_model = copy.deepcopy(scenario)
+    del missing_execution_model["execution"]["model"]
+    expect_invalid(scenario_validator, missing_execution_model)
+    unsupported_execution_model = copy.deepcopy(scenario)
+    unsupported_execution_model["execution"]["model"] = "future_model"
+    expect_invalid(scenario_validator, unsupported_execution_model)
     unversioned_stream_record = copy.deepcopy(stream_records[0])
     del unversioned_stream_record["contract_version"]
     expect_invalid(stream_validator, unversioned_stream_record)
     unsupported_stream_record = copy.deepcopy(stream_records[1])
-    unsupported_stream_record["contract_version"] = "2"
+    unsupported_stream_record["contract_version"] = "3"
     expect_invalid(stream_validator, unsupported_stream_record)
     malformed_stream_slice = copy.deepcopy(stream_records[1])
     malformed_stream_slice["payload"]["market_slice"]["unexpected"] = True
@@ -122,12 +128,34 @@ def main() -> None:
     first_journal_record = json.loads(
         journal_path.read_text(encoding="utf-8").splitlines()[0]
     )
+    missing_event_id = copy.deepcopy(first_journal_record)
+    del missing_event_id["event_id"]
+    expect_invalid(journal_validator, missing_event_id)
+    duplicate_causes = copy.deepcopy(first_journal_record)
+    duplicate_causes["causation_ids"] = ["prior-event", "prior-event"]
+    expect_invalid(journal_validator, duplicate_causes)
     unversioned_journal_record = copy.deepcopy(first_journal_record)
     del unversioned_journal_record["contract_version"]
     expect_invalid(journal_validator, unversioned_journal_record)
     unsupported_journal_record = copy.deepcopy(first_journal_record)
-    unsupported_journal_record["contract_version"] = "2"
+    unsupported_journal_record["contract_version"] = "3"
     expect_invalid(journal_validator, unsupported_journal_record)
+    journal_records = [
+        json.loads(line)
+        for line in journal_path.read_text(encoding="utf-8").splitlines()
+    ]
+    order_record = next(
+        record for record in journal_records if record["event_type"] == "order_accepted"
+    )
+    missing_creation_event = copy.deepcopy(order_record)
+    del missing_creation_event["payload"]["created_event_id"]
+    expect_invalid(journal_validator, missing_creation_event)
+    valuation_record = next(
+        record for record in journal_records if record["event_type"] == "valuation"
+    )
+    missing_positions = copy.deepcopy(valuation_record)
+    del missing_positions["payload"]["positions"]
+    expect_invalid(journal_validator, missing_positions)
     for timestamp in (
         "2026-01-02t14:30:00.1z",
         "2026-01-02T14:30:00.123456+05:30",

@@ -4,6 +4,7 @@ type config
 
 val config :
   risk:Risk.t ->
+  execution_model:Execution_model.t ->
   execution:Execution.t ->
   max_internal_events:int ->
   (config, string) result

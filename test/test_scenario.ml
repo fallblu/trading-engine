@@ -2,12 +2,12 @@ open Test_support
 module T = Trading_engine
 
 let demo_document () =
-  In_channel.with_open_bin "../contracts/v1/fixtures/demo.scenario.json"
+  In_channel.with_open_bin "../contracts/v2/fixtures/demo.scenario.json"
     In_channel.input_all
 
 let demo () = T.Scenario.of_string (demo_document ()) |> ok
 let demo_hash () = T.Sha256.digest_string (demo_document ())
-let stream_path = "../contracts/v1/fixtures/demo.scenario.jsonl"
+let stream_path = "../contracts/v2/fixtures/demo.scenario.jsonl"
 
 let stream_document () =
   In_channel.with_open_bin stream_path In_channel.input_all
@@ -82,6 +82,9 @@ let demo_contract_parses () =
   Alcotest.(check string) "run" "demo" (T.Id.Run.to_string scenario.run_id);
   Alcotest.(check int) "one instrument" 1 (List.length scenario.instruments);
   Alcotest.(check int) "four slices" 4 (List.length scenario.slices);
+  Alcotest.(check string)
+    "execution model" "completed_bar_v1"
+    (T.Execution_model.name scenario.execution_model);
   match scenario.metadata with
   | `Assoc fields ->
       Alcotest.(check bool)
@@ -104,9 +107,9 @@ let schema_artifacts_parse () =
           (List.mem_assoc "$defs" fields)
     | _ -> Alcotest.fail (path ^ " must contain a JSON object")
   in
-  check_schema "../contracts/v1/scenario.schema.json";
-  check_schema "../contracts/v1/scenario-stream.schema.json";
-  check_schema "../contracts/v1/journal.schema.json"
+  check_schema "../contracts/v2/scenario.schema.json";
+  check_schema "../contracts/v2/scenario-stream.schema.json";
+  check_schema "../contracts/v2/journal.schema.json"
 
 let timestamp_precision_is_bounded () =
   List.iter
@@ -161,13 +164,13 @@ let contract_version_is_required_and_supported () =
     map_root (fun fields ->
         List.map
           (fun (name, value) ->
-            if String.equal name "contract_version" then (name, `String "2")
+            if String.equal name "contract_version" then (name, `String "3")
             else (name, value))
           fields)
   in
   Alcotest.(check string)
     "unsupported version diagnosed"
-    "unsupported scenario contract_version \"2\" (expected \"1\")"
+    "unsupported scenario contract_version \"3\" (expected \"2\")"
     (T.Scenario.of_yojson unsupported |> error)
 
 let duplicate_fields_are_rejected () =
@@ -343,6 +346,34 @@ let portfolio_targets_are_total_and_aligned () =
     "noncanonical scalar rejected" true
     (Result.is_error (T.Scenario.of_yojson noncanonical))
 
+let execution_model_is_required_and_supported () =
+  let change_execution change =
+    map_root (fun fields ->
+        List.map
+          (fun (name, value) ->
+            if String.equal name "execution" then (name, change value)
+            else (name, value))
+          fields)
+  in
+  let missing =
+    change_execution (function
+      | `Assoc fields ->
+          `Assoc
+            (List.filter
+               (fun (name, _) -> not (String.equal name "model"))
+               fields)
+      | _ -> Alcotest.fail "execution must be an object")
+  in
+  Alcotest.(check bool)
+    "missing model rejected" true
+    (Result.is_error (T.Scenario.of_yojson missing));
+  let unsupported =
+    change_execution (change_field "model" (`String "future_model"))
+  in
+  Alcotest.(check string)
+    "unsupported model diagnosed" "unsupported execution model \"future_model\""
+    (T.Scenario.of_yojson unsupported |> error)
+
 let deterministic_replay () =
   let scenario = demo () in
   let hash = demo_hash () in
@@ -359,6 +390,66 @@ let deterministic_replay () =
             String.equal (T.Audit.event_name audit.T.Audit.event) "valuation")
           first.audits))
 
+let audit_ids_are_deterministic_and_causal () =
+  let result = T.Replay.run ~scenario_sha256:(demo_hash ()) (demo ()) |> ok in
+  let seen = ref T.Id.Event.Set.empty in
+  List.iter
+    (fun audit ->
+      let expected =
+        T.Audit.event_id ~run_id:audit.T.Audit.run_id
+          ~engine_sequence:audit.engine_sequence
+      in
+      Alcotest.(check string)
+        "event ID derives from run and sequence"
+        (T.Id.Event.to_string expected)
+        (T.Id.Event.to_string audit.event_id);
+      Alcotest.(check bool)
+        "event ID is unique" false
+        (T.Id.Event.Set.mem audit.event_id !seen);
+      Alcotest.(check (list string))
+        "causes are canonical"
+        (List.sort_uniq T.Id.Event.compare audit.causation_ids
+        |> List.map T.Id.Event.to_string)
+        (List.map T.Id.Event.to_string audit.causation_ids);
+      List.iter
+        (fun cause ->
+          Alcotest.(check bool)
+            "cause is a prior event" true
+            (T.Id.Event.Set.mem cause !seen))
+        audit.causation_ids;
+      seen := T.Id.Event.Set.add audit.event_id !seen)
+    result.audits;
+  let event sequence =
+    List.find
+      (fun audit -> Int64.equal audit.T.Audit.engine_sequence sequence)
+      result.audits
+  in
+  let cause_strings audit =
+    List.map T.Id.Event.to_string audit.T.Audit.causation_ids
+  in
+  Alcotest.(check (list string))
+    "external slice has no engine cause" []
+    (cause_strings (event 7L));
+  Alcotest.(check (list string))
+    "target order cites slice and target request"
+    [ "demo-event-000000000002"; "demo-event-000000000003" ]
+    (cause_strings (event 5L));
+  Alcotest.(check (list string))
+    "fill cites order creation and executable slice"
+    [ "demo-event-000000000005"; "demo-event-000000000007" ]
+    (cause_strings (event 8L));
+  Alcotest.(check (list string))
+    "completion cites terminal valuation"
+    [ "demo-event-000000000019" ]
+    (cause_strings (event 20L));
+  match (event 5L).event with
+  | T.Audit.Order_accepted order ->
+      Alcotest.(check string)
+        "order snapshot retains creation event"
+        (T.Id.Event.to_string (event 5L).event_id)
+        (T.Id.Event.to_string order.created_event_id)
+  | _ -> Alcotest.fail "expected accepted order"
+
 let replay_ends_with_completion_summary () =
   let hash = demo_hash () in
   let result = T.Replay.run ~scenario_sha256:hash (demo ()) |> ok in
@@ -367,12 +458,16 @@ let replay_ends_with_completion_summary () =
   Alcotest.(check string)
     "journal contract" T.Contract.version first.contract_version;
   (match first.event with
-  | T.Audit.Run_started { scenario_sha256 = actual } ->
-      Alcotest.(check string) "start hash" hash actual
+  | T.Audit.Run_started { scenario_sha256 = actual; execution_model } ->
+      Alcotest.(check string) "start hash" hash actual;
+      Alcotest.(check string) "start model" "completed_bar_v1" execution_model
   | _ -> Alcotest.fail "expected run start");
   match completion.event with
-  | T.Audit.Run_completed { scenario_sha256 = actual; valuation; _ } ->
+  | T.Audit.Run_completed
+      { scenario_sha256 = actual; execution_model; valuation; _ } ->
       Alcotest.(check string) "completion hash" hash actual;
+      Alcotest.(check string)
+        "completion model" "completed_bar_v1" execution_model;
       Alcotest.check money_testable "summary equity" result.valuation.equity
         valuation.equity
   | _ -> Alcotest.fail "expected run completion payload"
@@ -384,7 +479,7 @@ let replay_matches_golden_file () =
     |> fun value -> value ^ "\n"
   in
   let expected =
-    In_channel.with_open_bin "../contracts/v1/fixtures/demo.journal.jsonl"
+    In_channel.with_open_bin "../contracts/v2/fixtures/demo.journal.jsonl"
       In_channel.input_all
   in
   Alcotest.(check string) "stable audit contract" expected actual
@@ -585,7 +680,11 @@ let tests =
       duplicate_and_incomplete_slice_bars_are_rejected;
     Alcotest.test_case "portfolio target validation" `Quick
       portfolio_targets_are_total_and_aligned;
+    Alcotest.test_case "execution model required and supported" `Quick
+      execution_model_is_required_and_supported;
     Alcotest.test_case "deterministic replay" `Quick deterministic_replay;
+    Alcotest.test_case "audit IDs are deterministic and causal" `Quick
+      audit_ids_are_deterministic_and_causal;
     Alcotest.test_case "terminal completion summary" `Quick
       replay_ends_with_completion_summary;
     Alcotest.test_case "replay matches golden file" `Quick

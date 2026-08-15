@@ -12,6 +12,7 @@ val active_for_instrument : t -> Id.Instrument.t -> Order.t list
 val accept :
   t ->
   id:Id.Order.t ->
+  created_event_id:Id.Event.t ->
   accepted_sequence:int64 ->
   created_at:Ptime.t ->
   eligible_after_slice_sequence:int64 ->
@@ -21,6 +22,7 @@ val accept :
 val reject :
   t ->
   id:Id.Order.t ->
+  created_event_id:Id.Event.t ->
   rejected_sequence:int64 ->
   created_at:Ptime.t ->
   eligible_after_slice_sequence:int64 ->

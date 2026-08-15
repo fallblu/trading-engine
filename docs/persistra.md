@@ -13,6 +13,7 @@ The JSON scenario carries:
 
 - Required `contract_version` identifying the scenario and journal protocol
 - Required producer metadata preserved as JSON but ignored by execution
+- Required compiled execution-model selection
 - One explicit executable-instrument catalog
 - Risk, participation, and fee policies
 - Strictly increasing synchronized market slices
@@ -30,15 +31,19 @@ Persistra should:
 7. Read `--capabilities` and require support for the scenario and journal contract version.
 8. Validate the scenario through the JSON Schema and `--validate-only`.
 9. Run the CLI as a separate process and import its audit journal.
-10. Require the same contract version on every journal record.
-11. Verify the same scenario SHA-256 in `run_started` and `run_completed`.
-12. Require the terminal completion record before accepting a replay.
+10. Require the same contract version and deterministic run-scoped event-ID derivation on every
+    journal record.
+11. Reject duplicate, unknown, forward, cross-run, or noncanonical causal references.
+12. Verify the same scenario SHA-256 and selected execution model in `run_started`,
+    `run_completed`, and the retained manifest.
+13. Reconcile every per-instrument valuation row to the aggregate account values.
+14. Require the terminal completion record before accepting a replay.
 
 Do not let the engine read Persistra's internal DuckDB tables. Their schema and connection
 lifecycle belong to Persistra.
 
-Use the committed v1 [scenario](../contracts/v1/scenario.schema.json) and
-[journal](../contracts/v1/journal.schema.json) JSON Schemas and their adjacent conformance fixtures
+Use the current v2 [scenario](../contracts/v2/scenario.schema.json) and
+[journal](../contracts/v2/journal.schema.json) JSON Schemas and their adjacent conformance fixtures
 for structural checks. The engine parser is authoritative for ordering, catalog coverage,
 causality, tick, lot, risk, and accounting invariants that JSON Schema cannot express.
 

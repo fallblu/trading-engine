@@ -2,10 +2,10 @@ open Test_support
 module T = Trading_engine
 module Runner = T.Engine.Make (T.Scripted_strategy)
 
-let runner ?(initial_cash = "10000") ?(risk = risk ())
+let runner ?(initial_cash = "10000") ?(risk = risk ()) ?execution_model
     ?(execution = execution ()) schedule =
   let strategy_state = T.Scripted_strategy.create schedule |> ok in
-  let config = engine_config ~risk ~execution () in
+  let config = engine_config ~risk ?execution_model ~execution () in
   Runner.create ~run_id:(run_id "test-run") ~scenario_sha256 ~config
     ~initial_cash:(money initial_cash) ~strategy_state
   |> ok
@@ -454,6 +454,39 @@ let one_valuation_per_slice () =
   Alcotest.(check int) "first slice" 1 (count first);
   Alcotest.(check int) "second slice" 1 (count second)
 
+module No_fill_execution = struct
+  let name = "test_no_fill"
+
+  let fold_slice _execution ~instruments:_ ~oms:_ _slice ~init ~apply:_ =
+    Ok (init, [])
+end
+
+let configured_execution_model_is_dispatched () =
+  let execution_model =
+    T.Execution_model.of_module (module No_fill_execution)
+  in
+  let direct = T.Strategy.Submit_order (request ~quantity_value:"3" ()) in
+  let state = runner ~execution_model [ (1L, [ direct ]) ] in
+  let state, first = Runner.process_slice state (market_slice 1L) |> ok in
+  let state, second = Runner.process_slice state (market_slice 2L) |> ok in
+  Alcotest.check quantity_testable "custom model applies no fills"
+    T.Scalar.Quantity.zero
+    (T.Account.position_quantity (Runner.account state)
+       (instrument_id "test-equity"));
+  Alcotest.(check int)
+    "order remains working" 1
+    (List.length (T.Oms.active_orders (Runner.oms state)));
+  Alcotest.(check bool)
+    "no fill audit" false
+    (List.exists
+       (fun name -> String.equal name "fill_applied")
+       (event_names (first @ second)));
+  match (List.hd first).event with
+  | T.Audit.Run_started { execution_model = actual; _ } ->
+      Alcotest.(check string)
+        "selected model is audited" No_fill_execution.name actual
+  | _ -> Alcotest.fail "expected run start"
+
 let tests =
   [
     Alcotest.test_case "market target retries after partial fill" `Quick
@@ -482,4 +515,6 @@ let tests =
     Alcotest.test_case "invalid initial state rejected" `Quick
       invalid_initial_state_is_rejected;
     Alcotest.test_case "one valuation per slice" `Quick one_valuation_per_slice;
+    Alcotest.test_case "configured execution model is dispatched" `Quick
+      configured_execution_model_is_dispatched;
   ]

@@ -14,8 +14,8 @@ journal files, and the runtime shell.
 | `Planner` | Exact weight-to-quantity conversion |
 | `Risk` | Catalog, size, lot, tick, position, and working-sell checks |
 | `Oms` | Order lifecycle, fill limits, idempotency, and deterministic ordering |
-| `Execution` | Synchronized-slice matching, capacity allocation, and fees |
-| `Account` | Cash, positions, average cost, fees, P&L, and valuation |
+| `Execution`, `Execution_model` | Pluggable synchronized-slice matching, capacity allocation, and fees |
+| `Account` | Cash, per-instrument attribution, average cost, fees, P&L, and valuation |
 | `Engine` | Sequencing, portfolio reconciliation, and pure orchestration |
 | `Scenario`, `Scenario_stream`, `Replay` | Strict batch and bounded-memory input runners |
 | `Sha256`, `Codec`, `Journal` | Input identity, stable audit JSON, and file publication |
@@ -55,8 +55,10 @@ Each market slice exposes:
 - `slice_sequence`: stable, positive source order
 
 All configured instruments share these values within a slice. `engine_sequence` orders every
-external and derived audit event. The replay clock uses `received_at`; each order records that time
-as `created_at`. A slice starting before an order was created cannot execute that order.
+external and derived audit event. Each record's deterministic `event_id` combines `run_id` with
+that sequence, while sorted `causation_ids` point only to earlier records in the same run. Orders
+retain the event that created them. The replay clock uses `received_at`; each order records that
+time as `created_at`. A slice starting before an order was created cannot execute that order.
 
 Schedule sequences and slice sequences are positive and strictly increasing. Every schedule entry
 anchors to an existing slice. A scheduled order-changing intent must be received no later than the
@@ -73,6 +75,7 @@ Determinism depends on:
 - Canonical exact strings and checked fixed-point arithmetic
 - Explicit fee, participation, fill, sizing, and affordability rules
 - Stable generated order and fill IDs derived from the run ID
+- Stable event IDs and canonical causal-reference ordering
 - Stable JSON field and event order
 - The exact scenario-byte SHA-256 in both terminal audit records
 
@@ -94,6 +97,8 @@ The implementation and tests enforce:
 - Cash equals initial cash minus buys and fees plus sells net of fees.
 - Equity equals cash plus marked position value.
 - Equity change equals realized plus unrealized P&L without external cash flows.
+- Position market value, basis, realized P&L, unrealized P&L, and fees sum exactly to each
+  valuation's account aggregates.
 - Fills respect order size, capacity, lot size, tick size, and causal time.
 - Every configured instrument uses the single base currency.
 

@@ -17,7 +17,7 @@ type order_counts = {
 }
 
 type event =
-  | Run_started of { scenario_sha256 : string }
+  | Run_started of { scenario_sha256 : string; execution_model : string }
   | Market_slice_received of Market_slice.t
   | Target_portfolio_requested of {
       basis : target_basis;
@@ -39,6 +39,7 @@ type event =
   | Valuation of Account.valuation
   | Run_completed of {
       scenario_sha256 : string;
+      execution_model : string;
       valuation : Account.valuation;
       order_counts : order_counts;
     }
@@ -46,15 +47,23 @@ type event =
 type t = {
   contract_version : string;
   engine_sequence : int64;
+  event_id : Id.Event.t;
+  causation_ids : Id.Event.t list;
   run_id : Id.Run.t;
   recorded_at : Ptime.t;
   event : event;
 }
 
-let create ~engine_sequence ~run_id ~recorded_at event =
+let event_id ~run_id ~engine_sequence =
+  Printf.sprintf "%s-event-%012Ld" (Id.Run.to_string run_id) engine_sequence
+  |> Id.Event.of_string_exn
+
+let create ~engine_sequence ~causation_ids ~run_id ~recorded_at event =
   {
     contract_version = Contract.version;
     engine_sequence;
+    event_id = event_id ~run_id ~engine_sequence;
+    causation_ids;
     run_id;
     recorded_at;
     event;

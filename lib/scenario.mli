@@ -8,6 +8,7 @@ type t = private {
   initial_cash : Scalar.Money.t;
   instruments : Instrument.t list;
   risk : Risk.t;
+  execution_model : Execution_model.t;
   execution : Execution.t;
   max_internal_events : int;
   schedule : (int64 * Strategy.intent list) list;
@@ -22,6 +23,7 @@ type stream_header = private {
   initial_cash : Scalar.Money.t;
   instruments : Instrument.t list;
   risk : Risk.t;
+  execution_model : Execution_model.t;
   execution : Execution.t;
   max_internal_events : int;
 }

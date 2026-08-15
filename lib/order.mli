@@ -22,6 +22,7 @@ type status =
 type t = private {
   id : Id.Order.t;
   request : request;
+  created_event_id : Id.Event.t;
   created_sequence : int64;
   created_at : Ptime.t;
   eligible_after_slice_sequence : int64;
@@ -40,6 +41,7 @@ val request :
 
 val accept :
   id:Id.Order.t ->
+  created_event_id:Id.Event.t ->
   accepted_sequence:int64 ->
   created_at:Ptime.t ->
   eligible_after_slice_sequence:int64 ->
@@ -48,6 +50,7 @@ val accept :
 
 val reject :
   id:Id.Order.t ->
+  created_event_id:Id.Event.t ->
   rejected_sequence:int64 ->
   created_at:Ptime.t ->
   eligible_after_slice_sequence:int64 ->

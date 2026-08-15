@@ -6,6 +6,7 @@ type t = {
   initial_cash : Scalar.Money.t;
   instruments : Instrument.t list;
   risk : Risk.t;
+  execution_model : Execution_model.t;
   execution : Execution.t;
   max_internal_events : int;
   schedule : (int64 * Strategy.intent list) list;
@@ -20,6 +21,7 @@ type stream_header = {
   initial_cash : Scalar.Money.t;
   instruments : Instrument.t list;
   risk : Risk.t;
+  execution_model : Execution_model.t;
   execution : Execution.t;
   max_internal_events : int;
 }
@@ -179,9 +181,12 @@ let parse_risk base_currency instruments json =
 let parse_execution json =
   let* fields =
     object_fields ~name:"execution"
-      ~expected:[ "participation_bps"; "fixed_fee"; "fee_bps" ]
+      ~expected:[ "model"; "participation_bps"; "fixed_fee"; "fee_bps" ]
       json
   in
+  let* model_json = field fields "model" in
+  let* model_name = string ~name:"execution model" model_json in
+  let* execution_model = Execution_model.find model_name in
   let* participation_json = field fields "participation_bps" in
   let* participation_bps =
     integer ~name:"participation_bps" participation_json
@@ -190,7 +195,8 @@ let parse_execution json =
   let* fixed_fee = parse_money ~name:"fixed_fee" fixed_json in
   let* fee_json = field fields "fee_bps" in
   let* fee_bps = integer ~name:"fee_bps" fee_json in
-  Execution.create ~participation_bps ~fixed_fee ~fee_bps
+  let* execution = Execution.create ~participation_bps ~fixed_fee ~fee_bps in
+  Ok (execution_model, execution)
 
 let parse_side json =
   let* value = string ~name:"side" json in
@@ -627,7 +633,7 @@ let of_yojson json =
         let* risk_json = field fields "risk" in
         let* risk = parse_risk base_currency instruments risk_json in
         let* execution_json = field fields "execution" in
-        let* execution = parse_execution execution_json in
+        let* execution_model, execution = parse_execution execution_json in
         let* maximum_json = field fields "max_internal_events" in
         let* max_internal_events =
           integer ~name:"max_internal_events" maximum_json
@@ -652,6 +658,7 @@ let of_yojson json =
               initial_cash;
               instruments;
               risk;
+              execution_model;
               execution;
               max_internal_events;
               schedule;
@@ -697,6 +704,7 @@ let stream_header_of_yojson ~contract_version json =
       initial_cash = scenario.initial_cash;
       instruments = scenario.instruments;
       risk = scenario.risk;
+      execution_model = scenario.execution_model;
       execution = scenario.execution;
       max_internal_events = scenario.max_internal_events;
     }

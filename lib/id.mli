@@ -19,3 +19,4 @@ module Instrument : S
 module Order : S
 module Fill : S
 module Strategy : S
+module Event : S

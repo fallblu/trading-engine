@@ -70,7 +70,9 @@ let run ~scenario_sha256 ?journal_path scenario =
       | Error _ as error -> fail error
       | Ok strategy_state -> (
           match
-            Engine.config ~risk:scenario.risk ~execution:scenario.execution
+            Engine.config ~risk:scenario.risk
+              ~execution_model:scenario.execution_model
+              ~execution:scenario.execution
               ~max_internal_events:scenario.max_internal_events
           with
           | Error _ as error -> fail error
@@ -123,7 +125,9 @@ let run_stream_pass ~scenario_sha256 ~journal channel =
       | Error _ as error -> error
       | Ok strategy_state -> (
           match
-            Engine.config ~risk:header.Scenario.risk ~execution:header.execution
+            Engine.config ~risk:header.Scenario.risk
+              ~execution_model:header.execution_model
+              ~execution:header.execution
               ~max_internal_events:header.max_internal_events
           with
           | Error _ as error -> error
