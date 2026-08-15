@@ -1,0 +1,11 @@
+(lang dune 3.24)
+
+(name trading_engine)
+(generate_opam_files false)
+(implicit_transitive_deps false)
+
+(package
+ (name trading_engine)
+ (synopsis "Deterministic event-driven trading execution engine")
+ (description
+  "A replay-first OCaml execution engine with explicit seams for future paper and live trading adapters."))

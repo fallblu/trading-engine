@@ -1,0 +1,12 @@
+(test
+ (name test_engine)
+ (modules
+  test_support
+  test_domain
+  test_accounting
+  test_execution
+  test_reducer
+  test_scenario
+  test_engine)
+ (deps ../examples/demo.json fixtures/demo.journal.jsonl)
+ (libraries trading_engine yojson alcotest qcheck-core qcheck-alcotest))

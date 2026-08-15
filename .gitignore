@@ -1,0 +1,6 @@
+/_build/
+/_opam/
+/.direnv/
+/.envrc
+*.install
+*.merlin

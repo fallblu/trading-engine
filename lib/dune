@@ -1,0 +1,4 @@
+(library
+ (name trading_engine)
+ (public_name trading_engine)
+ (libraries ptime yojson zarith fmt logs))
