@@ -41,7 +41,7 @@ jobs:
         with:
           persist-credentials: false
           repository: fallblu/persistra
-          ref: ${{ vars.PERSISTRA_COMPAT_REF || '6cf02d01b20ba135b966362a9a66547802e13288' }}
+          ref: ${{ vars.PERSISTRA_COMPAT_REF || 'main' }}
           path: persistra
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
