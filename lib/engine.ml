@@ -163,16 +163,28 @@ module Interactive = struct
   let enqueue reduction items =
     { reduction with pending = reduction.pending @ items }
 
+  let value state =
+    let marks =
+      Id.Instrument.Map.bindings state.latest_bars
+      |> List.map (fun (instrument_id, bar) ->
+          (instrument_id, bar.Bar.close_price))
+    in
+    Account.value state.account
+      ~instruments:(Risk.instruments state.config.risk)
+      ~marks ~fx_rates:state.latest_fx_rates
+
   let strategy_context state now =
     let latest_bars =
       Id.Instrument.Map.bindings state.latest_bars |> List.map snd
     in
-    Strategy.context ~now ~account:state.account
+    let* valuation = value state in
+    Strategy.context ~now ~valuation
       ~working_orders:(Oms.active_orders state.oms)
       ~latest_bars
 
   let notification reduction ~causation_ids event =
-    Notify (causation_ids, strategy_context reduction.state reduction.now, event)
+    let* context = strategy_context reduction.state reduction.now in
+    Ok (Notify (causation_ids, context, event))
 
   let order_id state =
     let value =
@@ -204,12 +216,11 @@ module Interactive = struct
     match emit_with_id reduction (Audit.Intent_rejected reason) with
     | Error _ as error -> error
     | Ok (reduction, event_id) ->
-        Ok
-          (enqueue reduction
-             [
-               notification reduction ~causation_ids:[ event_id ]
-                 (Strategy.Intent_rejected reason);
-             ])
+        let* pending =
+          notification reduction ~causation_ids:[ event_id ]
+            (Strategy.Intent_rejected reason)
+        in
+        Ok (enqueue reduction [ pending ])
 
   let submit_order reduction request =
     let id = order_id reduction.state in
@@ -254,13 +265,11 @@ module Interactive = struct
                     with
                     | Error _ as error -> error
                     | Ok (reduction, event_id) ->
-                        Ok
-                          (enqueue reduction
-                             [
-                               notification reduction
-                                 ~causation_ids:[ event_id ]
-                                 (Strategy.Order_updated order);
-                             ])))
+                        let* pending =
+                          notification reduction ~causation_ids:[ event_id ]
+                            (Strategy.Order_updated order)
+                        in
+                        Ok (enqueue reduction [ pending ])))
             | Error reason -> (
                 match
                   Oms.reject reduction.state.oms ~id ~created_event_id
@@ -278,16 +287,17 @@ module Interactive = struct
                     with
                     | Error _ as error -> error
                     | Ok (reduction, event_id) ->
+                        let* order_pending =
+                          notification reduction ~causation_ids:[ event_id ]
+                            (Strategy.Order_updated order)
+                        in
+                        let* rejection_pending =
+                          notification reduction ~causation_ids:[ event_id ]
+                            (Strategy.Intent_rejected reason)
+                        in
                         Ok
                           (enqueue reduction
-                             [
-                               notification reduction
-                                 ~causation_ids:[ event_id ]
-                                 (Strategy.Order_updated order);
-                               notification reduction
-                                 ~causation_ids:[ event_id ]
-                                 (Strategy.Intent_rejected reason);
-                             ])))))
+                             [ order_pending; rejection_pending ])))))
 
   let cancel_order reduction ~reason order_id =
     match Oms.cancel reduction.state.oms order_id with
@@ -304,12 +314,11 @@ module Interactive = struct
         with
         | Error _ as error -> error
         | Ok (reduction, event_id) ->
-            Ok
-              (enqueue reduction
-                 [
-                   notification reduction ~causation_ids:[ event_id ]
-                     (Strategy.Order_updated order);
-                 ]))
+            let* pending =
+              notification reduction ~causation_ids:[ event_id ]
+                (Strategy.Order_updated order)
+            in
+            Ok (enqueue reduction [ pending ]))
 
   let cancel_orders reduction ~reason order_ids =
     let causation_ids = reduction.causation_ids in
@@ -955,16 +964,19 @@ module Interactive = struct
                             with
                             | Error _ as error -> error
                             | Ok (reduction, event_id) ->
+                                let* fill_pending =
+                                  notification reduction
+                                    ~causation_ids:[ event_id ]
+                                    (Strategy.Fill_received fill)
+                                in
+                                let* order_pending =
+                                  notification reduction
+                                    ~causation_ids:[ event_id ]
+                                    (Strategy.Order_updated order)
+                                in
                                 Ok
                                   (enqueue reduction
-                                     [
-                                       notification reduction
-                                         ~causation_ids:[ event_id ]
-                                         (Strategy.Fill_received fill);
-                                       notification reduction
-                                         ~causation_ids:[ event_id ]
-                                         (Strategy.Order_updated order);
-                                     ])))))))
+                                     [ fill_pending; order_pending ])))))))
 
   let apply_proposed_fill reduction market_slice proposed =
     match Oms.find reduction.state.oms proposed.Execution.order_id with
@@ -1035,16 +1047,6 @@ module Interactive = struct
               | Ok reduction -> cancel reduction remaining))
     in
     cancel reduction order_ids
-
-  let value state =
-    let marks =
-      Id.Instrument.Map.bindings state.latest_bars
-      |> List.map (fun (instrument_id, bar) ->
-          (instrument_id, bar.Bar.close_price))
-    in
-    Account.value state.account
-      ~instruments:(Risk.instruments state.config.risk)
-      ~marks ~fx_rates:state.latest_fx_rates
 
   let audit_valuation state =
     let* account = value state in
@@ -1347,14 +1349,12 @@ module Interactive = struct
           reduction.state.latest_bars market_slice.bars
       in
       let state = { reduction.state with latest_bars } in
-      let reduction =
-        enqueue { reduction with state }
-          [
-            notification { reduction with state }
-              ~causation_ids:[ slice_event_id ]
-              (Strategy.Market_slice_closed market_slice);
-          ]
+      let reduction = { reduction with state } in
+      let* pending =
+        notification reduction ~causation_ids:[ slice_event_id ]
+          (Strategy.Market_slice_closed market_slice)
       in
+      let reduction = enqueue reduction [ pending ] in
       continue Reconcile_targets reduction
 
   let order_counts orders =

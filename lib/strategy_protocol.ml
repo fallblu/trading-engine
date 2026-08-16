@@ -32,6 +32,7 @@ let sequence value = string (Int64.to_string value)
 let price value = string (Scalar.Price.to_decimal_string value)
 let quantity value = string (Scalar.Quantity.to_decimal_string value)
 let money value = string (Scalar.Money.to_decimal_string value)
+let weight value = string (Scalar.Weight.to_decimal_string value)
 let ratio value = string (Scalar.Ratio.to_decimal_string value)
 let timestamp value = string (Codec.ptime_to_string value)
 let instrument_id value = string (Id.Instrument.to_string value)
@@ -110,26 +111,38 @@ let initialize_message ~sequence:message_sequence initialization =
          ("metadata", initialization.metadata);
        ])
 
-let context_to_yojson instruments context =
-  let instruments =
-    List.sort
-      (fun left right ->
-        Id.Instrument.compare left.Instrument.id right.Instrument.id)
-      instruments
-  in
+let cash_attribution_to_yojson (balance : Account.cash_attribution) =
+  `Assoc
+    [
+      ("currency", string balance.currency);
+      ("amount", money balance.amount);
+      ("fx_rate", price balance.fx_rate);
+      ("base_value", money balance.base_value);
+    ]
+
+let marked_position_to_yojson (position : Strategy.marked_position) =
+  `Assoc
+    [
+      ("instrument_id", instrument_id position.instrument_id);
+      ("quantity", quantity position.quantity);
+      ("mark", price position.mark);
+      ("base_market_value", money position.base_market_value);
+      ("weight", Option.fold ~none:`Null ~some:weight position.weight);
+    ]
+
+let context_to_yojson context =
+  let portfolio = Strategy.portfolio context in
   let cash_balances =
-    Strategy.cash_balances context
-    |> List.sort (fun (left, _) (right, _) -> String.compare left right)
+    List.sort
+      (fun (left : Account.cash_attribution) right ->
+        String.compare left.currency right.currency)
+      portfolio.cash_balances
   in
   let positions =
-    List.map
-      (fun instrument ->
-        `Assoc
-          [
-            ("instrument_id", instrument_id instrument.Instrument.id);
-            ("quantity", quantity (Strategy.position context instrument.id));
-          ])
-      instruments
+    List.sort
+      (fun (left : Strategy.marked_position) right ->
+        Id.Instrument.compare left.instrument_id right.instrument_id)
+      portfolio.positions
   in
   let working_orders =
     Strategy.working_orders context
@@ -137,15 +150,32 @@ let context_to_yojson instruments context =
         Id.Order.compare left.Order.id right.Order.id)
   in
   let latest_bars =
-    List.filter_map
-      (fun instrument -> Strategy.latest_bar context instrument.Instrument.id)
-      instruments
+    List.map
+      (fun (position : Strategy.marked_position) ->
+        Strategy.latest_bar context position.instrument_id)
+      positions
+    |> List.filter_map Fun.id
   in
   `Assoc
     [
       ("now", timestamp (Strategy.now context));
-      ("cash_balances", `List (List.map cash_balance_to_yojson cash_balances));
-      ("positions", `List positions);
+      ( "portfolio",
+        `Assoc
+          [
+            ("base_currency", string portfolio.base_currency);
+            ("cash", money portfolio.cash);
+            ("net_market_value", money portfolio.net_market_value);
+            ("long_market_value", money portfolio.long_market_value);
+            ("short_market_value", money portfolio.short_market_value);
+            ("gross_exposure", money portfolio.gross_exposure);
+            ("equity", money portfolio.equity);
+            ("weights_available", `Bool (Option.is_some portfolio.cash_weight));
+            ( "cash_weight",
+              Option.fold ~none:`Null ~some:weight portfolio.cash_weight );
+            ( "cash_balances",
+              `List (List.map cash_attribution_to_yojson cash_balances) );
+            ("positions", `List (List.map marked_position_to_yojson positions));
+          ] );
       ("working_orders", `List (List.map Codec.order_to_yojson working_orders));
       ("latest_bars", `List (List.map Codec.bar_to_yojson latest_bars));
     ]
@@ -171,12 +201,11 @@ let event_to_yojson = function
   | Strategy.Intent_rejected reason ->
       `Assoc [ ("type", string "intent_rejected"); ("reason", string reason) ]
 
-let event_message ~sequence:message_sequence ~instruments context event =
+let event_message ~sequence:message_sequence context event =
   message ~sequence:message_sequence ~message_type:"event"
     (`Assoc
        [
-         ("context", context_to_yojson instruments context);
-         ("event", event_to_yojson event);
+         ("context", context_to_yojson context); ("event", event_to_yojson event);
        ])
 
 let shutdown_message ~sequence:message_sequence =

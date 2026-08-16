@@ -59,7 +59,7 @@ def response(request: dict[str, object]) -> dict[str, object]:
         response_type = "error"
         payload = {"message": "unsupported request"}
     return {
-        "strategy_protocol_version": "1",
+        "strategy_protocol_version": "2",
         "strategy_sequence": sequence,
         "message_type": response_type,
         "payload": payload,
@@ -82,7 +82,7 @@ for line in sys.stdin:
     if MODE == "bad-sequence":
         message["strategy_sequence"] = "999"
     if MODE == "wrong-version":
-        message["strategy_protocol_version"] = "2"
+        message["strategy_protocol_version"] = "1"
     if MODE == "unknown-field":
         message["unexpected"] = True
     if MODE == "error" and request["message_type"] == "event":

@@ -53,6 +53,7 @@ module Weight : sig
   type t
 
   val scale : int64
+  val of_micros : int64 -> t
   val zero : t
   val one : t
   val of_decimal_string : string -> (t, string) result
@@ -98,6 +99,7 @@ module Money : sig
   val for_quantity : t -> Quantity.t -> (t, string) result
   val convert : t -> rate:Price.t -> (t, string) result
   val multiply_ratio : t -> Ratio.t -> (t, string) result
+  val weight_toward_zero : t -> equity:t -> (Weight.t, string) result
   val fee : fixed:t -> bps:int -> notional:t -> (t, string) result
 
   val proportion_toward_zero :

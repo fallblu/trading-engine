@@ -223,6 +223,7 @@ module Weight = struct
   let scale = scale
   let zero = 0L
   let one = scale
+  let of_micros value = value
 
   let of_decimal_string value =
     match parse_scaled ~allow_negative:true value with
@@ -325,6 +326,14 @@ module Money = struct
         (mul (of_int64 value) (of_int64 (Ratio.to_micros ratio)))
         (of_int64 scale))
     |> Checked_int64.of_z
+
+  let weight_toward_zero value ~equity =
+    if Int64.compare equity 0L <= 0 then
+      Error "portfolio equity must be positive"
+    else
+      Z.(div (mul (of_int64 value) (of_int64 Weight.scale)) (of_int64 equity))
+      |> Checked_int64.of_z
+      |> Result.map Weight.of_micros
 
   let fee ~fixed ~bps ~notional =
     if Int64.compare fixed 0L < 0 then Error "fixed fee must be nonnegative"

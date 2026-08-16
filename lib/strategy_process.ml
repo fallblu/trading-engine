@@ -5,7 +5,6 @@ type t = {
   await_process : unit -> Eio.Process.exit_status;
   clock : float Eio.Time.clock_ty Eio.Resource.t;
   transcript : Strategy_transcript.t;
-  instruments : Instrument.t list;
   timeout : float;
   mutable next_sequence : int64;
 }
@@ -78,8 +77,7 @@ let on_event session context event =
   let* sequence = next_sequence session in
   let* response =
     exchange_at session ~stage:"strategy event" ~sequence (fun ~sequence ->
-        Strategy_protocol.event_message ~sequence
-          ~instruments:session.instruments context event)
+        Strategy_protocol.event_message ~sequence context event)
   in
   match response with
   | Strategy_protocol.Intents intents -> Ok intents
@@ -170,7 +168,6 @@ let with_session ~env ~command ~timeout ~transcript_path
                     await_process = (fun () -> Eio.Process.await process);
                     clock = Eio.Stdenv.clock env;
                     transcript;
-                    instruments = initialization.instruments;
                     timeout;
                     next_sequence = 1L;
                   }

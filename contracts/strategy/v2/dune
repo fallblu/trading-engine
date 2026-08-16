@@ -1,0 +1,15 @@
+(install
+ (section share)
+ (package trading_engine)
+ (files
+  (message.schema.json as contracts/strategy/v2/message.schema.json)
+  (transcript.schema.json as contracts/strategy/v2/transcript.schema.json)
+  (fixtures/external.scenario.json
+   as
+   contracts/strategy/v2/fixtures/external.scenario.json)
+  (fixtures/external.scenario.jsonl
+   as
+   contracts/strategy/v2/fixtures/external.scenario.jsonl)
+  (fixtures/external.strategy.jsonl
+   as
+   contracts/strategy/v2/fixtures/external.strategy.jsonl)))

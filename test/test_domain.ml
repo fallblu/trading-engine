@@ -67,6 +67,24 @@ let fee_rounds_up_to_one_micro () =
   Alcotest.check money_testable "fixed plus rounded variable fee"
     (money "0.250001") fee
 
+let portfolio_weight_rounds_toward_zero () =
+  let positive =
+    T.Scalar.Money.weight_toward_zero (money "2") ~equity:(money "3") |> ok
+  in
+  let negative =
+    T.Scalar.Money.weight_toward_zero (money "-1") ~equity:(money "3") |> ok
+  in
+  Alcotest.(check string)
+    "positive truncated" "0.666666"
+    (T.Scalar.Weight.to_decimal_string positive);
+  Alcotest.(check string)
+    "negative truncated" "-0.333333"
+    (T.Scalar.Weight.to_decimal_string negative);
+  Alcotest.(check bool)
+    "zero equity rejected" true
+    (Result.is_error
+       (T.Scalar.Money.weight_toward_zero (money "1") ~equity:(money "0")))
+
 let market_slice_validation () =
   let start_at = timestamp "2026-01-02T14:30:00Z" in
   let end_at = timestamp "2026-01-02T21:00:00Z" in
@@ -209,6 +227,8 @@ let tests =
       scalar_decimal_round_trip;
     Alcotest.test_case "checked overflow" `Quick scalar_overflow_is_rejected;
     Alcotest.test_case "fee rounds up" `Quick fee_rounds_up_to_one_micro;
+    Alcotest.test_case "portfolio weight rounds toward zero" `Quick
+      portfolio_weight_rounds_toward_zero;
     Alcotest.test_case "market slice validation" `Quick market_slice_validation;
     Alcotest.test_case "SHA-256 vectors" `Quick sha256_vectors;
     Alcotest.test_case "OMS partial and duplicate fills" `Quick

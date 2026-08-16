@@ -26,7 +26,7 @@ let initialize_message_is_complete () =
     T.Strategy_protocol.initialize_message ~sequence:1L (initialization ())
   in
   Alcotest.(check string)
-    "protocol version" "1"
+    "protocol version" "2"
     (match field "strategy_protocol_version" message with
     | `String value -> value
     | _ -> Alcotest.fail "expected version string");
@@ -50,25 +50,44 @@ let initialize_message_is_complete () =
 let event_message_contains_complete_context () =
   let account = test_account () in
   let slice = market_slice 1L in
+  let valuation =
+    account_value account ~marks:[ (instrument_id "test-equity", price "105") ]
+  in
   let context =
-    T.Strategy.context ~now:slice.received_at ~account ~working_orders:[]
+    T.Strategy.context ~now:slice.received_at ~valuation ~working_orders:[]
       ~latest_bars:slice.bars
+    |> ok
   in
   let message =
-    T.Strategy_protocol.event_message ~sequence:2L
-      ~instruments:[ instrument () ]
-      context (T.Strategy.Market_slice_closed slice)
+    T.Strategy_protocol.event_message ~sequence:2L context
+      (T.Strategy.Market_slice_closed slice)
   in
   let payload = field "payload" message in
   let context = field "context" payload in
+  let portfolio = field "portfolio" context in
   Alcotest.(check int)
     "one cash ledger" 1
-    (match field "cash_balances" context with
+    (match field "cash_balances" portfolio with
     | `List values -> List.length values
     | _ -> Alcotest.fail "expected cash balances");
   Alcotest.(check string)
+    "equity" "10000"
+    (match field "equity" portfolio with
+    | `String value -> value
+    | _ -> Alcotest.fail "expected equity");
+  Alcotest.(check bool)
+    "weights available" true
+    (match field "weights_available" portfolio with
+    | `Bool value -> value
+    | _ -> Alcotest.fail "expected weight availability");
+  Alcotest.(check string)
+    "cash weight" "1"
+    (match field "cash_weight" portfolio with
+    | `String value -> value
+    | _ -> Alcotest.fail "expected cash weight");
+  Alcotest.(check string)
     "zero position" "0"
-    (match field "positions" context with
+    (match field "positions" portfolio with
     | `List [ position ] -> (
         match field "quantity" position with
         | `String value -> value
@@ -80,10 +99,42 @@ let event_message_contains_complete_context () =
     | `String value -> value
     | _ -> Alcotest.fail "expected event type")
 
+let nonpositive_equity_omits_weights () =
+  let account = test_account ~initial_cash:[ ("USD", money "0") ] () in
+  let slice = market_slice 1L in
+  let valuation =
+    account_value account ~marks:[ (instrument_id "test-equity", price "105") ]
+  in
+  let context =
+    T.Strategy.context ~now:slice.received_at ~valuation ~working_orders:[]
+      ~latest_bars:slice.bars
+    |> ok
+  in
+  let message =
+    T.Strategy_protocol.event_message ~sequence:2L context
+      (T.Strategy.Market_slice_closed slice)
+  in
+  let portfolio =
+    field "payload" message |> field "context" |> field "portfolio"
+  in
+  Alcotest.(check bool)
+    "weights unavailable" false
+    (match field "weights_available" portfolio with
+    | `Bool value -> value
+    | _ -> Alcotest.fail "expected weight availability");
+  Alcotest.(check bool)
+    "cash weight null" true
+    (field "cash_weight" portfolio = `Null);
+  Alcotest.(check bool)
+    "position weight null" true
+    (match field "positions" portfolio with
+    | `List [ position ] -> field "weight" position = `Null
+    | _ -> Alcotest.fail "expected complete positions")
+
 let response message_type payload =
   `Assoc
     [
-      ("strategy_protocol_version", `String "1");
+      ("strategy_protocol_version", `String "2");
       ("strategy_sequence", `String "3");
       ("message_type", `String message_type);
       ("payload", payload);
@@ -140,8 +191,8 @@ let responses_are_strict_and_typed () =
   let duplicate =
     `Assoc
       [
-        ("strategy_protocol_version", `String "1");
-        ("strategy_protocol_version", `String "1");
+        ("strategy_protocol_version", `String "2");
+        ("strategy_protocol_version", `String "2");
         ("strategy_sequence", `String "3");
         ("message_type", `String "stopped");
         ("payload", `Assoc []);
@@ -155,20 +206,20 @@ let responses_are_strict_and_typed () =
   let wrong_version =
     `Assoc
       [
-        ("strategy_protocol_version", `String "2");
+        ("strategy_protocol_version", `String "1");
         ("strategy_sequence", `String "3");
         ("message_type", `String "stopped");
         ("payload", `Assoc []);
       ]
   in
   Alcotest.(check string)
-    "wrong version rejected" "unsupported strategy protocol version: 2"
+    "wrong version rejected" "unsupported strategy protocol version: 1"
     (T.Strategy_protocol.response_of_yojson ~expected_sequence:3L wrong_version
     |> error);
   let unknown_field =
     `Assoc
       [
-        ("strategy_protocol_version", `String "1");
+        ("strategy_protocol_version", `String "2");
         ("strategy_sequence", `String "3");
         ("message_type", `String "stopped");
         ("payload", `Assoc []);
@@ -214,6 +265,8 @@ let tests =
       initialize_message_is_complete;
     Alcotest.test_case "event context is complete" `Quick
       event_message_contains_complete_context;
+    Alcotest.test_case "nonpositive equity omits weights" `Quick
+      nonpositive_equity_omits_weights;
     Alcotest.test_case "responses are strict and typed" `Quick
       responses_are_strict_and_typed;
     Alcotest.test_case "transcript records direction" `Quick

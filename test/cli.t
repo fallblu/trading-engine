@@ -2,7 +2,7 @@
   0.1.0-dev
 
   $ ../bin/main.exe --capabilities
-  {"engine_version":"0.1.0-dev","scenario_contract_versions":["3"],"journal_contract_versions":["3"],"scenario_formats":["json","jsonl"],"journal_formats":["jsonl"],"execution_models":["completed_bar_v1"],"strategy_protocol_versions":["1"]}
+  {"engine_version":"0.1.0-dev","scenario_contract_versions":["3"],"journal_contract_versions":["3"],"scenario_formats":["json","jsonl"],"journal_formats":["jsonl"],"execution_models":["completed_bar_v1"],"strategy_protocol_versions":["2"]}
 
   $ ../bin/main.exe --validate-only --input ../contracts/v3/fixtures/demo.scenario.json
   valid run=demo instruments=1 schedule=2 slices=4 scenario_sha256=3e19fa66bc6425bb8ed7a89b338080a831dd39ea778c3c7f9e8ce1d3370fbee0
@@ -43,7 +43,7 @@
   $ test ! -e ignored.journal.jsonl
 
   $ mkdir external
-  $ ../bin/main.exe --input ../contracts/strategy/v1/fixtures/external.scenario.json --journal external/run.journal.jsonl --strategy-executable ./fake_strategy.py --strategy-transcript external/run.strategy.jsonl --strategy-timeout 5
+  $ ../bin/main.exe --input ../contracts/strategy/v2/fixtures/external.scenario.json --journal external/run.journal.jsonl --strategy-executable ./fake_strategy.py --strategy-transcript external/run.strategy.jsonl --strategy-timeout 5
   run=external-demo audits=10 orders=1 active=0 filled=1 rejected=0
   cash=9794 equity=10008 gross=214 realized=0 unrealized=8 fees=0
   journal=external/run.journal.jsonl
@@ -51,10 +51,10 @@
 
   $ python3 -c 'from pathlib import Path; print(len(Path("external/run.journal.jsonl").read_text().splitlines()), len(Path("external/run.strategy.jsonl").read_text().splitlines()))'
   10 14
-  $ diff -u ../contracts/strategy/v1/fixtures/external.strategy.jsonl external/run.strategy.jsonl
+  $ diff -u ../contracts/strategy/v2/fixtures/external.strategy.jsonl external/run.strategy.jsonl
 
   $ mkdir failed-external
-  $ ../bin/main.exe --input ../contracts/strategy/v1/fixtures/external.scenario.json --journal failed-external/run.journal.jsonl --strategy-executable ./fake_strategy.py --strategy-arg stall --strategy-transcript failed-external/run.strategy.jsonl --strategy-timeout 0.01
+  $ ../bin/main.exe --input ../contracts/strategy/v2/fixtures/external.scenario.json --journal failed-external/run.journal.jsonl --strategy-executable ./fake_strategy.py --strategy-arg stall --strategy-transcript failed-external/run.strategy.jsonl --strategy-timeout 0.01
   trading-engine: strategy initialization: external strategy timed out
   [123]
   $ test ! -e failed-external/run.journal.jsonl
@@ -67,7 +67,7 @@
   >   expected="$2"
   >   directory="fault-$mode"
   >   mkdir "$directory"
-  >   output=$(../bin/main.exe --input ../contracts/strategy/v1/fixtures/external.scenario.json --journal "$directory/run.journal.jsonl" --strategy-executable ./fake_strategy.py --strategy-arg "$mode" --strategy-transcript "$directory/run.strategy.jsonl" --strategy-timeout 5 2>&1)
+  >   output=$(../bin/main.exe --input ../contracts/strategy/v2/fixtures/external.scenario.json --journal "$directory/run.journal.jsonl" --strategy-executable ./fake_strategy.py --strategy-arg "$mode" --strategy-transcript "$directory/run.strategy.jsonl" --strategy-timeout 5 2>&1)
   >   status=$?
   >   test "$status" -eq 123 || return 1
   >   case "$output" in *"$expected"*) ;; *) return 1 ;; esac
@@ -97,7 +97,7 @@
   unknown-field: rejected
 
   $ mkdir external-stream
-  $ ../bin/main.exe --input-format jsonl --input ../contracts/strategy/v1/fixtures/external.scenario.jsonl --journal external-stream/run.journal.jsonl --strategy-executable ./fake_strategy.py --strategy-transcript external-stream/run.strategy.jsonl --strategy-timeout 5
+  $ ../bin/main.exe --input-format jsonl --input ../contracts/strategy/v2/fixtures/external.scenario.jsonl --journal external-stream/run.journal.jsonl --strategy-executable ./fake_strategy.py --strategy-transcript external-stream/run.strategy.jsonl --strategy-timeout 5
   run=external-demo audits=10 orders=1 active=0 filled=1 rejected=0
   cash=9794 equity=10008 gross=214 realized=0 unrealized=8 fees=0
   journal=external-stream/run.journal.jsonl

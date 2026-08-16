@@ -90,7 +90,11 @@ Running the same scenario bytes produces byte-identical audit lines.
 `Engine.Interactive` stops at each strategy request and exposes the immutable context and event.
 Its `resume` transition accepts typed intents and continues the same pure reducer. The scripted
 runner invokes an in-process callback at that boundary. The external runner serializes it through
-protocol v1. Reducer state never contains a process, clock, pipe, timeout, or file handle.
+protocol v2. Reducer state never contains a process, clock, pipe, timeout, or file handle.
+
+Each strategy callback carries an account valuation built at that reducer boundary. It includes
+post-fill cash and positions marked to the latest completed bars. Positive-equity accounts expose
+realized portfolio weights; zero- and negative-equity accounts explicitly omit weights.
 
 The JSON Lines runner hashes and validates the complete stream before journal creation. It then
 replays one slice-plus-intents record at a time and does not accumulate market slices, schedule

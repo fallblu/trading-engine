@@ -29,11 +29,7 @@ type direction = Engine_to_strategy | Strategy_to_engine
 val initialize_message : sequence:int64 -> initialization -> Yojson.Safe.t
 
 val event_message :
-  sequence:int64 ->
-  instruments:Instrument.t list ->
-  Strategy.context ->
-  Strategy.event ->
-  Yojson.Safe.t
+  sequence:int64 -> Strategy.context -> Strategy.event -> Yojson.Safe.t
 
 val shutdown_message : sequence:int64 -> Yojson.Safe.t
 

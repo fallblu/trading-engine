@@ -1,8 +1,29 @@
 type context = {
   now : Ptime.t;
-  account : Account.t;
+  portfolio : portfolio;
   working_orders : Order.t list;
   latest_bars : Bar.t Id.Instrument.Map.t;
+}
+
+and marked_position = {
+  instrument_id : Id.Instrument.t;
+  quantity : Scalar.Quantity.t;
+  mark : Scalar.Price.t;
+  base_market_value : Scalar.Money.t;
+  weight : Scalar.Weight.t option;
+}
+
+and portfolio = {
+  base_currency : string;
+  cash : Scalar.Money.t;
+  net_market_value : Scalar.Money.t;
+  long_market_value : Scalar.Money.t;
+  short_market_value : Scalar.Money.t;
+  gross_exposure : Scalar.Money.t;
+  equity : Scalar.Money.t;
+  cash_weight : Scalar.Weight.t option;
+  cash_balances : Account.cash_attribution list;
+  positions : marked_position list;
 }
 
 type event =
@@ -28,24 +49,72 @@ type intent =
   | Cancel_order of Id.Order.t
   | Emit_metric of { name : string; value : string }
 
-let context ~now ~account ~working_orders ~latest_bars =
+let ( let* ) result function_ =
+  match result with Ok value -> function_ value | Error _ as error -> error
+
+let weight ~equity value =
+  if Scalar.Money.compare equity Scalar.Money.zero <= 0 then Ok None
+  else Scalar.Money.weight_toward_zero value ~equity |> Result.map Option.some
+
+let context ~now ~(valuation : Account.valuation) ~working_orders ~latest_bars =
+  let* cash_weight = weight ~equity:valuation.equity valuation.cash in
+  let* positions =
+    List.fold_left
+      (fun result (position : Account.position_attribution) ->
+        let* positions = result in
+        let* position_weight =
+          weight ~equity:valuation.equity position.base_market_value
+        in
+        Ok
+          ({
+             instrument_id = position.instrument_id;
+             quantity = position.quantity;
+             mark = position.mark;
+             base_market_value = position.base_market_value;
+             weight = position_weight;
+           }
+          :: positions))
+      (Ok []) valuation.positions
+    |> Result.map List.rev
+  in
   let latest_bars =
     List.fold_left
       (fun result bar -> Id.Instrument.Map.add bar.Bar.instrument_id bar result)
       Id.Instrument.Map.empty latest_bars
   in
-  { now; account; working_orders; latest_bars }
+  let portfolio =
+    {
+      base_currency = valuation.base_currency;
+      cash = valuation.cash;
+      net_market_value = valuation.net_market_value;
+      long_market_value = valuation.long_market_value;
+      short_market_value = valuation.short_market_value;
+      gross_exposure = valuation.gross_exposure;
+      equity = valuation.equity;
+      cash_weight;
+      cash_balances = valuation.cash_balances;
+      positions;
+    }
+  in
+  Ok { now; portfolio; working_orders; latest_bars }
 
 let now context = context.now
+let portfolio context = context.portfolio
+let cash context = context.portfolio.cash
 
-let cash context =
-  Account.cash context.account (Account.base_currency context.account)
-  |> Option.get
-
-let cash_balances context = Account.cash_balances context.account
+let cash_balances context =
+  List.map
+    (fun (balance : Account.cash_attribution) ->
+      (balance.currency, balance.amount))
+    context.portfolio.cash_balances
 
 let position context instrument_id =
-  Account.position_quantity context.account instrument_id
+  List.find_opt
+    (fun (position : marked_position) ->
+      Id.Instrument.equal position.instrument_id instrument_id)
+    context.portfolio.positions
+  |> Option.map (fun (position : marked_position) -> position.quantity)
+  |> Option.value ~default:Scalar.Quantity.zero
 
 let working_orders context = context.working_orders
 

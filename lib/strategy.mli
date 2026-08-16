@@ -2,6 +2,27 @@
 
 type context
 
+type marked_position = private {
+  instrument_id : Id.Instrument.t;
+  quantity : Scalar.Quantity.t;
+  mark : Scalar.Price.t;
+  base_market_value : Scalar.Money.t;
+  weight : Scalar.Weight.t option;
+}
+
+type portfolio = private {
+  base_currency : string;
+  cash : Scalar.Money.t;
+  net_market_value : Scalar.Money.t;
+  long_market_value : Scalar.Money.t;
+  short_market_value : Scalar.Money.t;
+  gross_exposure : Scalar.Money.t;
+  equity : Scalar.Money.t;
+  cash_weight : Scalar.Weight.t option;
+  cash_balances : Account.cash_attribution list;
+  positions : marked_position list;
+}
+
 type event =
   | Market_slice_closed of Market_slice.t
   | Fill_received of Fill.t
@@ -27,12 +48,13 @@ type intent =
 
 val context :
   now:Ptime.t ->
-  account:Account.t ->
+  valuation:Account.valuation ->
   working_orders:Order.t list ->
   latest_bars:Bar.t list ->
-  context
+  (context, string) result
 
 val now : context -> Ptime.t
+val portfolio : context -> portfolio
 val cash : context -> Scalar.Money.t
 val cash_balances : context -> (string * Scalar.Money.t) list
 val position : context -> Id.Instrument.t -> Scalar.Quantity.t

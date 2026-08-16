@@ -1,5 +1,5 @@
 let version = "3"
-let strategy_protocol_version = "1"
+let strategy_protocol_version = "2"
 let engine_version = "0.1.0-dev"
 let strings values = `List (List.map (fun value -> `String value) values)
 
