@@ -26,6 +26,11 @@ and reducer internals keep plain errors inside the deterministic boundary; repla
 stable codes, phases, source locations, event causality, and sanitized exception details before
 returning an error to callers.
 
+Artifact writers and the process supervisor route their minimal operating-system operations through
+one boundary dispatcher. Production executes those effects directly. Failure-path tests replace one
+operation at a time, including partial writes, without introducing files, pipes, processes, or fault
+state into the reducer.
+
 ## Reducer phases
 
 For each synchronized market slice, the engine:

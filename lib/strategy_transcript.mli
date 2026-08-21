@@ -2,7 +2,7 @@
 
 type t
 
-val create : string -> (t, Diagnostic.t) result
+val create : ?effects:Boundary_effects.t -> string -> (t, Diagnostic.t) result
 
 val append :
   t ->

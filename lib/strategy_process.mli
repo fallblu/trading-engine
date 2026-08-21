@@ -3,6 +3,7 @@
 type t
 
 val with_session :
+  ?effects:Boundary_effects.t ->
   env:Eio_unix.Stdenv.base ->
   command:string list ->
   timeout:float ->
