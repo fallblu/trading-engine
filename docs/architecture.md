@@ -26,18 +26,20 @@ journal files, and the runtime shell.
 For each synchronized market slice, the engine:
 
 1. Validates catalog coverage, slice order, receipt order, and market time.
-2. Emits `run_started` once and then `market_slice_received`.
+2. Stores the synchronized closes and complete FX vector, emits `run_started` once, and then emits
+   `market_slice_received`.
 3. Applies splits and dividends, adjusting signed positions, persistent targets, and active orders.
 4. Accrues borrow fees on open shorts for the slice interval.
-5. Builds one matching batch from orders that became eligible after an earlier slice.
+5. Fixes the priority sequence of orders that became eligible after an earlier slice.
 6. Offers each instrument's remaining capacity to liquidation orders first, then applies
    sell-before-buy and FIFO priority within each origin class.
 7. Clips proposals to the largest lot-aligned quantity allowed by position, exposure, leverage,
    and initial-margin risk; only applied quantity consumes capacity.
-8. Cancels eligible market-order remainders.
-9. Stores every synchronized close and complete FX vector as current marks.
-10. Delivers captured fill, order, and `Market_slice_closed` requests one at a time.
-11. Resumes with scripted or external intents and reconciles the persistent portfolio target once.
+8. Pauses matching to deliver each fill and order request, then applies the response before the
+   next callback or eligible order.
+9. Cancels eligible market-order remainders and delivers their order updates.
+10. Delivers `market_slice_closed` with the same clock, bars, and FX marks as the fill callbacks.
+11. Reconciles the persistent portfolio target once after the closing callback.
 12. Assesses maintenance margin, cancelling active orders and creating bounded liquidation orders
     when breached.
 13. Delivers resulting order updates and drains strategy feedback.
@@ -90,11 +92,13 @@ Running the same scenario bytes produces byte-identical audit lines.
 `Engine.Interactive` stops at each strategy request and exposes the immutable context and event.
 Its `resume` transition accepts typed intents and continues the same pure reducer. The scripted
 runner invokes an in-process callback at that boundary. The external runner serializes it through
-protocol v2. Reducer state never contains a process, clock, pipe, timeout, or file handle.
+protocol v3. Reducer state never contains a process, clock, pipe, timeout, or file handle.
 
-Each strategy callback carries an account valuation built at that reducer boundary. It includes
-post-fill cash and positions marked to the latest completed bars. Positive-equity accounts expose
-realized portfolio weights; zero- and negative-equity accounts explicitly omit weights.
+Each strategy callback carries an account valuation built at that reducer boundary. All callbacks
+for a slice use its receipt time, completed bars, and FX vector. A callback response is reduced
+before any later callback or eligible order, so the next context exposes its effects.
+Positive-equity accounts expose realized portfolio weights; zero- and negative-equity accounts
+explicitly omit weights.
 
 The JSON Lines runner hashes and validates the complete stream before journal creation. It then
 replays one slice-plus-intents record at a time and does not accumulate market slices, schedule

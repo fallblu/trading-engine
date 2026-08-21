@@ -315,6 +315,56 @@ let applied_quantity_is_validated () =
     "quantity must remain lot aligned" true
     (Result.is_error misaligned)
 
+let cursor_reads_current_oms_and_preserves_capacity () =
+  let oms, first =
+    oms_with_order ~id:"order-first" (request ~quantity_value:"1" ())
+  in
+  let oms, second =
+    T.Oms.accept oms ~id:(order_id "order-second") ~accepted_sequence:2L
+      ~created_event_id:(event_id "order-second-event")
+      ~created_at:(timestamp "2026-01-02T21:00:02Z")
+      ~eligible_after_slice_sequence:1L
+      (request ~quantity_value:"1" ())
+    |> ok
+  in
+  let oms, third =
+    T.Oms.accept oms ~id:(order_id "order-third") ~accepted_sequence:3L
+      ~created_event_id:(event_id "order-third-event")
+      ~created_at:(timestamp "2026-01-02T21:00:02Z")
+      ~eligible_after_slice_sequence:1L
+      (request ~quantity_value:"1" ())
+    |> ok
+  in
+  let cursor =
+    T.Execution.start_slice (execution ())
+      ~instruments:[ instrument () ]
+      ~oms
+      (market_slice ~bars:[ bar ~volume:(Some "2") 2L ] 2L)
+    |> ok
+  in
+  let cursor =
+    match T.Execution.next cursor ~oms |> ok with
+    | T.Execution.Proposed (proposed, advance) ->
+        Alcotest.check order_id_testable "first proposal" first.id
+          proposed.order_id;
+        advance proposed.quantity |> ok
+    | T.Execution.Finished _ -> Alcotest.fail "expected first proposal"
+  in
+  let oms, _ = T.Oms.cancel oms second.id |> ok in
+  let cursor =
+    match T.Execution.next cursor ~oms |> ok with
+    | T.Execution.Proposed (proposed, advance) ->
+        Alcotest.check order_id_testable "cancelled order is skipped" third.id
+          proposed.order_id;
+        Alcotest.check quantity_testable "unused capacity reaches third order"
+          (quantity "1") proposed.quantity;
+        advance proposed.quantity |> ok
+    | T.Execution.Finished _ -> Alcotest.fail "expected third-order proposal"
+  in
+  match T.Execution.next cursor ~oms |> ok with
+  | T.Execution.Finished _ -> ()
+  | T.Execution.Proposed _ -> Alcotest.fail "expected completed cursor"
+
 let fills_respect_lot_size () =
   let configured = instrument ~lot_size:"10" () in
   let oms, _ = oms_with_order (request ~quantity_value:"20" ()) in
@@ -371,6 +421,8 @@ let tests =
       applied_quantity_controls_shared_capacity;
     Alcotest.test_case "applied quantity validation" `Quick
       applied_quantity_is_validated;
+    Alcotest.test_case "cursor reads current OMS" `Quick
+      cursor_reads_current_oms_and_preserves_capacity;
     Alcotest.test_case "fills respect lot size" `Quick fills_respect_lot_size;
     Alcotest.test_case "off-tick market slice rejected" `Quick
       off_tick_market_slice_is_rejected;

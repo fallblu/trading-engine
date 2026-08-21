@@ -26,7 +26,7 @@ let initialize_message_is_complete () =
     T.Strategy_protocol.initialize_message ~sequence:1L (initialization ())
   in
   Alcotest.(check string)
-    "protocol version" "2"
+    "protocol version" "3"
     (match field "strategy_protocol_version" message with
     | `String value -> value
     | _ -> Alcotest.fail "expected version string");
@@ -134,7 +134,7 @@ let nonpositive_equity_omits_weights () =
 let response message_type payload =
   `Assoc
     [
-      ("strategy_protocol_version", `String "2");
+      ("strategy_protocol_version", `String "3");
       ("strategy_sequence", `String "3");
       ("message_type", `String message_type);
       ("payload", payload);
@@ -191,8 +191,8 @@ let responses_are_strict_and_typed () =
   let duplicate =
     `Assoc
       [
-        ("strategy_protocol_version", `String "2");
-        ("strategy_protocol_version", `String "2");
+        ("strategy_protocol_version", `String "3");
+        ("strategy_protocol_version", `String "3");
         ("strategy_sequence", `String "3");
         ("message_type", `String "stopped");
         ("payload", `Assoc []);
@@ -219,7 +219,7 @@ let responses_are_strict_and_typed () =
   let unknown_field =
     `Assoc
       [
-        ("strategy_protocol_version", `String "2");
+        ("strategy_protocol_version", `String "3");
         ("strategy_sequence", `String "3");
         ("message_type", `String "stopped");
         ("payload", `Assoc []);
