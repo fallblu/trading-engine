@@ -165,6 +165,210 @@ let split_adjusts_working_order () =
     [ "market_slice_received"; "split_applied"; "order_adjusted"; "valuation" ]
     (List.map (fun event -> T.Audit.event_name event.T.Audit.event) events)
 
+let split_action id ~numerator ~denominator =
+  T.Corporate_action.split
+    ~id:(T.Id.Corporate_action.of_string_exn id)
+    ~instrument_id:(instrument_id "test-equity")
+    ~numerator ~denominator
+  |> ok
+
+let split_caps_adjusted_market_fill () =
+  let strategy_state =
+    T.Scripted_strategy.create
+      [
+        ( 1L,
+          [
+            T.Strategy.Submit_order
+              (request ~quantity_value:"10" ~kind:T.Order.Market ());
+          ] );
+      ]
+    |> ok
+  in
+  let config = engine_config ~risk:(risk ~max_order:"10" ()) () in
+  let state =
+    Runner.create
+      ~run_id:(run_id "split-market-cap")
+      ~scenario_sha256 ~config
+      ~initial_cash:[ ("USD", money "10000") ]
+      ~strategy_state
+    |> ok
+  in
+  let state, _ = Runner.process_slice state (market_slice 1L) |> ok in
+  let action =
+    split_action "market-forward-split" ~numerator:2L ~denominator:1L
+  in
+  let split_bar =
+    bar ~open_price:"50" ~high_price:"50" ~low_price:"50" ~close_price:"50" 2L
+  in
+  let state, events =
+    Runner.process_slice state
+      (market_slice ~bars:[ split_bar ] ~corporate_actions:[ action ] 2L)
+    |> ok
+  in
+  Alcotest.check quantity_testable "bounded market fill" (quantity "10")
+    (T.Account.position_quantity (Runner.account state)
+       (instrument_id "test-equity"));
+  let order = T.Oms.orders (Runner.oms state) |> List.hd in
+  Alcotest.check quantity_testable "adjusted market quantity" (quantity "20")
+    order.request.quantity;
+  Alcotest.check quantity_testable "market filled quantity" (quantity "10")
+    order.filled_quantity;
+  Alcotest.(check string)
+    "market remainder cancelled" "cancelled"
+    (T.Order.status_to_string order.status);
+  let limited =
+    List.find_map
+      (fun event ->
+        match event.T.Audit.event with
+        | T.Audit.Margin_limited { requested_quantity; permitted_quantity; _ }
+          ->
+            Some (requested_quantity, permitted_quantity)
+        | _ -> None)
+      events
+    |> Option.get
+  in
+  Alcotest.check quantity_testable "adjusted proposal" (quantity "20")
+    (fst limited);
+  Alcotest.check quantity_testable "maximum permitted fill" (quantity "10")
+    (snd limited)
+
+let split_caps_partially_filled_limit_remainder () =
+  let strategy_state =
+    T.Scripted_strategy.create
+      [
+        ( 1L,
+          [
+            T.Strategy.Submit_order
+              (request ~quantity_value:"10"
+                 ~kind:(T.Order.Limit (price "100"))
+                 ());
+          ] );
+      ]
+    |> ok
+  in
+  let config = engine_config ~risk:(risk ~max_order:"10" ()) () in
+  let state =
+    Runner.create
+      ~run_id:(run_id "split-partial-limit")
+      ~scenario_sha256 ~config
+      ~initial_cash:[ ("USD", money "10000") ]
+      ~strategy_state
+    |> ok
+  in
+  let state, _ = Runner.process_slice state (market_slice 1L) |> ok in
+  let partial_bar =
+    bar ~open_price:"90" ~high_price:"100" ~low_price:"80" ~close_price:"90"
+      ~volume:(Some "4") 2L
+  in
+  let state, _ =
+    Runner.process_slice state (market_slice ~bars:[ partial_bar ] 2L) |> ok
+  in
+  let action =
+    split_action "partial-forward-split" ~numerator:2L ~denominator:1L
+  in
+  let adjusted_bar =
+    bar ~open_price:"50" ~high_price:"50" ~low_price:"50" ~close_price:"50" 3L
+  in
+  let state, events =
+    Runner.process_slice state
+      (market_slice ~bars:[ adjusted_bar ] ~corporate_actions:[ action ] 3L)
+    |> ok
+  in
+  let order = T.Oms.active_orders (Runner.oms state) |> List.hd in
+  Alcotest.check quantity_testable "split-adjusted total" (quantity "20")
+    order.request.quantity;
+  Alcotest.check quantity_testable "split-adjusted prior fill plus bounded fill"
+    (quantity "18") order.filled_quantity;
+  Alcotest.check quantity_testable "GTC remainder" (quantity "2")
+    (T.Order.remaining_quantity order);
+  let limited =
+    List.find_map
+      (fun event ->
+        match event.T.Audit.event with
+        | T.Audit.Margin_limited { requested_quantity; permitted_quantity; _ }
+          ->
+            Some (requested_quantity, permitted_quantity)
+        | _ -> None)
+      events
+    |> Option.get
+  in
+  Alcotest.check quantity_testable "adjusted partial proposal" (quantity "12")
+    (fst limited);
+  Alcotest.check quantity_testable "bounded partial fill" (quantity "10")
+    (snd limited);
+  let state, _ =
+    Runner.process_slice state (market_slice ~bars:[ adjusted_bar ] 4L) |> ok
+  in
+  let order = T.Oms.orders (Runner.oms state) |> List.hd in
+  Alcotest.(check string)
+    "limit completes on later slice" "filled"
+    (T.Order.status_to_string order.status);
+  Alcotest.check quantity_testable "final split-adjusted position"
+    (quantity "20")
+    (T.Account.position_quantity (Runner.account state)
+       (instrument_id "test-equity"))
+
+let reverse_split_restores_order_below_maximum () =
+  let strategy_state =
+    T.Scripted_strategy.create
+      [
+        ( 1L,
+          [
+            T.Strategy.Submit_order
+              (request ~quantity_value:"10"
+                 ~kind:(T.Order.Limit (price "100"))
+                 ());
+          ] );
+      ]
+    |> ok
+  in
+  let config = engine_config ~risk:(risk ~max_order:"10" ()) () in
+  let state =
+    Runner.create
+      ~run_id:(run_id "reverse-split-order")
+      ~scenario_sha256 ~config
+      ~initial_cash:[ ("USD", money "10000") ]
+      ~strategy_state
+    |> ok
+  in
+  let state, _ = Runner.process_slice state (market_slice 1L) |> ok in
+  let forward = split_action "a-forward-split" ~numerator:2L ~denominator:1L in
+  let no_fill_bar =
+    bar ~open_price:"75" ~high_price:"75" ~low_price:"75" ~close_price:"75" 2L
+  in
+  let state, _ =
+    Runner.process_slice state
+      (market_slice ~bars:[ no_fill_bar ] ~corporate_actions:[ forward ] 2L)
+    |> ok
+  in
+  let oversized = T.Oms.active_orders (Runner.oms state) |> List.hd in
+  Alcotest.check quantity_testable "forward-adjusted above maximum"
+    (quantity "20") oversized.request.quantity;
+  let reverse = split_action "b-reverse-split" ~numerator:1L ~denominator:2L in
+  let fill_bar =
+    bar ~open_price:"100" ~high_price:"100" ~low_price:"100" ~close_price:"100"
+      3L
+  in
+  let state, events =
+    Runner.process_slice state
+      (market_slice ~bars:[ fill_bar ] ~corporate_actions:[ reverse ] 3L)
+    |> ok
+  in
+  let order = T.Oms.orders (Runner.oms state) |> List.hd in
+  Alcotest.check quantity_testable "reverse-adjusted at maximum" (quantity "10")
+    order.request.quantity;
+  Alcotest.(check string)
+    "reverse-adjusted order fills" "filled"
+    (T.Order.status_to_string order.status);
+  Alcotest.(check bool)
+    "fill at maximum is not clipped" false
+    (List.exists
+       (fun event ->
+         match event.T.Audit.event with
+         | T.Audit.Margin_limited _ -> true
+         | _ -> false)
+       events)
+
 let margin_call_forces_deterministic_liquidation () =
   let config = engine_config () in
   let state =
@@ -294,6 +498,12 @@ let tests =
       split_and_dividend_accounting;
     Alcotest.test_case "split adjusts working order" `Quick
       split_adjusts_working_order;
+    Alcotest.test_case "split caps adjusted market fill" `Quick
+      split_caps_adjusted_market_fill;
+    Alcotest.test_case "split caps partially filled limit remainder" `Quick
+      split_caps_partially_filled_limit_remainder;
+    Alcotest.test_case "reverse split restores order below maximum" `Quick
+      reverse_split_restores_order_below_maximum;
     Alcotest.test_case "margin call forces liquidation" `Quick
       margin_call_forces_deterministic_liquidation;
     Alcotest.test_case "short borrow accrues" `Quick

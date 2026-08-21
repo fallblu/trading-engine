@@ -159,8 +159,11 @@ base-currency rate is exactly one.
 Supported corporate actions are exact-ratio `split` and per-unit `cash_dividend` records. Action
 IDs are unique across the scenario. Actions are applied in canonical ID order before borrow fees
 and matching. A split rescales the position, persistent target, and active orders while preserving
-basis; a dividend changes the quote-currency cash ledger and realized dividend P&L, crediting a
-long and debiting a short.
+basis; it does not rescale unit-based risk limits. Split-adjusted positions and targets are
+grandfathered under the existing reduce-only position policy. Split-adjusted orders remain active,
+but each fill is bounded by `max_order_quantity`; GTC limit remainders may fill on later slices,
+while market IOC remainders are cancelled. A dividend changes the quote-currency cash ledger and
+realized dividend P&L, crediting a long and debiting a short.
 
 For causal next-open execution, an order-changing schedule entry's anchor `received_at` is no later
 than the next slice `start_at`.
@@ -178,8 +181,9 @@ hashes the exact batch document or stream bytes it parses.
 `market_slice_received` contains the complete normalized slice. Portfolio requests record their
 basis, original weight when applicable, computed quantity, and sizing reference price. Orders use
 `eligible_after_slice_sequence`; fills use `slice_sequence`. `margin_limited` records a proposed
-fill and the greatest lot-aligned quantity permitted by position, exposure, leverage, and initial
-margin policy. Each order snapshot retains both creation and latest-update event IDs.
+fill and the greatest lot-aligned quantity permitted by maximum order quantity, position,
+exposure, leverage, and initial margin policy. Each order snapshot retains both creation and
+latest-update event IDs.
 
 The journal also records split/dividend application, split-driven order adjustments, short borrow
 fees, margin calls, liquidation-origin orders, and restoration. Every valuation contains complete

@@ -897,8 +897,12 @@ module Interactive = struct
       Ok fee
     in
     let lot_value = Scalar.Quantity.to_micros instrument.lot_size in
+    let quantity_limit =
+      Scalar.Quantity.minimum proposed.quantity
+        (Risk.max_order_quantity state.config.risk)
+    in
     let requested_lots =
-      Int64.div (Scalar.Quantity.to_micros proposed.quantity) lot_value
+      Int64.div (Scalar.Quantity.to_micros quantity_limit) lot_value
     in
     let allowed lots =
       if Int64.equal lots 0L then true
