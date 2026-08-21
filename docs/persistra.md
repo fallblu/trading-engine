@@ -56,12 +56,16 @@ for structural checks. The engine parser is authoritative for ordering, catalog 
 causality, tick, lot, risk, and accounting invariants that JSON Schema cannot express.
 
 External strategies use the separate
-[strategy protocol v2](../contracts/strategy/v2/README.md). Persistra's host turns protocol
+[strategy protocol v3](../contracts/strategy/v3/README.md). Persistra's host turns protocol
 initialization, marked portfolio contexts, market-slice, fill, order, and rejection events into
 typed callbacks. Realized weights are available only for positive equity. The retained run
 manifest binds the strategy identity, executable hash, declared input hashes, transcript hash,
 scenario hash, and journal hash. Strategy standard output remains protocol-only; logs and
 diagnostics use standard error.
+
+Persistra must answer each callback before the engine continues matching. Every callback for a
+slice uses the slice receipt time and complete bar and FX snapshot. A later callback therefore
+includes accepted intents returned from an earlier callback at that same replay clock.
 
 ## Time mapping
 

@@ -23,9 +23,9 @@
  (deps
   ../bin/main.exe
   fake_strategy.py
-  ../contracts/strategy/v2/fixtures/external.scenario.json
-  ../contracts/strategy/v2/fixtures/external.scenario.jsonl
-  ../contracts/strategy/v2/fixtures/external.strategy.jsonl
+  ../contracts/strategy/v3/fixtures/external.scenario.json
+  ../contracts/strategy/v3/fixtures/external.scenario.jsonl
+  ../contracts/strategy/v3/fixtures/external.strategy.jsonl
   ../contracts/v3/fixtures/demo.scenario.json
   ../contracts/v3/fixtures/demo.scenario.jsonl))
 
@@ -56,15 +56,15 @@
   validate_strategy_schema.py
   ../contracts/v3/scenario.schema.json
   ../contracts/v3/journal.schema.json
-  ../contracts/strategy/v2/message.schema.json
-  ../contracts/strategy/v2/transcript.schema.json
-  ../contracts/strategy/v2/fixtures/external.strategy.jsonl)
+  ../contracts/strategy/v3/message.schema.json
+  ../contracts/strategy/v3/transcript.schema.json
+  ../contracts/strategy/v3/fixtures/external.strategy.jsonl)
  (action
   (run
    python3
    %{dep:validate_strategy_schema.py}
    %{dep:../contracts/v3/scenario.schema.json}
    %{dep:../contracts/v3/journal.schema.json}
-   %{dep:../contracts/strategy/v2/message.schema.json}
-   %{dep:../contracts/strategy/v2/transcript.schema.json}
-   %{dep:../contracts/strategy/v2/fixtures/external.strategy.jsonl})))
+   %{dep:../contracts/strategy/v3/message.schema.json}
+   %{dep:../contracts/strategy/v3/transcript.schema.json}
+   %{dep:../contracts/strategy/v3/fixtures/external.strategy.jsonl})))
