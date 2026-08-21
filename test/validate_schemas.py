@@ -115,7 +115,7 @@ def main() -> None:
     unsupported_execution_model = copy.deepcopy(scenario)
     unsupported_execution_model["execution"]["model"] = "future_model"
     expect_invalid(scenario_validator, unsupported_execution_model)
-    if contract_version == "3":
+    if contract_version in {"3", "4"}:
         excessive_feedback_cap = copy.deepcopy(scenario)
         excessive_feedback_cap["max_internal_events"] = 4611686018427387904
         expect_invalid(scenario_validator, excessive_feedback_cap)
@@ -129,7 +129,7 @@ def main() -> None:
     malformed_stream_slice["payload"]["market_slice"]["unexpected"] = True
     expect_invalid(stream_validator, malformed_stream_slice)
     noncanonical = copy.deepcopy(scenario)
-    if contract_version == "3":
+    if contract_version in {"3", "4"}:
         noncanonical["initial_cash"][0]["amount"] = "10000.0"
     else:
         noncanonical["initial_cash"] = "10000.0"
@@ -153,6 +153,31 @@ def main() -> None:
         json.loads(line)
         for line in journal_path.read_text(encoding="utf-8").splitlines()
     ]
+    if contract_version == "4":
+        fill_clipped = copy.deepcopy(first_journal_record)
+        fill_clipped["event_type"] = "fill_clipped"
+        fill_clipped["payload"] = {
+            "reason": {
+                "version": "1",
+                "policy": "max_leverage",
+                "threshold": {"unit": "ratio", "value": "2"},
+            },
+            "order_id": "fixture-order",
+            "instrument_id": "fixture-instrument",
+            "proposed_quantity": "10",
+            "permitted_quantity": "5",
+            "price": "100",
+        }
+        journal_validator.validate(fill_clipped)
+        mismatched_threshold = copy.deepcopy(fill_clipped)
+        mismatched_threshold["payload"]["reason"]["threshold"] = {
+            "unit": "money",
+            "value": "2",
+        }
+        expect_invalid(journal_validator, mismatched_threshold)
+        unknown_policy = copy.deepcopy(fill_clipped)
+        unknown_policy["payload"]["reason"]["policy"] = "future_policy"
+        expect_invalid(journal_validator, unknown_policy)
     order_record = next(
         record for record in journal_records if record["event_type"] == "order_accepted"
     )

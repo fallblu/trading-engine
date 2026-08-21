@@ -66,7 +66,11 @@ let parse_json ~line_number line =
                 line_number message)
            exception_)
 
-type envelope = { record_type : string; payload : Yojson.Safe.t }
+type envelope = {
+  contract_version : string;
+  record_type : string;
+  payload : Yojson.Safe.t;
+}
 
 let parse_envelope ~line_number ~expected_sequence line =
   let result =
@@ -80,14 +84,15 @@ let parse_envelope ~line_number ~expected_sequence line =
     in
     let* contract_json = field fields "contract_version" in
     let* contract_version = string ~name:"contract_version" contract_json in
-    if not (String.equal contract_version Contract.version) then
+    if not (Contract.is_supported contract_version) then
       Error
         (Diagnostic.make ~code:Diagnostic.Scenario_unsupported_contract
            ~phase:Diagnostic.Validation ~line:line_number
            ~sequence:expected_sequence ~json_path:"$.contract_version"
            (Printf.sprintf
-              "unsupported scenario contract_version %S (expected %S)"
-              contract_version Contract.version))
+              "unsupported scenario contract_version %S (expected one of %s)"
+              contract_version
+              (String.concat ", " Contract.supported_versions)))
     else
       let* sequence_json = field fields "scenario_sequence" in
       let* scenario_sequence =
@@ -102,7 +107,7 @@ let parse_envelope ~line_number ~expected_sequence line =
         let* type_json = field fields "record_type" in
         let* record_type = string ~name:"record_type" type_json in
         let* payload = field fields "payload" in
-        Ok { record_type; payload }
+        Ok { contract_version; record_type; payload }
   in
   Result.map_error
     (Diagnostic.annotate ~line:line_number ~sequence:expected_sequence
@@ -141,8 +146,8 @@ let fold_channel channel ~init ~step ~finish =
              "scenario_header must be the first scenario stream record")
       else
         let* header =
-          Scenario.stream_header_of_yojson ~contract_version:Contract.version
-            envelope.payload
+          Scenario.stream_header_of_yojson
+            ~contract_version:envelope.contract_version envelope.payload
           |> Result.map_error
                (Diagnostic.annotate ~line:1 ~sequence:1L ~json_path:"$.payload")
         in
@@ -158,7 +163,16 @@ let fold_channel channel ~init ~step ~finish =
               let* envelope =
                 parse_envelope ~line_number:!line_number ~expected_sequence line
               in
-              if String.equal envelope.record_type "market_slice" then
+              if
+                not
+                  (String.equal envelope.contract_version
+                     header.contract_version)
+              then
+                Error
+                  (invalid ~line:!line_number ~sequence:expected_sequence
+                     ~json_path:"$.contract_version"
+                     "scenario stream contract_version must remain constant")
+              else if String.equal envelope.record_type "market_slice" then
                 let* item =
                   Scenario.stream_item_of_yojson header ~previous
                     envelope.payload

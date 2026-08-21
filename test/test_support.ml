@@ -138,13 +138,16 @@ let risk ?(base_currency = "USD") ?(instruments = [ instrument () ])
     ~initial_margin_bps ~maintenance_margin_bps ~short_borrow_bps
   |> ok
 
-let engine_config ?(risk = risk ()) ?execution_model ?(execution = execution ())
-    ?(max_internal_events = 1000) () =
+let engine_config ?(contract_version = T.Contract.version) ?(risk = risk ())
+    ?execution_model ?(execution = execution ()) ?(max_internal_events = 1000)
+    () =
   let execution_model =
     Option.value execution_model
       ~default:(T.Execution_model.find "completed_bar_v1" |> ok)
   in
-  T.Engine.config ~risk ~execution_model ~execution ~max_internal_events |> ok
+  T.Engine.config ~contract_version ~risk ~execution_model ~execution
+    ~max_internal_events
+  |> ok
 
 let risk_check risk ~account ~oms request =
   T.Risk.check risk ~account ~oms

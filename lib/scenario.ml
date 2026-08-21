@@ -788,10 +788,12 @@ let of_yojson_result json =
   in
   let* contract_json = field fields "contract_version" in
   let* contract_version = string ~name:"contract_version" contract_json in
-  if not (String.equal contract_version Contract.version) then
+  if not (Contract.is_supported contract_version) then
     Error
-      (Printf.sprintf "unsupported scenario contract_version %S (expected %S)"
-         contract_version Contract.version)
+      (Printf.sprintf
+         "unsupported scenario contract_version %S (expected one of %s)"
+         contract_version
+         (String.concat ", " Contract.supported_versions))
   else
     let* metadata = field fields "metadata" in
     let* () =
@@ -874,8 +876,7 @@ let of_yojson json =
     match json with
     | `Assoc fields -> (
         match List.assoc_opt "contract_version" fields with
-        | Some (`String supplied)
-          when not (String.equal supplied Contract.version) ->
+        | Some (`String supplied) when not (Contract.is_supported supplied) ->
             (Diagnostic.Scenario_unsupported_contract, "$.contract_version")
         | _ -> (Diagnostic.Scenario_invalid, "$"))
     | _ -> (Diagnostic.Scenario_invalid, "$")
@@ -1006,7 +1007,7 @@ let stream_item_of_yojson_result header ~previous json =
 
 let stream_header_of_yojson ~contract_version json =
   let code, json_path =
-    if String.equal contract_version Contract.version then
+    if Contract.is_supported contract_version then
       (Diagnostic.Scenario_stream_invalid, "$.payload")
     else (Diagnostic.Scenario_unsupported_contract, "$.contract_version")
   in

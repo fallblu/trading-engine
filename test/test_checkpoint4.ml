@@ -220,17 +220,27 @@ let split_caps_adjusted_market_fill () =
     List.find_map
       (fun event ->
         match event.T.Audit.event with
-        | T.Audit.Margin_limited { requested_quantity; permitted_quantity; _ }
-          ->
-            Some (requested_quantity, permitted_quantity)
+        | T.Audit.Fill_clipped
+            {
+              proposed_quantity;
+              permitted_quantity;
+              limit = T.Risk.Maximum_order_quantity threshold;
+              _;
+            } ->
+            Some (proposed_quantity, permitted_quantity, threshold)
         | _ -> None)
       events
     |> Option.get
   in
   Alcotest.check quantity_testable "adjusted proposal" (quantity "20")
-    (fst limited);
+    (let proposed, _, _ = limited in
+     proposed);
   Alcotest.check quantity_testable "maximum permitted fill" (quantity "10")
-    (snd limited)
+    (let _, permitted, _ = limited in
+     permitted);
+  Alcotest.check quantity_testable "maximum order threshold" (quantity "10")
+    (let _, _, threshold = limited in
+     threshold)
 
 let split_caps_partially_filled_limit_remainder () =
   let strategy_state =
@@ -285,17 +295,27 @@ let split_caps_partially_filled_limit_remainder () =
     List.find_map
       (fun event ->
         match event.T.Audit.event with
-        | T.Audit.Margin_limited { requested_quantity; permitted_quantity; _ }
-          ->
-            Some (requested_quantity, permitted_quantity)
+        | T.Audit.Fill_clipped
+            {
+              proposed_quantity;
+              permitted_quantity;
+              limit = T.Risk.Maximum_order_quantity threshold;
+              _;
+            } ->
+            Some (proposed_quantity, permitted_quantity, threshold)
         | _ -> None)
       events
     |> Option.get
   in
   Alcotest.check quantity_testable "adjusted partial proposal" (quantity "12")
-    (fst limited);
+    (let proposed, _, _ = limited in
+     proposed);
   Alcotest.check quantity_testable "bounded partial fill" (quantity "10")
-    (snd limited);
+    (let _, permitted, _ = limited in
+     permitted);
+  Alcotest.check quantity_testable "maximum order threshold" (quantity "10")
+    (let _, _, threshold = limited in
+     threshold);
   let state, _ =
     Runner.process_slice state (market_slice ~bars:[ adjusted_bar ] 4L) |> ok
   in
@@ -365,7 +385,7 @@ let reverse_split_restores_order_below_maximum () =
     (List.exists
        (fun event ->
          match event.T.Audit.event with
-         | T.Audit.Margin_limited _ -> true
+         | T.Audit.Fill_clipped _ -> true
          | _ -> false)
        events)
 
@@ -479,6 +499,69 @@ let risk_allows_reducing_an_out_of_limit_position () =
     (Result.is_error
        (risk_check configured_risk ~account ~oms:T.Oms.empty increase))
 
+let fill_clipping_reason_taxonomy_is_stable () =
+  let cases =
+    [
+      ( T.Risk.Maximum_order_quantity (quantity "10"),
+        "max_order_quantity",
+        "quantity",
+        `String "10" );
+      ( T.Risk.Maximum_long_position (quantity "20"),
+        "max_long_position",
+        "quantity",
+        `String "20" );
+      ( T.Risk.Maximum_short_position (quantity "30"),
+        "max_short_position",
+        "quantity",
+        `String "30" );
+      ( T.Risk.Maximum_gross_exposure (money "1000"),
+        "max_gross_exposure",
+        "money",
+        `String "1000" );
+      ( T.Risk.Maximum_leverage (T.Scalar.Ratio.of_decimal_string "2" |> ok),
+        "max_leverage",
+        "ratio",
+        `String "2" );
+      (T.Risk.Initial_margin 5000, "initial_margin", "basis_points", `Int 5000);
+    ]
+  in
+  List.iteri
+    (fun index (limit, expected_policy, expected_unit, expected_value) ->
+      let audit =
+        T.Audit.create ~contract_version:T.Contract.version
+          ~engine_sequence:(Int64.of_int (index + 1))
+          ~causation_ids:[] ~run_id:(run_id "clip-taxonomy")
+          ~recorded_at:(timestamp "2026-01-02T21:00:02Z")
+          (T.Audit.Fill_clipped
+             {
+               order_id = order_id "clip-order";
+               instrument_id = instrument_id "test-equity";
+               proposed_quantity = quantity "10";
+               permitted_quantity = quantity "5";
+               price = price "100";
+               limit;
+             })
+      in
+      let open Yojson.Safe.Util in
+      let reason =
+        T.Codec.audit_to_yojson audit |> member "payload" |> member "reason"
+      in
+      Alcotest.(check string)
+        "reason version" "1"
+        (reason |> member "version" |> to_string);
+      Alcotest.(check string)
+        "limiting policy" expected_policy
+        (reason |> member "policy" |> to_string);
+      let threshold = reason |> member "threshold" in
+      Alcotest.(check string)
+        "threshold unit" expected_unit
+        (threshold |> member "unit" |> to_string);
+      Alcotest.(check string)
+        "threshold value"
+        (Yojson.Safe.to_string expected_value)
+        (threshold |> member "value" |> Yojson.Safe.to_string))
+    cases
+
 let engine_requires_complete_currency_ledgers () =
   let instruments = [ instrument (); euro_instrument () ] in
   let config = engine_config ~risk:(risk ~instruments ()) () in
@@ -510,6 +593,8 @@ let tests =
       short_borrow_accrues_before_matching;
     Alcotest.test_case "risk allows reduction above position cap" `Quick
       risk_allows_reducing_an_out_of_limit_position;
+    Alcotest.test_case "fill clipping reason taxonomy is stable" `Quick
+      fill_clipping_reason_taxonomy_is_stable;
     Alcotest.test_case "engine requires complete currency ledgers" `Quick
       engine_requires_complete_currency_ledgers;
   ]

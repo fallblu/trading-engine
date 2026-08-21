@@ -42,7 +42,7 @@ scenario slices and scheduled or external intents
 - Deterministic liquidation-first matching, then sell-before-buy and FIFO priority
 - Shared per-instrument volume participation, partial fills, and GTC limits
 - One-slice IOC market orders
-- Risk-aware fractional-lot clipping with structured `margin_limited` records
+- Risk-aware fractional-lot clipping with structured `fill_clipped` reasons and thresholds
 - Fixed and notional fees with explicit rounding
 - Explicit multi-currency cash ledgers and complete per-slice FX marks in a base currency
 - Split and cash-dividend processing before matching, including target and order adjustment
@@ -75,7 +75,7 @@ Validate the included scenario with an in-memory replay:
 
 ```sh
 opam exec -- dune exec trading-engine -- \
-  --input contracts/v3/fixtures/demo.scenario.json \
+  --input contracts/v4/fixtures/demo.scenario.json \
   --validate-only
 ```
 
@@ -83,7 +83,7 @@ Run it and create a journal:
 
 ```sh
 opam exec -- dune exec trading-engine -- \
-  --input contracts/v3/fixtures/demo.scenario.json \
+  --input contracts/v4/fixtures/demo.scenario.json \
   --journal demo.journal.jsonl
 ```
 
@@ -91,7 +91,7 @@ For larger histories, validate and replay the equivalent stream one slice at a t
 
 ```sh
 opam exec -- dune exec trading-engine -- \
-  --input contracts/v3/fixtures/demo.scenario.jsonl \
+  --input contracts/v4/fixtures/demo.scenario.jsonl \
   --input-format jsonl \
   --journal demo.journal.jsonl
 ```
@@ -183,12 +183,12 @@ production recovery log.
 - [Architecture](docs/architecture.md)
 - [Diagnostic contract](docs/diagnostics.md)
 - [Scenario contract](docs/scenario.md)
-- [Current contract v3 and conformance fixtures](contracts/v3/README.md)
+- [Current contract v4 and conformance fixtures](contracts/v4/README.md)
 - [Frozen contract v2](contracts/v2/README.md)
 - [Historical contract v1](contracts/v1/README.md)
-- [Scenario JSON Schema](contracts/v3/scenario.schema.json)
-- [Scenario stream record JSON Schema](contracts/v3/scenario-stream.schema.json)
-- [Journal record JSON Schema](contracts/v3/journal.schema.json)
+- [Scenario JSON Schema](contracts/v4/scenario.schema.json)
+- [Scenario stream record JSON Schema](contracts/v4/scenario-stream.schema.json)
+- [Journal record JSON Schema](contracts/v4/journal.schema.json)
 - [External strategy protocol v3](contracts/strategy/v3/README.md)
 - [Historical strategy protocol v2](contracts/strategy/v2/README.md)
 - [Historical strategy protocol v1](contracts/strategy/v1/README.md)
