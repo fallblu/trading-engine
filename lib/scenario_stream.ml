@@ -129,101 +129,162 @@ let footer_count payload =
   let* count_json = field fields "slice_count" in
   int64_string ~name:"slice_count" ~positive:false count_json
 
-let fold_channel channel ~init ~step ~finish =
-  let line_number = ref 1 in
-  match In_channel.input_line channel with
-  | None ->
-      Error
-        (invalid ~line:1 ~sequence:1L
-           "scenario stream must start with scenario_header")
-  | Some line ->
-      let* envelope =
-        parse_envelope ~line_number:1 ~expected_sequence:1L line
-      in
-      if not (String.equal envelope.record_type "scenario_header") then
-        Error
-          (invalid ~line:1 ~sequence:1L ~json_path:"$.record_type"
-             "scenario_header must be the first scenario stream record")
-      else
-        let* header =
-          Scenario.stream_header_of_yojson
-            ~contract_version:envelope.contract_version envelope.payload
-          |> Result.map_error
-               (Diagnostic.annotate ~line:1 ~sequence:1L ~json_path:"$.payload")
-        in
-        let* state = init header in
-        let rec loop state previous slice_count expected_sequence =
-          incr line_number;
-          match In_channel.input_line channel with
-          | None ->
-              Error
-                (invalid ~line:!line_number ~sequence:expected_sequence
-                   "scenario_end must terminate the scenario stream")
-          | Some line ->
-              let* envelope =
-                parse_envelope ~line_number:!line_number ~expected_sequence line
-              in
-              if
-                not
-                  (String.equal envelope.contract_version
-                     header.contract_version)
-              then
-                Error
-                  (invalid ~line:!line_number ~sequence:expected_sequence
-                     ~json_path:"$.contract_version"
-                     "scenario stream contract_version must remain constant")
-              else if String.equal envelope.record_type "market_slice" then
-                let* item =
-                  Scenario.stream_item_of_yojson header ~previous
-                    envelope.payload
-                  |> Result.map_error
-                       (Diagnostic.annotate ~line:!line_number
-                          ~sequence:expected_sequence ~json_path:"$.payload")
-                in
-                let* state = step state item in
-                let* expected_sequence = successor expected_sequence in
-                if Int64.equal slice_count Int64.max_int then
-                  Error
-                    (invalid ~line:!line_number ~sequence:expected_sequence
-                       "scenario slice count is exhausted")
-                else
-                  loop state (Some item) (Int64.succ slice_count)
-                    expected_sequence
-              else if String.equal envelope.record_type "scenario_end" then
-                let* declared_count =
-                  footer_count envelope.payload
-                  |> Result.map_error
-                       (Diagnostic.annotate ~line:!line_number
-                          ~sequence:expected_sequence ~json_path:"$.payload")
-                in
-                if not (Int64.equal declared_count slice_count) then
-                  Error
-                    (invalid ~line:!line_number ~sequence:expected_sequence
-                       ~json_path:"$.payload.slice_count"
-                       "scenario_end slice_count differs from streamed market \
-                        slices")
-                else
-                  match In_channel.input_line channel with
-                  | Some _ ->
-                      Error
-                        (invalid ~line:(!line_number + 1)
-                           "scenario_end must be the terminal scenario stream \
-                            record")
-                  | None -> finish state ~slice_count
-              else
-                Error
-                  (invalid ~line:!line_number ~sequence:expected_sequence
-                     ~json_path:"$.record_type"
-                     ("unsupported scenario stream record_type: "
-                    ^ envelope.record_type))
-        in
-        let* expected_sequence = successor 1L in
-        loop state None 0L expected_sequence
+type bounded_line = End | Line of string | Too_large of int
 
-let fold_file path ~init ~step ~finish =
+let read_bounded_line channel buffer =
+  let maximum = Bytes.length buffer in
+  let rec drain observed =
+    match input_char channel with
+    | '\n' -> Too_large observed
+    | _ when observed = Int.max_int -> Too_large observed
+    | _ -> drain (observed + 1)
+    | exception End_of_file -> Too_large observed
+  in
+  let rec read length =
+    match input_char channel with
+    | '\n' -> Line (Bytes.sub_string buffer 0 length)
+    | character when length < maximum ->
+        Bytes.set buffer length character;
+        read (length + 1)
+    | _ -> drain (maximum + 1)
+    | exception End_of_file ->
+        if length = 0 then End else Line (Bytes.sub_string buffer 0 length)
+  in
+  read 0
+
+let resource_limit ~sequence ~line ~observed ~allowed =
+  Diagnostic.make ?sequence ~line ~code:Diagnostic.Resource_limit
+    ~phase:Diagnostic.Input
+    (Printf.sprintf "scenario stream record is %d bytes; limit is %d bytes"
+       observed allowed)
+
+let read_record ?sequence ~line channel buffer =
+  match read_bounded_line channel buffer with
+  | End -> Ok None
+  | Line value -> Ok (Some value)
+  | Too_large observed ->
+      Error
+        (resource_limit ~sequence ~line ~observed ~allowed:(Bytes.length buffer))
+
+let fold_channel ?(max_record_bytes = Resource_limits.scenario_record_bytes)
+    channel ~init ~step ~finish =
+  let line_number = ref 1 in
+  if max_record_bytes <= 0 then
+    Error
+      (Diagnostic.make ~code:Diagnostic.Resource_limit
+         ~phase:Diagnostic.Validation
+         "scenario record byte limit must be positive")
+  else if max_record_bytes > Resource_limits.scenario_record_bytes then
+    Error
+      (Diagnostic.make ~code:Diagnostic.Resource_limit
+         ~phase:Diagnostic.Validation
+         (Printf.sprintf
+            "scenario record byte limit is %d bytes; maximum is %d bytes"
+            max_record_bytes Resource_limits.scenario_record_bytes))
+  else
+    let buffer = Bytes.create max_record_bytes in
+    match read_record ~sequence:1L ~line:1 channel buffer with
+    | Error _ as error -> error
+    | Ok None ->
+        Error
+          (invalid ~line:1 ~sequence:1L
+             "scenario stream must start with scenario_header")
+    | Ok (Some line) ->
+        let* envelope =
+          parse_envelope ~line_number:1 ~expected_sequence:1L line
+        in
+        if not (String.equal envelope.record_type "scenario_header") then
+          Error
+            (invalid ~line:1 ~sequence:1L ~json_path:"$.record_type"
+               "scenario_header must be the first scenario stream record")
+        else
+          let* header =
+            Scenario.stream_header_of_yojson
+              ~contract_version:envelope.contract_version envelope.payload
+            |> Result.map_error
+                 (Diagnostic.annotate ~line:1 ~sequence:1L
+                    ~json_path:"$.payload")
+          in
+          let* state = init header in
+          let rec loop state previous slice_count expected_sequence =
+            incr line_number;
+            match
+              read_record ~sequence:expected_sequence ~line:!line_number channel
+                buffer
+            with
+            | Error _ as error -> error
+            | Ok None ->
+                Error
+                  (invalid ~line:!line_number ~sequence:expected_sequence
+                     "scenario_end must terminate the scenario stream")
+            | Ok (Some line) ->
+                let* envelope =
+                  parse_envelope ~line_number:!line_number ~expected_sequence
+                    line
+                in
+                if
+                  not
+                    (String.equal envelope.contract_version
+                       header.contract_version)
+                then
+                  Error
+                    (invalid ~line:!line_number ~sequence:expected_sequence
+                       ~json_path:"$.contract_version"
+                       "scenario stream contract_version must remain constant")
+                else if String.equal envelope.record_type "market_slice" then
+                  let* item =
+                    Scenario.stream_item_of_yojson header ~previous
+                      envelope.payload
+                    |> Result.map_error
+                         (Diagnostic.annotate ~line:!line_number
+                            ~sequence:expected_sequence ~json_path:"$.payload")
+                  in
+                  let* state = step state item in
+                  let* expected_sequence = successor expected_sequence in
+                  if Int64.equal slice_count Int64.max_int then
+                    Error
+                      (invalid ~line:!line_number ~sequence:expected_sequence
+                         "scenario slice count is exhausted")
+                  else
+                    loop state (Some item) (Int64.succ slice_count)
+                      expected_sequence
+                else if String.equal envelope.record_type "scenario_end" then
+                  let* declared_count =
+                    footer_count envelope.payload
+                    |> Result.map_error
+                         (Diagnostic.annotate ~line:!line_number
+                            ~sequence:expected_sequence ~json_path:"$.payload")
+                  in
+                  if not (Int64.equal declared_count slice_count) then
+                    Error
+                      (invalid ~line:!line_number ~sequence:expected_sequence
+                         ~json_path:"$.payload.slice_count"
+                         "scenario_end slice_count differs from streamed \
+                          market slices")
+                  else
+                    let terminal_line = !line_number + 1 in
+                    match read_record ~line:terminal_line channel buffer with
+                    | Error _ as error -> error
+                    | Ok (Some _) ->
+                        Error
+                          (invalid ~line:terminal_line
+                             "scenario_end must be the terminal scenario \
+                              stream record")
+                    | Ok None -> finish state ~slice_count
+                else
+                  Error
+                    (invalid ~line:!line_number ~sequence:expected_sequence
+                       ~json_path:"$.record_type"
+                       ("unsupported scenario stream record_type: "
+                      ^ envelope.record_type))
+          in
+          let* expected_sequence = successor 1L in
+          loop state None 0L expected_sequence
+
+let fold_file ?max_record_bytes path ~init ~step ~finish =
   try
     In_channel.with_open_bin path (fun channel ->
-        fold_channel channel ~init ~step ~finish)
+        fold_channel ?max_record_bytes channel ~init ~step ~finish)
   with Sys_error message as exception_ ->
     Error
       (Diagnostic.of_exception ~code:Diagnostic.Input_io ~phase:Diagnostic.Input

@@ -236,12 +236,62 @@ let responses_are_strict_and_typed () =
     (T.Strategy_protocol.response_of_string ~expected_sequence:3L "{"
     |> diagnostic_message
     |> String.starts_with ~prefix:"invalid strategy response JSON:");
+  let oversized =
+    T.Strategy_protocol.response_of_string ~expected_sequence:3L
+      (String.make (T.Strategy_protocol.max_message_bytes + 1) 'x')
+    |> error
+  in
+  Alcotest.(check string)
+    "oversized response code" "resource.limit"
+    (T.Diagnostic.code_to_string oversized.code);
   Alcotest.(check string)
     "oversized response rejected"
-    "strategy response exceeds the maximum message size"
-    (T.Strategy_protocol.response_of_string ~expected_sequence:3L
-       (String.make (T.Strategy_protocol.max_message_bytes + 1) 'x')
-    |> diagnostic_message)
+    (Printf.sprintf "strategy message is %d bytes; limit is %d bytes"
+       (T.Strategy_protocol.max_message_bytes + 1)
+       T.Strategy_protocol.max_message_bytes)
+    oversized.message;
+  let oversized_intents =
+    response "intents"
+      (`Assoc
+         [
+           ( "intents",
+             `List
+               (List.init (T.Resource_limits.intents_per_batch + 1) (fun _ ->
+                    `Null)) );
+         ])
+    |> T.Strategy_protocol.response_of_yojson ~expected_sequence:3L
+    |> error
+  in
+  Alcotest.(check string)
+    "intent limit code" "resource.limit"
+    (T.Diagnostic.code_to_string oversized_intents.code);
+  Alcotest.(check (option string))
+    "intent limit path" (Some "$.payload.intents")
+    oversized_intents.context.json_path
+
+let strategy_configuration_is_validated_before_use () =
+  let initialization =
+    {
+      (initialization ()) with
+      metadata =
+        `Assoc
+          [
+            ( "padding",
+              `String (String.make T.Resource_limits.strategy_message_bytes 'x')
+            );
+          ];
+    }
+  in
+  let diagnostic =
+    T.Strategy_process.validate_configuration ~command:[ "unused" ] ~timeout:1.0
+      ~initialization
+    |> error
+  in
+  Alcotest.(check string)
+    "initialization limit code" "resource.limit"
+    (T.Diagnostic.code_to_string diagnostic.code);
+  Alcotest.(check (option int64))
+    "initialization sequence" (Some 1L) diagnostic.context.sequence
 
 let transcript_records_direction_and_sequence () =
   let message = T.Strategy_protocol.shutdown_message ~sequence:9L in
@@ -285,6 +335,35 @@ let with_process_tree_paths test =
       remove_if_exists transcript_path;
       remove_if_exists (transcript_path ^ ".partial"))
     (fun () -> test pid_path transcript_path)
+
+let invalid_configuration_creates_no_transcript_or_process () =
+  with_process_tree_paths @@ fun _ transcript_path ->
+  let initialization =
+    {
+      (initialization ()) with
+      metadata =
+        `Assoc
+          [
+            ( "padding",
+              `String (String.make T.Resource_limits.strategy_message_bytes 'x')
+            );
+          ];
+    }
+  in
+  let diagnostic =
+    Eio_main.run @@ fun env ->
+    T.Strategy_process.with_session ~env
+      ~command:[ "/definitely/missing/strategy" ]
+      ~timeout:1.0 ~transcript_path ~initialization (fun _ -> Ok ())
+    |> error
+  in
+  Alcotest.(check string)
+    "configuration fails before spawn" "resource.limit"
+    (T.Diagnostic.code_to_string diagnostic.code);
+  Alcotest.(check bool) "no transcript" false (Sys.file_exists transcript_path);
+  Alcotest.(check bool)
+    "no partial transcript" false
+    (Sys.file_exists (transcript_path ^ ".partial"))
 
 let callback_exception_reaps_process_tree () =
   with_process_tree_paths @@ fun pid_path transcript_path ->
@@ -331,6 +410,10 @@ let tests =
       nonpositive_equity_omits_weights;
     Alcotest.test_case "responses are strict and typed" `Quick
       responses_are_strict_and_typed;
+    Alcotest.test_case "strategy configuration is bounded" `Quick
+      strategy_configuration_is_validated_before_use;
+    Alcotest.test_case "configuration precedes transcript and process" `Quick
+      invalid_configuration_creates_no_transcript_or_process;
     Alcotest.test_case "transcript records direction" `Quick
       transcript_records_direction_and_sequence;
     Alcotest.test_case "callback exception reaps process tree" `Slow

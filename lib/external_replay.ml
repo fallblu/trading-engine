@@ -40,7 +40,16 @@ let replay ?sequence message =
     ~phase:Diagnostic.Replay message
 
 let reducer_result ?sequence result =
-  Result.map_error (reducer ?sequence) result
+  Result.map_error
+    (fun message ->
+      if
+        String.starts_with
+          ~prefix:"internal event count exceeds configured limit" message
+      then
+        Diagnostic.make ?sequence ~code:Diagnostic.Resource_limit
+          ~phase:Diagnostic.Reducer message
+      else reducer ?sequence message)
+    result
 
 let ( let* ) result function_ =
   match result with Ok value -> function_ value | Error _ as error -> error
@@ -150,6 +159,11 @@ let run ?(durability = Artifact_writer.Buffered) ~env ~scenario_sha256
     Error
       (replay "external strategy replay requires an empty scenario schedule")
   else
+    let initialization = initialization_of_scenario ~scenario_sha256 scenario in
+    let* () =
+      Strategy_process.validate_configuration ~command:strategy_command
+        ~timeout:strategy_timeout ~initialization
+    in
     let* initial =
       create_runner ~contract_version:scenario.contract_version
         ~run_id:scenario.run_id ~scenario_sha256 ~risk:scenario.risk
@@ -164,9 +178,7 @@ let run ?(durability = Artifact_writer.Buffered) ~env ~scenario_sha256
     let session_result =
       protect_artifacts (journal, transcript) @@ fun () ->
       Strategy_process.with_staged_session ~env ~command:strategy_command
-        ~timeout:strategy_timeout ~transcript
-        ~initialization:(initialization_of_scenario ~scenario_sha256 scenario)
-        (fun session ->
+        ~timeout:strategy_timeout ~transcript ~initialization (fun session ->
           let respond = Strategy_process.on_event session in
           let step result market_slice =
             let* state, audits_rev = result in
@@ -284,6 +296,10 @@ let run_stream ?(durability = Artifact_writer.Buffered) ~env ~journal_path
                ~phase:Diagnostic.Input
                "scenario stream changed during validation")
         else
+          let* () =
+            Strategy_process.validate_configuration ~command:strategy_command
+              ~timeout:strategy_timeout ~initialization:validated.initialization
+          in
           let* journal, transcript =
             create_artifacts ~durability ~journal_path ~transcript_path
           in

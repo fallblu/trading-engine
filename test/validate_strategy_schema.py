@@ -90,6 +90,15 @@ def main() -> None:
     malformed_sequence = copy.deepcopy(records[1]["message"])
     malformed_sequence["strategy_sequence"] = "01"
     expect_invalid(message_validator, malformed_sequence)
+    intents = next(
+        copy.deepcopy(record["message"])
+        for record in records
+        if record["message"]["message_type"] == "intents"
+        and record["message"]["payload"]["intents"]
+    )
+    intent = intents["payload"]["intents"][0]
+    intents["payload"]["intents"] = [intent] * 4097
+    expect_invalid(message_validator, intents)
     malformed_transcript = copy.deepcopy(records[0])
     malformed_transcript["direction"] = "network"
     expect_invalid(transcript_validator, malformed_transcript)

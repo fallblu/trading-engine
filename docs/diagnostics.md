@@ -31,6 +31,7 @@ Version 1 defines these codes:
 | `scenario.unsupported_contract` | Scenario contract version is unsupported |
 | `scenario_stream.invalid` | Stream envelope, ordering, or payload validation failed |
 | `scenario_stream.changed` | Stream bytes changed between validation and replay |
+| `resource.limit` | A versioned parser, protocol, reducer, or artifact limit was exceeded |
 | `replay.failed` | Replay orchestration invariant failed |
 | `reducer.failed` | Pure engine processing rejected the requested transition |
 | `strategy.invalid_configuration` | Strategy command or timeout is invalid |

@@ -117,8 +117,15 @@ def main() -> None:
     expect_invalid(scenario_validator, unsupported_execution_model)
     if contract_version in {"3", "4"}:
         excessive_feedback_cap = copy.deepcopy(scenario)
-        excessive_feedback_cap["max_internal_events"] = 4611686018427387904
+        excessive_feedback_cap["max_internal_events"] = 100001
         expect_invalid(scenario_validator, excessive_feedback_cap)
+        excessive_catalog = copy.deepcopy(scenario)
+        excessive_catalog["instruments"] = [scenario["instruments"][0]] * 4097
+        expect_invalid(scenario_validator, excessive_catalog)
+        excessive_intents = copy.deepcopy(scenario)
+        intent = scenario["schedule"][0]["intents"][0]
+        excessive_intents["schedule"][0]["intents"] = [intent] * 4097
+        expect_invalid(scenario_validator, excessive_intents)
     unversioned_stream_record = copy.deepcopy(stream_records[0])
     del unversioned_stream_record["contract_version"]
     expect_invalid(stream_validator, unversioned_stream_record)
@@ -128,6 +135,16 @@ def main() -> None:
     malformed_stream_slice = copy.deepcopy(stream_records[1])
     malformed_stream_slice["payload"]["market_slice"]["unexpected"] = True
     expect_invalid(stream_validator, malformed_stream_slice)
+    if contract_version in {"3", "4"}:
+        excessive_stream_catalog = copy.deepcopy(stream_records[0])
+        excessive_stream_catalog["payload"]["instruments"] = (
+            [stream_records[0]["payload"]["instruments"][0]] * 4097
+        )
+        expect_invalid(stream_validator, excessive_stream_catalog)
+        excessive_stream_intents = copy.deepcopy(stream_records[1])
+        intent = scenario["schedule"][0]["intents"][0]
+        excessive_stream_intents["payload"]["intents"] = [intent] * 4097
+        expect_invalid(stream_validator, excessive_stream_intents)
     noncanonical = copy.deepcopy(scenario)
     if contract_version in {"3", "4"}:
         noncanonical["initial_cash"][0]["amount"] = "10000.0"

@@ -361,7 +361,32 @@ let process_cases =
         (fun () -> exercise_process_failure stage))
     process_stages
 
+let artifact_records_are_bounded () =
+  with_absent_path ".bounded.jsonl" @@ fun final_path ->
+  let writer =
+    T.Artifact_writer.create ~label:"bounded artifact" final_path |> ok
+  in
+  T.Artifact_writer.append writer
+    (String.make T.Resource_limits.artifact_record_bytes 'x')
+  |> ok;
+  let diagnostic =
+    T.Artifact_writer.append writer
+      (String.make (T.Resource_limits.artifact_record_bytes + 1) 'x')
+    |> error
+  in
+  Alcotest.(check string)
+    "artifact limit code" "resource.limit"
+    (T.Diagnostic.code_to_string diagnostic.code);
+  Alcotest.(check int)
+    "oversized record was not written" T.Resource_limits.artifact_record_bytes
+    (In_channel.with_open_bin (final_path ^ ".partial") in_channel_length);
+  T.Artifact_writer.close_preserving_partial writer
+
 let tests =
   artifact_cases "journal" (module Journal_writer)
   @ artifact_cases "transcript" (module Transcript_writer)
   @ transaction_cases @ durability_cases @ process_cases
+  @ [
+      Alcotest.test_case "artifact records are bounded" `Quick
+        artifact_records_are_bounded;
+    ]

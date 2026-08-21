@@ -42,11 +42,11 @@ retains current account, order, target, and latest-bar state required by executi
 | `run_id` | Stable identity used in generated IDs |
 | `base_currency` | Reporting currency used for aggregate risk and valuation |
 | `initial_cash` | One explicit nonnegative balance for every scenario currency |
-| `instruments` | Approved executable-instrument catalog |
+| `instruments` | Approved executable-instrument catalog, at most 4,096 entries |
 | `risk` | Signed position, exposure, leverage, margin, and borrow policy |
 | `execution` | Capacity and fee configuration |
-| `max_internal_events` | Positive reducer feedback cap, at most `4611686018427387903` |
-| `schedule` | Intents emitted after named slices |
+| `max_internal_events` | Positive reducer feedback cap, at most 100,000 |
+| `schedule` | Intents emitted after named slices, at most 4,096 per batch |
 | `slices` | Complete synchronized market observations |
 
 Metadata may contain nested JSON values. Duplicate object keys and non-finite numbers are rejected
@@ -55,6 +55,9 @@ at any depth. Metadata is retained on `Scenario.t` but never affects execution.
 An external strategy replay requires `schedule: []`. The JSON Lines form likewise requires every
 slice record's `intents` array to be empty. This keeps one authoritative decision source: either
 the scenario contract or the separate strategy protocol, never both.
+
+Each JSON Lines record is limited to 1 MiB, excluding its line feed. The reader accepts a final
+record without a line feed and drains an oversized record without retaining bytes above the limit.
 
 ## Instruments, risk, and execution
 

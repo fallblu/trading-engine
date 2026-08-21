@@ -51,8 +51,10 @@ let exception_diagnostic ?sequence stage exception_ =
         ( Diagnostic.Strategy_protocol,
           stage ^ ": external strategy closed stdout" )
     | Eio.Buf_read.Buffer_limit_exceeded ->
-        ( Diagnostic.Strategy_protocol,
-          stage ^ ": strategy response exceeds the maximum message size" )
+        ( Diagnostic.Resource_limit,
+          Printf.sprintf
+            "%s: strategy response exceeds the maximum message size (%d bytes)"
+            stage Strategy_protocol.max_message_bytes )
     | _ ->
         ( Diagnostic.Strategy_process,
           stage ^ ": " ^ Printexc.to_string exception_ )
@@ -187,11 +189,21 @@ let append_cleanup_error result child =
       | Error original -> Error (Diagnostic.combine original cleanup))
 
 let exchange session ~stage ~expected_sequence request =
+  let request_document = Strategy_protocol.message_to_string request in
+  let request_bytes = String.length request_document in
+  let* () =
+    if request_bytes <= Strategy_protocol.max_message_bytes then Ok ()
+    else
+      Error
+        (diagnostic ~sequence:expected_sequence ~code:Diagnostic.Resource_limit
+           (Printf.sprintf "%s: strategy message is %d bytes; limit is %d bytes"
+              stage request_bytes Strategy_protocol.max_message_bytes))
+  in
   let* () =
     Strategy_transcript.append session.transcript
       ~direction:Strategy_protocol.Engine_to_strategy request
   in
-  let request_line = Strategy_protocol.message_to_string request ^ "\n" in
+  let request_line = request_document ^ "\n" in
   let response =
     try
       match
@@ -329,7 +341,7 @@ let await_exit session =
         (diagnostic ~code:Diagnostic.Strategy_exit
            (Printf.sprintf "external strategy was killed by signal %d" signal))
 
-let validate_configuration ~command ~timeout =
+let configured_executable ~command ~timeout ~initialization =
   if not (valid_timeout timeout) then
     Error
       (diagnostic ~code:Diagnostic.Strategy_invalid_configuration
@@ -344,7 +356,23 @@ let validate_configuration ~command ~timeout =
         Error
           (diagnostic ~code:Diagnostic.Strategy_invalid_configuration
              "external strategy executable must not be empty")
-    | executable :: _ -> Ok executable
+    | executable :: _ ->
+        let message =
+          Strategy_protocol.initialize_message ~sequence:1L initialization
+          |> Strategy_protocol.message_to_string
+        in
+        let observed = String.length message in
+        if observed > Strategy_protocol.max_message_bytes then
+          Error
+            (diagnostic ~sequence:1L ~code:Diagnostic.Resource_limit
+               (Printf.sprintf
+                  "strategy initialization message is %d bytes; limit is %d \
+                   bytes"
+                  observed Strategy_protocol.max_message_bytes))
+        else Ok executable
+
+let validate_configuration ~command ~timeout ~initialization =
+  configured_executable ~command ~timeout ~initialization |> Result.map ignore
 
 let run_session ~effects ~env ~command ~executable ~timeout ~transcript
     ~(initialization : Strategy_protocol.initialization) use =
@@ -417,7 +445,7 @@ let run_session ~effects ~env ~command ~executable ~timeout ~transcript
 
 let with_staged_session ?(effects = Boundary_effects.direct) ~env ~command
     ~timeout ~transcript ~initialization use =
-  match validate_configuration ~command ~timeout with
+  match configured_executable ~command ~timeout ~initialization with
   | Error _ as error -> error
   | Ok executable ->
       run_session ~effects ~env ~command ~executable ~timeout ~transcript
@@ -426,7 +454,7 @@ let with_staged_session ?(effects = Boundary_effects.direct) ~env ~command
 let with_session ?(effects = Boundary_effects.direct)
     ?(durability = Artifact_writer.Buffered) ~env ~command ~timeout
     ~transcript_path ~initialization use =
-  match validate_configuration ~command ~timeout with
+  match configured_executable ~command ~timeout ~initialization with
   | Error _ as error -> error
   | Ok executable -> (
       match Strategy_transcript.create ~effects ~durability transcript_path with
