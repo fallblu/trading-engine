@@ -119,7 +119,10 @@ External replay requires an empty batch schedule or empty streamed intent batche
 supervisor launches an explicit argument vector, permits one request at a time, enforces a
 per-exchange timeout and 1 MiB response limit, then requires a clean child exit with no extra
 standard output. It records every accepted request and response in sequence. Failures preserve
-the transcript and journal partials; success publishes both requested paths without replacement.
+the transcript and journal partials. After both writers close, publication links every final path
+without replacement before removing any partial path. A close or link failure rolls back final
+links created by the transaction. A cleanup failure keeps the complete final set and restores any
+partial names already removed.
 
 ## Invariants
 

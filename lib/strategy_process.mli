@@ -2,6 +2,16 @@
 
 type t
 
+val with_staged_session :
+  ?effects:Boundary_effects.t ->
+  env:Eio_unix.Stdenv.base ->
+  command:string list ->
+  timeout:float ->
+  transcript:Strategy_transcript.t ->
+  initialization:Strategy_protocol.initialization ->
+  (t -> ('a, Diagnostic.t) result) ->
+  ('a * Strategy_protocol.identity, Diagnostic.t) result
+
 val with_session :
   ?effects:Boundary_effects.t ->
   env:Eio_unix.Stdenv.base ->

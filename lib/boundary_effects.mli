@@ -7,6 +7,7 @@ type stage =
   | Artifact_close
   | Artifact_publish
   | Artifact_cleanup
+  | Artifact_restore
   | Process_spawn
   | Process_exchange
   | Process_terminate
@@ -19,6 +20,7 @@ type operation =
   | Close_artifact
   | Publish_artifact of { partial_path : string; final_path : string }
   | Cleanup_artifact of string
+  | Restore_artifact of { final_path : string; partial_path : string }
   | Spawn_process
   | Exchange_process
   | Terminate_process
