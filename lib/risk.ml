@@ -193,58 +193,104 @@ let check_alignment instrument request =
         if Scalar.Price.is_multiple price ~tick:instrument.tick_size then Ok ()
         else Error "limit price is not aligned to the instrument tick size"
 
-let signed_order_quantity request =
-  match request.Order.side with
-  | Order.Buy -> Ok request.quantity
-  | Order.Sell -> Scalar.Quantity.negate request.quantity
+type reservations = { buys : Scalar.Quantity.t; sells : Scalar.Quantity.t }
 
-let working_position ~account ~oms instrument_id =
+let empty_reservations =
+  { buys = Scalar.Quantity.zero; sells = Scalar.Quantity.zero }
+
+let reservations_for_instrument ~oms instrument_id =
+  Oms.active_for_instrument oms instrument_id
+  |> List.fold_left
+       (fun result order ->
+         let* reservations = result in
+         let remaining = Order.remaining_quantity order in
+         match order.Order.request.side with
+         | Order.Buy ->
+             let* buys = Scalar.Quantity.add reservations.buys remaining in
+             Ok { reservations with buys }
+         | Order.Sell ->
+             let* sells = Scalar.Quantity.add reservations.sells remaining in
+             Ok { reservations with sells })
+       (Ok empty_reservations)
+
+let add_request reservations request =
+  match request.Order.side with
+  | Order.Buy ->
+      let* buys = Scalar.Quantity.add reservations.buys request.quantity in
+      Ok { reservations with buys }
+  | Order.Sell ->
+      let* sells = Scalar.Quantity.add reservations.sells request.quantity in
+      Ok { reservations with sells }
+
+let directional_positions ~account instrument_id reservations =
   let current = Account.position_quantity account instrument_id in
-  let active = Oms.active_for_instrument oms instrument_id in
-  List.fold_left
-    (fun result order ->
-      let* quantity = result in
-      let remaining = Order.remaining_quantity order in
-      let* delta =
-        match order.Order.request.side with
-        | Order.Buy -> Ok remaining
-        | Order.Sell -> Scalar.Quantity.negate remaining
-      in
-      Scalar.Quantity.add quantity delta)
-    (Ok current) active
+  let* buy_position = Scalar.Quantity.add current reservations.buys in
+  let* sell_position = Scalar.Quantity.subtract current reservations.sells in
+  Ok (buy_position, sell_position)
+
+let position_for_side side (buy_position, sell_position) =
+  match side with Order.Buy -> buy_position | Order.Sell -> sell_position
+
+let worst_directional_position positions =
+  let buy_position, sell_position = positions in
+  let* buy_absolute = Scalar.Quantity.absolute buy_position in
+  let* sell_absolute = Scalar.Quantity.absolute sell_position in
+  if Scalar.Quantity.compare buy_absolute sell_absolute >= 0 then
+    Ok buy_position
+  else Ok sell_position
+
+let check_self_cross ~oms request =
+  let active = Oms.active_for_instrument oms request.Order.instrument_id in
+  if
+    List.exists
+      (fun order -> order.Order.request.side <> request.Order.side)
+      active
+  then Error "order would self-cross an active opposite-side order"
+  else Ok ()
 
 let projected_position ~account ~oms request =
-  let* pending = working_position ~account ~oms request.Order.instrument_id in
-  let* projected =
-    let* delta = signed_order_quantity request in
-    Scalar.Quantity.add pending delta
+  let* reservations =
+    reservations_for_instrument ~oms request.Order.instrument_id
   in
+  let* pending_positions =
+    directional_positions ~account request.instrument_id reservations
+  in
+  let pending = position_for_side request.side pending_positions in
+  let* projected_reservations = add_request reservations request in
+  let* projected_positions =
+    directional_positions ~account request.instrument_id projected_reservations
+  in
+  let projected = position_for_side request.side projected_positions in
   if
     Scalar.Quantity.is_positive pending
     && Scalar.Quantity.is_negative projected
     || Scalar.Quantity.is_negative pending
        && Scalar.Quantity.is_positive projected
   then Error "one order must not cross a position through zero"
-  else Ok projected
+  else Ok (pending, projected)
 
-let projected_valuation_quantities state ~account ~oms request projected =
+let projected_valuation_quantities state ~account ~oms request =
   Id.Instrument.Map.bindings state.instruments
   |> List.fold_left
        (fun result (instrument_id, _) ->
          let* values = result in
-         if Id.Instrument.equal instrument_id request.Order.instrument_id then
-           Ok ((instrument_id, projected) :: values)
-         else
-           let* quantity = working_position ~account ~oms instrument_id in
-           Ok ((instrument_id, quantity) :: values))
+         let* reservations = reservations_for_instrument ~oms instrument_id in
+         let* reservations =
+           if Id.Instrument.equal instrument_id request.Order.instrument_id then
+             add_request reservations request
+           else Ok reservations
+         in
+         let* positions =
+           directional_positions ~account instrument_id reservations
+         in
+         let* quantity = worst_directional_position positions in
+         Ok ((instrument_id, quantity) :: values))
        (Ok [])
   |> Result.map List.rev
 
 let projected_gross_exposure state ~account ~oms ~marks ~fx_rates request =
-  let* projected = projected_position ~account ~oms request in
-  let* () = check_position state projected in
   let* quantities =
-    projected_valuation_quantities state ~account ~oms request projected
+    projected_valuation_quantities state ~account ~oms request
   in
   let mark_map =
     List.fold_left
@@ -293,15 +339,14 @@ let check state ~account ~oms ~marks ~fx_rates request =
     | None -> Error "order refers to an unknown instrument"
     | Some instrument ->
         let* () = check_alignment instrument request in
-        let* pending =
-          working_position ~account ~oms request.Order.instrument_id
-        in
-        let* projected = projected_position ~account ~oms request in
+        let* () = check_self_cross ~oms request in
+        let* pending, projected = projected_position ~account ~oms request in
         let* pending_absolute = Scalar.Quantity.absolute pending in
         let* projected_absolute = Scalar.Quantity.absolute projected in
         if Scalar.Quantity.compare projected_absolute pending_absolute <= 0 then
           Ok ()
         else
+          let* () = check_position state projected in
           let* before =
             Account.value account ~instruments:(instruments state) ~marks
               ~fx_rates

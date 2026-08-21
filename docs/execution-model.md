@@ -42,6 +42,20 @@ positions and submits at most one market order per instrument. Each order is cap
 market remainder is IOC, but the desired target is retried after a later slice until reached or
 superseded.
 
+## Working-order risk
+
+Pre-trade risk reserves each active order's unfilled quantity by side. For every instrument, it
+values both the position after all reserved buys and the position after all reserved sells, then
+uses the larger absolute endpoint for portfolio exposure. Opposing orders therefore cannot hide
+risk by netting before either execution path is known.
+
+A new order is rejected while an active opposite-side order exists for the same instrument. This
+self-cross rule applies to direct and target-generated orders. Same-side orders may coexist, and
+their remaining quantities share the applicable long or short position limit. Risk-reducing orders
+remain permitted when an actual position is already outside a limit, but one order may not cross
+that position through zero. Fill-time position, exposure, leverage, and margin checks remain the
+final defense against price and account changes after acceptance.
+
 ## Market and limit prices
 
 A market order executes at the open of its first eligible slice.
