@@ -5,6 +5,7 @@ type stage =
   | Artifact_close
   | Artifact_publish
   | Artifact_cleanup
+  | Artifact_restore
   | Process_spawn
   | Process_exchange
   | Process_terminate
@@ -17,6 +18,7 @@ type operation =
   | Close_artifact
   | Publish_artifact of { partial_path : string; final_path : string }
   | Cleanup_artifact of string
+  | Restore_artifact of { final_path : string; partial_path : string }
   | Spawn_process
   | Exchange_process
   | Terminate_process
@@ -36,6 +38,7 @@ let stage = function
   | Close_artifact -> Artifact_close
   | Publish_artifact _ -> Artifact_publish
   | Cleanup_artifact _ -> Artifact_cleanup
+  | Restore_artifact _ -> Artifact_restore
   | Spawn_process -> Process_spawn
   | Exchange_process -> Process_exchange
   | Terminate_process -> Process_terminate
@@ -48,6 +51,7 @@ let stage_to_string = function
   | Artifact_close -> "artifact close"
   | Artifact_publish -> "artifact publish"
   | Artifact_cleanup -> "artifact cleanup"
+  | Artifact_restore -> "artifact restore"
   | Process_spawn -> "process spawn"
   | Process_exchange -> "process exchange"
   | Process_terminate -> "process terminate"

@@ -120,9 +120,28 @@ let process_slice respond runner market_slice =
   in
   drive respond progress
 
-let close_journal = function
-  | None -> ()
-  | Some journal -> Journal.close_preserving_partial journal
+let create_artifacts ~journal_path ~transcript_path =
+  let* journal = Journal.create journal_path in
+  match Strategy_transcript.create transcript_path with
+  | Ok transcript -> Ok (journal, transcript)
+  | Error _ as error ->
+      Journal.close_preserving_partial journal;
+      error
+
+let close_artifacts (journal, transcript) =
+  Journal.close_preserving_partial journal;
+  Strategy_transcript.close_preserving_partial transcript
+
+let protect_artifacts artifacts run =
+  try run ()
+  with exception_ ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    close_artifacts artifacts;
+    Printexc.raise_with_backtrace exception_ backtrace
+
+let commit_artifacts (journal, transcript) =
+  Artifact_writer.commit
+    [ Journal.artifact journal; Strategy_transcript.artifact transcript ]
 
 let run ~env ~scenario_sha256 ~journal_path ~transcript_path ~strategy_command
     ~strategy_timeout (scenario : Scenario.t) =
@@ -137,11 +156,14 @@ let run ~env ~scenario_sha256 ~journal_path ~transcript_path ~strategy_command
         ~max_internal_events:scenario.max_internal_events
         ~initial_cash:scenario.initial_cash
     in
-    let* journal = Journal.create journal_path in
+    let* journal, transcript =
+      create_artifacts ~journal_path ~transcript_path
+    in
     let journal_ref = Some journal in
     let session_result =
-      Strategy_process.with_session ~env ~command:strategy_command
-        ~timeout:strategy_timeout ~transcript_path
+      protect_artifacts (journal, transcript) @@ fun () ->
+      Strategy_process.with_staged_session ~env ~command:strategy_command
+        ~timeout:strategy_timeout ~transcript
         ~initialization:(initialization_of_scenario ~scenario_sha256 scenario)
         (fun session ->
           let respond = Strategy_process.on_event session in
@@ -165,10 +187,10 @@ let run ~env ~scenario_sha256 ~journal_path ~transcript_path ~strategy_command
     in
     match session_result with
     | Error _ as error ->
-        close_journal journal_ref;
+        close_artifacts (journal, transcript);
         error
     | Ok ((state, valuation, audits), strategy) -> (
-        match Journal.commit journal with
+        match commit_artifacts (journal, transcript) with
         | Error _ as error -> error
         | Ok () ->
             Ok
@@ -243,9 +265,9 @@ let replay_stream_pass ~scenario_sha256 ~journal ~session channel =
 
 let run_stream ~env ~journal_path ~transcript_path ~strategy_command
     ~strategy_timeout path =
-  let journal_ref = ref None in
+  let artifacts_ref = ref None in
   let fail result =
-    close_journal !journal_ref;
+    Option.iter close_artifacts !artifacts_ref;
     result
   in
   try
@@ -261,11 +283,14 @@ let run_stream ~env ~journal_path ~transcript_path ~strategy_command
                ~phase:Diagnostic.Input
                "scenario stream changed during validation")
         else
-          let* journal = Journal.create journal_path in
-          journal_ref := Some journal;
+          let* journal, transcript =
+            create_artifacts ~journal_path ~transcript_path
+          in
+          artifacts_ref := Some (journal, transcript);
           let session_result =
-            Strategy_process.with_session ~env ~command:strategy_command
-              ~timeout:strategy_timeout ~transcript_path
+            protect_artifacts (journal, transcript) @@ fun () ->
+            Strategy_process.with_staged_session ~env ~command:strategy_command
+              ~timeout:strategy_timeout ~transcript
               ~initialization:validated.initialization (fun session ->
                 seek_in channel 0;
                 let* runner, valuation, audit_count, slice_count =
@@ -283,7 +308,7 @@ let run_stream ~env ~journal_path ~transcript_path ~strategy_command
           match session_result with
           | Error _ as error -> fail error
           | Ok ((runner, valuation, audit_count, slice_count), strategy) -> (
-              match Journal.commit journal with
+              match commit_artifacts (journal, transcript) with
               | Error _ as error -> error
               | Ok () ->
                   Ok
