@@ -838,8 +838,8 @@ module Interactive = struct
           Error "market slice sequence must increase"
       | _ -> (
           match state.last_slice_end with
-          | Some end_at when Ptime.compare market_slice.end_at end_at <= 0 ->
-              Error "market slice end must increase"
+          | Some end_at when Ptime.compare market_slice.start_at end_at < 0 ->
+              Error "market slice start must not precede previous end"
           | _ -> (
               match state.last_received_at with
               | Some received_at
