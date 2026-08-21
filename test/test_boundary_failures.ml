@@ -107,6 +107,7 @@ let exercise_artifact_failure (type writer) writer_name
               | Error _ as error -> error
               | Ok () -> Writer.commit writer)
           | Artifact_create -> Alcotest.fail "create failure was not injected"
+          | Artifact_restore -> Alcotest.fail "expected a lifecycle failure"
           | Process_spawn | Process_exchange | Process_terminate | Process_reap
             ->
               Alcotest.fail "expected an artifact stage"
@@ -154,6 +155,70 @@ let artifact_cases writer_name writer =
         `Quick
         (fun () -> exercise_artifact_failure writer_name writer stage))
     artifact_stages
+
+let nth_failure target occurrence =
+  let seen = ref 0 in
+  let perform : type result.
+      T.Boundary_effects.operation -> (unit -> result) -> result =
+   fun operation run ->
+    if T.Boundary_effects.stage operation = target then (
+      seen := !seen + 1;
+      if !seen = occurrence then
+        raise (Injected_failure (T.Boundary_effects.stage_to_string target)));
+    run ()
+  in
+  ({ T.Boundary_effects.perform }, seen)
+
+let exercise_transaction_failure stage occurrence =
+  with_absent_path ".journal.jsonl" @@ fun journal_path ->
+  with_absent_path ".strategy.jsonl" @@ fun transcript_path ->
+  let effects, seen = nth_failure stage occurrence in
+  let journal =
+    T.Artifact_writer.create ~effects ~label:"journal" journal_path |> ok
+  in
+  let transcript =
+    T.Artifact_writer.create ~effects ~label:"strategy transcript"
+      transcript_path
+    |> ok
+  in
+  T.Artifact_writer.append journal "journal\n" |> ok;
+  T.Artifact_writer.append transcript "transcript\n" |> ok;
+  let diagnostic = T.Artifact_writer.commit [ journal; transcript ] |> error in
+  Alcotest.(check int) "target occurrence reached" occurrence !seen;
+  Alcotest.(check string)
+    "artifact diagnostic" "artifact.io"
+    (T.Diagnostic.code_to_string diagnostic.code);
+  let finals_exist = stage = T.Boundary_effects.Artifact_cleanup in
+  List.iter
+    (fun path ->
+      Alcotest.(check bool)
+        "final-set invariant" finals_exist (Sys.file_exists path);
+      Alcotest.(check bool)
+        "partial-set invariant" true
+        (Sys.file_exists (path ^ ".partial")))
+    [ journal_path; transcript_path ];
+  if finals_exist then
+    List.iter
+      (fun path ->
+        Alcotest.(check string)
+          "final and restored partial agree"
+          (In_channel.with_open_bin path In_channel.input_all)
+          (In_channel.with_open_bin (path ^ ".partial") In_channel.input_all))
+      [ journal_path; transcript_path ]
+
+let transaction_cases =
+  List.concat_map
+    (fun stage ->
+      List.map
+        (fun occurrence ->
+          Alcotest.test_case
+            (Printf.sprintf "transaction %s %d"
+               (T.Boundary_effects.stage_to_string stage)
+               occurrence)
+            `Quick
+            (fun () -> exercise_transaction_failure stage occurrence))
+        [ 1; 2 ])
+    T.Boundary_effects.[ Artifact_close; Artifact_publish; Artifact_cleanup ]
 
 let initialization () =
   let instrument = instrument () in
@@ -205,4 +270,4 @@ let process_cases =
 let tests =
   artifact_cases "journal" (module Journal_writer)
   @ artifact_cases "transcript" (module Transcript_writer)
-  @ process_cases
+  @ transaction_cases @ process_cases
