@@ -103,5 +103,9 @@ val value :
   marks:(Id.Instrument.t * Scalar.Price.t) list ->
   fx_rates:(string * Scalar.Price.t) list ->
   (valuation, string) result
+(** [value state ~instruments ~marks ~fx_rates] attributes every supplied mark
+    and retained account position. Marks must cover positions with nonzero
+    quantity. A retained flat position may omit its mark; its attribution then
+    uses the canonical mark one. *)
 
 val pp_valuation : Format.formatter -> valuation -> unit
