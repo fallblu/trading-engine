@@ -1,6 +1,7 @@
 (lang dune 3.24)
 
 (name trading_engine)
+(version 1.0.0)
 (generate_opam_files false)
 (implicit_transitive_deps false)
 
