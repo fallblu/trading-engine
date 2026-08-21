@@ -423,12 +423,13 @@ let with_staged_session ?(effects = Boundary_effects.direct) ~env ~command
       run_session ~effects ~env ~command ~executable ~timeout ~transcript
         ~initialization use
 
-let with_session ?(effects = Boundary_effects.direct) ~env ~command ~timeout
+let with_session ?(effects = Boundary_effects.direct)
+    ?(durability = Artifact_writer.Buffered) ~env ~command ~timeout
     ~transcript_path ~initialization use =
   match validate_configuration ~command ~timeout with
   | Error _ as error -> error
   | Ok executable -> (
-      match Strategy_transcript.create ~effects transcript_path with
+      match Strategy_transcript.create ~effects ~durability transcript_path with
       | Error _ as error -> error
       | Ok transcript -> (
           let fail result =

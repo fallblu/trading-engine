@@ -2,7 +2,11 @@
 
 type t
 
-val create : ?effects:Boundary_effects.t -> string -> (t, Diagnostic.t) result
+val create :
+  ?effects:Boundary_effects.t ->
+  ?durability:Artifact_writer.durability ->
+  string ->
+  (t, Diagnostic.t) result
 
 val append :
   t ->
