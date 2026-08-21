@@ -77,6 +77,10 @@ position, persistent quantity target, and each active order by its exact numerat
 ratio. It inversely scales limit prices and preserves total position basis. If the adjusted order
 cannot satisfy the configured lot or tick, the slice fails instead of silently rounding. Each
 changed order emits `order_adjusted` with causal links to both the original order and split.
+Unit-based risk limits do not scale with a split. Adjusted positions and persistent targets are
+grandfathered: fills may reduce an out-of-limit absolute position but may not increase it, and
+reconciliation orders remain bounded by the configured maximum order quantity. An adjusted active
+order may exceed that maximum, but no individual fill may do so.
 
 A cash dividend multiplies the pre-match signed position by its per-unit amount. It credits a long
 or debits a short in the instrument's quote-currency ledger and records realized dividend P&L.
@@ -94,11 +98,16 @@ fixed_fee + ceil(fill_notional × fee_bps / 10,000)
 
 Liquidation proposals are processed first, followed by sells and then buys within each origin
 class. For each proposal, the engine searches for the largest lot-aligned quantity whose signed
-post-fill position is within the long/short cap.
+post-fill position is within the long/short cap and whose fill quantity is no greater than the
+maximum order quantity.
 When absolute exposure increases, the projected account must also satisfy maximum gross exposure,
 maximum leverage, and initial margin. Reductions in absolute exposure are permitted without a new
 initial-margin test. A clipped proposal emits `margin_limited`; a zero permitted quantity produces
 no fill. Only the applied quantity consumes shared slice capacity.
+
+This bounded-fill policy preserves split-adjusted GTC limit orders: an oversized remainder may
+fill over multiple slices. Market orders remain IOC, so they fill at most one bounded quantity and
+cancel any remainder after their eligible slice.
 
 Each partial fill pays its own fixed fee, so fragmentation affects total cost.
 

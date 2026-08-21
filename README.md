@@ -149,8 +149,8 @@ slice whose start is not earlier than its creation time.
   active orders; cash dividends credit longs and debit shorts in the quote-currency ledger.
 - Borrow fees accrue on open shorts for the slice interval before matching.
 - Proposed fills are clipped to the largest permitted fractional-lot quantity at the actual fill
-  price. Increasing exposure must satisfy position, gross-exposure, leverage, and initial-margin
-  limits; exposure-reducing fills remain available.
+  price and never exceed the maximum order quantity. Increasing exposure must satisfy position,
+  gross-exposure, leverage, and initial-margin limits; exposure-reducing fills remain available.
 - A maintenance-margin breach cancels active orders, clears portfolio targets, and creates
   deterministic market orders that flatten positions in bounded lots across later slices.
 - The engine emits exactly one valuation after each complete synchronized slice.
