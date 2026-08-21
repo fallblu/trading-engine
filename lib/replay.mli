@@ -23,10 +23,12 @@ type streamed_result = private {
 val run :
   scenario_sha256:string ->
   ?journal_path:string ->
+  ?durability:Artifact_writer.durability ->
   Scenario.t ->
   (result, Diagnostic.t) Stdlib.result
 
 val run_stream :
   ?journal_path:string ->
+  ?durability:Artifact_writer.durability ->
   string ->
   (streamed_result, Diagnostic.t) Stdlib.result

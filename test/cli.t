@@ -10,7 +10,7 @@
   $ ../bin/main.exe --validate-only --input-format jsonl --input ../contracts/v4/fixtures/demo.scenario.jsonl
   valid run=demo instruments=1 schedule=2 slices=4 scenario_sha256=6afe9bbda482265cfa24c35167150f02eea1a457aa5025143f3556b8046ae91b
 
-  $ ../bin/main.exe --input-format jsonl --input ../contracts/v4/fixtures/demo.scenario.jsonl --journal streamed.journal.jsonl
+  $ ../bin/main.exe --input-format jsonl --input ../contracts/v4/fixtures/demo.scenario.jsonl --journal streamed.journal.jsonl --durable-artifacts
   run=demo audits=20 orders=3 active=0 filled=2 rejected=0
   cash=9739.76812 equity=10004.76812 gross=265 realized=1.419136 unrealized=3.348984 fees=2.50188
   journal=streamed.journal.jsonl
@@ -47,13 +47,17 @@
 
   $ test ! -e validation.journal.jsonl
 
+  $ ../bin/main.exe --validate-only --durable-artifacts --input ../contracts/v4/fixtures/demo.scenario.json
+  trading-engine: --durable-artifacts cannot be used with --validate-only
+  [123]
+
   $ ../bin/main.exe --input ../contracts/v4/fixtures/demo.scenario.json --journal ignored.journal.jsonl --strategy-timeout 5
   trading-engine: --strategy-arg, --strategy-timeout, and --strategy-transcript require --strategy-executable
   [123]
   $ test ! -e ignored.journal.jsonl
 
   $ mkdir external
-  $ ../bin/main.exe --input ../contracts/strategy/v3/fixtures/external.scenario.json --journal external/run.journal.jsonl --strategy-executable ./fake_strategy.py --strategy-transcript external/run.strategy.jsonl --strategy-timeout 5
+  $ ../bin/main.exe --input ../contracts/strategy/v3/fixtures/external.scenario.json --journal external/run.journal.jsonl --strategy-executable ./fake_strategy.py --strategy-transcript external/run.strategy.jsonl --strategy-timeout 5 --durable-artifacts
   run=external-demo audits=10 orders=1 active=0 filled=1 rejected=0
   cash=9794 equity=10008 gross=214 realized=0 unrealized=8 fees=0
   journal=external/run.journal.jsonl

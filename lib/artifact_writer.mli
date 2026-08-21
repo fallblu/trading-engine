@@ -1,9 +1,11 @@
 (** Exclusive staged-file writer with a typed internal lifecycle. *)
 
 type t
+type durability = Buffered | Durable
 
 val create :
   ?effects:Boundary_effects.t ->
+  ?durability:durability ->
   label:string ->
   string ->
   (t, Diagnostic.t) result
