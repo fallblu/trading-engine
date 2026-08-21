@@ -130,7 +130,9 @@ opam exec -- dune exec trading-engine -- --capabilities
 
 Clients must confirm that both `scenario_contract_versions` and `journal_contract_versions`
 contain the scenario's `contract_version` before starting a replay. External clients must also
-require their version in `strategy_protocol_versions`. Runtime failures can use the structured
+require their version in `strategy_protocol_versions`. The versioned `resource_limits` object
+publishes inclusive limits for scenario records, strategy messages, reducer feedback, catalogs,
+intent batches, and artifact records. Runtime failures can use the structured
 diagnostic contract identified by each diagnostic's `diagnostic_version`. Human diagnostics remain
 the default. Use `--diagnostic-format json` to receive one JSON diagnostic on standard error with a
 stable code, phase, typed context, and sanitized underlying cause.
@@ -141,6 +143,9 @@ journal is created, then replayed from the same open file and hashed again befor
 CLI binds that exact-byte hash into the journal. It writes to the partial path and publishes the
 requested path only after `run_completed` is fully written and the partial file is closed. An
 error preserves the partial artifact for diagnosis.
+
+Journal and transcript records are limited to 2 MiB each, including the terminating line feed.
+Limit failures use the stable `resource.limit` diagnostic code.
 
 Pass `--durable-artifacts` to synchronize each staged file before publication and synchronize each
 containing directory after final links and partial cleanup. The default buffered mode flushes every

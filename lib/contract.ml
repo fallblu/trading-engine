@@ -16,6 +16,7 @@ let capabilities_to_yojson () =
       ("journal_formats", strings [ "jsonl" ]);
       ("execution_models", strings Execution_model.supported);
       ("strategy_protocol_versions", strings [ strategy_protocol_version ]);
+      ("resource_limits", Resource_limits.to_yojson ());
     ]
 
 let capabilities_to_string () =

@@ -10,6 +10,7 @@ type code =
   | Scenario_unsupported_contract
   | Scenario_stream_invalid
   | Scenario_stream_changed
+  | Resource_limit
   | Replay_failed
   | Reducer_failed
   | Strategy_invalid_configuration

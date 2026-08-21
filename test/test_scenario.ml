@@ -25,6 +25,22 @@ let with_stream records function_ =
           output_string channel (String.concat "\n" records ^ "\n"));
       function_ path)
 
+let with_stream_document document function_ =
+  let path = Filename.temp_file "trading-engine-scenario" ".jsonl" in
+  Fun.protect
+    ~finally:(fun () -> if Sys.file_exists path then Sys.remove path)
+    (fun () ->
+      Out_channel.with_open_bin path (fun channel ->
+          output_string channel document);
+      function_ path)
+
+let fold_stream_with_limit maximum path =
+  In_channel.with_open_bin path (fun channel ->
+      T.Scenario_stream.fold_channel ~max_record_bytes:maximum channel
+        ~init:(fun _ -> Ok ())
+        ~step:(fun () _ -> Ok ())
+        ~finish:(fun () ~slice_count -> Ok slice_count))
+
 let add_seconds timestamp seconds =
   Ptime.add_span timestamp (Ptime.Span.of_int_s seconds) |> Option.get
 
@@ -247,6 +263,61 @@ let map_field key change = function
              if String.equal name key then (name, change json) else (name, json))
            fields)
   | _ -> Alcotest.fail "expected object"
+
+let configured_resources_are_bounded () =
+  let document = Yojson.Safe.from_string (demo_document ()) in
+  let check_limit expected_path changed =
+    let diagnostic = T.Scenario.of_yojson changed |> error in
+    Alcotest.(check string)
+      "stable resource code" "resource.limit"
+      (T.Diagnostic.code_to_string diagnostic.code);
+    Alcotest.(check (option string))
+      "resource path" (Some expected_path) diagnostic.context.json_path
+  in
+  check_limit "$.max_internal_events"
+    (change_field "max_internal_events"
+       (`Int (T.Resource_limits.internal_events + 1))
+       document);
+  let instrument =
+    match document with
+    | `Assoc fields -> (
+        match List.assoc "instruments" fields with
+        | `List (value :: _) -> value
+        | _ -> Alcotest.fail "expected scenario instruments")
+    | _ -> Alcotest.fail "expected scenario"
+  in
+  check_limit "$.instruments"
+    (change_field "instruments"
+       (`List
+          (List.init (T.Resource_limits.catalog_instruments + 1) (fun _ ->
+               instrument)))
+       document);
+  let schedule_item, intent =
+    match document with
+    | `Assoc fields -> (
+        match List.assoc "schedule" fields with
+        | `List ((`Assoc item_fields as item) :: _) -> (
+            match List.assoc "intents" item_fields with
+            | `List (intent :: _) -> (item, intent)
+            | _ -> Alcotest.fail "expected scheduled intents")
+        | _ -> Alcotest.fail "expected scenario schedule")
+    | _ -> Alcotest.fail "expected scenario"
+  in
+  let oversized_item =
+    change_field "intents"
+      (`List
+         (List.init (T.Resource_limits.intents_per_batch + 1) (fun _ -> intent)))
+      schedule_item
+  in
+  check_limit "$.schedule[0].intents"
+    (change_field "schedule" (`List [ oversized_item ]) document);
+  Alcotest.(check bool)
+    "reducer configuration limit" true
+    (Result.is_error
+       (T.Engine.config ~contract_version:T.Contract.version ~risk:(risk ())
+          ~execution_model:(T.Execution_model.find "completed_bar_v1" |> ok)
+          ~execution:(execution ())
+          ~max_internal_events:(T.Resource_limits.internal_events + 1)))
 
 let scenario_with_second_slice_start start_at =
   map_root (fun fields ->
@@ -602,7 +673,7 @@ let journal_finalization_is_exclusive () =
         (In_channel.with_open_bin path In_channel.input_all);
       Alcotest.(check bool) "partial preserved" true (Sys.file_exists partial))
 
-let failed_replay_preserves_partial () =
+let invalid_replay_configuration_precedes_artifacts () =
   let path = Filename.temp_file "trading-engine-failure" ".jsonl" in
   Sys.remove path;
   let partial = path ^ ".partial" in
@@ -612,11 +683,11 @@ let failed_replay_preserves_partial () =
       if Sys.file_exists partial then Sys.remove partial)
     (fun () ->
       Alcotest.(check bool)
-        "invalid hash fails after journal creation" true
+        "invalid hash is rejected" true
         (Result.is_error
            (T.Replay.run ~scenario_sha256:"bad" ~journal_path:path (demo ())));
       Alcotest.(check bool) "final absent" false (Sys.file_exists path);
-      Alcotest.(check bool) "partial retained" true (Sys.file_exists partial))
+      Alcotest.(check bool) "partial absent" false (Sys.file_exists partial))
 
 let journal_matches_in_memory_events () =
   let scenario = demo () in
@@ -772,6 +843,63 @@ let streamed_intents_are_causal_before_execution () =
          executable market slice starts"
         (T.Replay.run_stream path |> diagnostic_message))
 
+let scenario_stream_records_are_bounded () =
+  let records = stream_records () in
+  let maximum =
+    List.fold_left
+      (fun current line -> Int.max current (String.length line))
+      0 records
+  in
+  with_stream records (fun path ->
+      Alcotest.(check int64)
+        "record at exact limit accepted" 4L
+        (fold_stream_with_limit maximum path |> ok));
+  let longest_line, longest_index =
+    records
+    |> List.mapi (fun index line -> (line, index + 1))
+    |> List.fold_left
+         (fun ((current, _) as selected) ((candidate, _) as next) ->
+           if String.length candidate > String.length current then next
+           else selected)
+         ("", 0)
+  in
+  with_stream records (fun path ->
+      let diagnostic = fold_stream_with_limit (maximum - 1) path |> error in
+      Alcotest.(check string)
+        "oversized record code" "resource.limit"
+        (T.Diagnostic.code_to_string diagnostic.code);
+      Alcotest.(check (option int))
+        "oversized record line" (Some longest_index) diagnostic.context.line;
+      Alcotest.(check string)
+        "observed and allowed bytes"
+        (Printf.sprintf "scenario stream record is %d bytes; limit is %d bytes"
+           (String.length longest_line)
+           (maximum - 1))
+        diagnostic.message);
+  with_stream_document (String.concat "\n" records) (fun path ->
+      Alcotest.(check int64)
+        "newline-free terminal record accepted" 4L
+        (fold_stream_with_limit maximum path |> ok));
+  let truncated = List.hd records ^ "\n{\"contract_version\"" in
+  with_stream_document truncated (fun path ->
+      let diagnostic = fold_stream_with_limit maximum path |> error in
+      Alcotest.(check string)
+        "truncated record remains a JSON error" "scenario.invalid_json"
+        (T.Diagnostic.code_to_string diagnostic.code);
+      Alcotest.(check (option int))
+        "truncated record line" (Some 2) diagnostic.context.line);
+  let small_limit = 32 in
+  let newline_free = String.make (small_limit + 7) 'x' in
+  with_stream_document newline_free (fun path ->
+      let diagnostic = fold_stream_with_limit small_limit path |> error in
+      Alcotest.(check string)
+        "newline-free oversized code" "resource.limit"
+        (T.Diagnostic.code_to_string diagnostic.code);
+      Alcotest.(check string)
+        "newline-free observed bytes"
+        "scenario stream record is 39 bytes; limit is 32 bytes"
+        diagnostic.message)
+
 let large_stream_replay_does_not_retain_audit_history () =
   let slice_count = 10_000 in
   let path = Filename.temp_file "trading-engine-large" ".jsonl" in
@@ -802,6 +930,8 @@ let tests =
       duplicate_fields_are_rejected;
     Alcotest.test_case "metadata validation is recursive" `Quick
       recursive_metadata_validation;
+    Alcotest.test_case "configured resources are bounded" `Quick
+      configured_resources_are_bounded;
     Alcotest.test_case "invalid schedule sequences rejected" `Quick
       invalid_schedule_sequences_are_rejected;
     Alcotest.test_case "duplicate slice bars rejected" `Quick
@@ -827,8 +957,8 @@ let tests =
       journal_is_created_exclusively;
     Alcotest.test_case "exclusive journal finalization" `Quick
       journal_finalization_is_exclusive;
-    Alcotest.test_case "failed replay preserves partial" `Quick
-      failed_replay_preserves_partial;
+    Alcotest.test_case "configuration precedes artifacts" `Quick
+      invalid_replay_configuration_precedes_artifacts;
     Alcotest.test_case "journal matches events" `Quick
       journal_matches_in_memory_events;
     Alcotest.test_case "stream replay matches batch semantics" `Quick
@@ -839,6 +969,8 @@ let tests =
       `Quick streamed_market_slice_timeline_is_non_overlapping;
     Alcotest.test_case "streamed intents are causal" `Quick
       streamed_intents_are_causal_before_execution;
+    Alcotest.test_case "scenario stream records are bounded" `Quick
+      scenario_stream_records_are_bounded;
     Alcotest.test_case "large stream avoids retained audit history" `Slow
       large_stream_replay_does_not_retain_audit_history;
   ]

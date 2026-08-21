@@ -38,6 +38,67 @@ module String_set = Set.Make (String)
 let ( let* ) result function_ =
   match result with Ok value -> function_ value | Error _ as error -> error
 
+let resource_limit ~json_path ~name ~observed ~allowed =
+  Diagnostic.make ~code:Diagnostic.Resource_limit ~phase:Diagnostic.Validation
+    ~json_path
+    (Printf.sprintf "%s count is %d; limit is %d" name observed allowed)
+
+let check_list_limit fields field_name ~json_path ~name allowed =
+  match List.assoc_opt field_name fields with
+  | Some (`List values) when List.length values > allowed ->
+      Error
+        (resource_limit ~json_path ~name ~observed:(List.length values) ~allowed)
+  | _ -> Ok ()
+
+let check_internal_event_limit fields ~json_path =
+  match List.assoc_opt "max_internal_events" fields with
+  | Some (`Int observed) when observed > Resource_limits.internal_events ->
+      Error
+        (resource_limit ~json_path ~name:"internal event" ~observed
+           ~allowed:Resource_limits.internal_events)
+  | _ -> Ok ()
+
+let check_batch_limits = function
+  | `Assoc fields -> (
+      let* () =
+        check_list_limit fields "instruments" ~json_path:"$.instruments"
+          ~name:"catalog instrument" Resource_limits.catalog_instruments
+      in
+      let* () =
+        check_internal_event_limit fields ~json_path:"$.max_internal_events"
+      in
+      match List.assoc_opt "schedule" fields with
+      | Some (`List items) ->
+          let rec check index = function
+            | [] -> Ok ()
+            | `Assoc item_fields :: remaining ->
+                let* () =
+                  check_list_limit item_fields "intents"
+                    ~json_path:(Printf.sprintf "$.schedule[%d].intents" index)
+                    ~name:"intent" Resource_limits.intents_per_batch
+                in
+                check (index + 1) remaining
+            | _ :: remaining -> check (index + 1) remaining
+          in
+          check 0 items
+      | _ -> Ok ())
+  | _ -> Ok ()
+
+let check_stream_header_limits = function
+  | `Assoc fields ->
+      let* () =
+        check_list_limit fields "instruments" ~json_path:"$.instruments"
+          ~name:"catalog instrument" Resource_limits.catalog_instruments
+      in
+      check_internal_event_limit fields ~json_path:"$.max_internal_events"
+  | _ -> Ok ()
+
+let check_stream_item_limits = function
+  | `Assoc fields ->
+      check_list_limit fields "intents" ~json_path:"$.intents" ~name:"intent"
+        Resource_limits.intents_per_batch
+  | _ -> Ok ()
+
 let object_fields ~name ~expected = function
   | `Assoc fields ->
       let names = List.map fst fields in
@@ -384,8 +445,13 @@ let parse_schedule_item json =
   let* sequence = parse_int64 ~name:"after_slice_sequence" sequence_json in
   let* intents_json = field fields "intents" in
   let* intents_json = list ~name:"intents" intents_json in
-  let* intents = map_list parse_intent intents_json in
-  Ok (sequence, intents)
+  if List.length intents_json > Resource_limits.intents_per_batch then
+    Error
+      (Printf.sprintf "intent count is %d; limit is %d"
+         (List.length intents_json) Resource_limits.intents_per_batch)
+  else
+    let* intents = map_list parse_intent intents_json in
+    Ok (sequence, intents)
 
 let parse_volume = function
   | `Null -> Ok None
@@ -813,63 +879,73 @@ let of_yojson_result json =
     in
     let* instruments_json = field fields "instruments" in
     let* instruments_json = list ~name:"instruments" instruments_json in
-    let* instruments = map_list parse_instrument instruments_json in
-    if instruments = [] then
-      Error "scenario must define at least one instrument"
+    if List.length instruments_json > Resource_limits.catalog_instruments then
+      Error
+        (Printf.sprintf "catalog instrument count is %d; limit is %d"
+           (List.length instruments_json)
+           Resource_limits.catalog_instruments)
     else
-      let currencies =
-        base_currency
-        :: List.map
-             (fun instrument -> instrument.Instrument.quote_currency)
-             instruments
-        |> List.sort_uniq String.compare
-      in
-      let cash_currencies =
-        List.map fst initial_cash |> List.sort_uniq String.compare
-      in
-      if cash_currencies <> currencies then
-        Error "initial_cash must contain every scenario currency exactly once"
+      let* instruments = map_list parse_instrument instruments_json in
+      if instruments = [] then
+        Error "scenario must define at least one instrument"
       else
-        let catalog =
-          List.map (fun instrument -> instrument.Instrument.id) instruments
-          |> Id.Instrument.Set.of_list
+        let currencies =
+          base_currency
+          :: List.map
+               (fun instrument -> instrument.Instrument.quote_currency)
+               instruments
+          |> List.sort_uniq String.compare
         in
-        let* risk_json = field fields "risk" in
-        let* risk = parse_risk base_currency instruments risk_json in
-        let* execution_json = field fields "execution" in
-        let* execution_model, execution = parse_execution execution_json in
-        let* maximum_json = field fields "max_internal_events" in
-        let* max_internal_events =
-          integer ~name:"max_internal_events" maximum_json
+        let cash_currencies =
+          List.map fst initial_cash |> List.sort_uniq String.compare
         in
-        if max_internal_events <= 0 then
-          Error "max_internal_events must be positive"
+        if cash_currencies <> currencies then
+          Error "initial_cash must contain every scenario currency exactly once"
         else
-          let* schedule_json = field fields "schedule" in
-          let* schedule_json = list ~name:"schedule" schedule_json in
-          let* schedule = map_list parse_schedule_item schedule_json in
-          let* slices_json = field fields "slices" in
-          let* slices_json = list ~name:"slices" slices_json in
-          let* slices = map_list parse_slice slices_json in
-          let* () =
-            validate_slices ~base_currency ~currencies ~instruments slices
+          let catalog =
+            List.map (fun instrument -> instrument.Instrument.id) instruments
+            |> Id.Instrument.Set.of_list
           in
-          let* () = validate_schedule risk catalog schedule slices in
-          Ok
-            {
-              contract_version;
-              metadata;
-              run_id;
-              base_currency;
-              initial_cash;
-              instruments;
-              risk;
-              execution_model;
-              execution;
-              max_internal_events;
-              schedule;
-              slices;
-            }
+          let* risk_json = field fields "risk" in
+          let* risk = parse_risk base_currency instruments risk_json in
+          let* execution_json = field fields "execution" in
+          let* execution_model, execution = parse_execution execution_json in
+          let* maximum_json = field fields "max_internal_events" in
+          let* max_internal_events =
+            integer ~name:"max_internal_events" maximum_json
+          in
+          if max_internal_events <= 0 then
+            Error "max_internal_events must be positive"
+          else if max_internal_events > Resource_limits.internal_events then
+            Error
+              (Printf.sprintf "internal event count is %d; limit is %d"
+                 max_internal_events Resource_limits.internal_events)
+          else
+            let* schedule_json = field fields "schedule" in
+            let* schedule_json = list ~name:"schedule" schedule_json in
+            let* schedule = map_list parse_schedule_item schedule_json in
+            let* slices_json = field fields "slices" in
+            let* slices_json = list ~name:"slices" slices_json in
+            let* slices = map_list parse_slice slices_json in
+            let* () =
+              validate_slices ~base_currency ~currencies ~instruments slices
+            in
+            let* () = validate_schedule risk catalog schedule slices in
+            Ok
+              {
+                contract_version;
+                metadata;
+                run_id;
+                base_currency;
+                initial_cash;
+                instruments;
+                risk;
+                execution_model;
+                execution;
+                max_internal_events;
+                schedule;
+                slices;
+              }
 
 let of_yojson json =
   let code, json_path =
@@ -881,6 +957,7 @@ let of_yojson json =
         | _ -> (Diagnostic.Scenario_invalid, "$"))
     | _ -> (Diagnostic.Scenario_invalid, "$")
   in
+  let* () = check_batch_limits json in
   of_yojson_result json
   |> Result.map_error (fun message ->
       Diagnostic.make ~code ~phase:Diagnostic.Validation ~json_path message)
@@ -1011,11 +1088,13 @@ let stream_header_of_yojson ~contract_version json =
       (Diagnostic.Scenario_stream_invalid, "$.payload")
     else (Diagnostic.Scenario_unsupported_contract, "$.contract_version")
   in
+  let* () = check_stream_header_limits json in
   stream_header_of_yojson_result ~contract_version json
   |> Result.map_error (fun message ->
       Diagnostic.make ~code ~phase:Diagnostic.Validation ~json_path message)
 
 let stream_item_of_yojson header ~previous json =
+  let* () = check_stream_item_limits json in
   stream_item_of_yojson_result header ~previous json
   |> Result.map_error (fun message ->
       Diagnostic.make ~code:Diagnostic.Scenario_stream_invalid

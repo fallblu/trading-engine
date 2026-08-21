@@ -56,10 +56,10 @@
         "run_id": { "$ref": "https://github.com/fallblu/trading-engine/contracts/v3/scenario.schema.json#/$defs/identifier" },
         "base_currency": { "$ref": "https://github.com/fallblu/trading-engine/contracts/v3/scenario.schema.json#/$defs/identifier" },
         "initial_cash": { "type": "array", "minItems": 1, "items": { "$ref": "https://github.com/fallblu/trading-engine/contracts/v3/scenario.schema.json#/$defs/cashBalance" } },
-        "instruments": { "type": "array", "minItems": 1, "items": { "$ref": "https://github.com/fallblu/trading-engine/contracts/v3/scenario.schema.json#/$defs/instrument" } },
+        "instruments": { "type": "array", "minItems": 1, "maxItems": 4096, "items": { "$ref": "https://github.com/fallblu/trading-engine/contracts/v3/scenario.schema.json#/$defs/instrument" } },
         "risk": { "$ref": "https://github.com/fallblu/trading-engine/contracts/v3/scenario.schema.json#/$defs/risk" },
         "execution": { "$ref": "https://github.com/fallblu/trading-engine/contracts/v3/scenario.schema.json#/$defs/execution" },
-        "max_internal_events": { "type": "integer", "minimum": 1, "maximum": 4611686018427387903 }
+        "max_internal_events": { "type": "integer", "minimum": 1, "maximum": 100000 }
       }
     },
     "slicePayload": {
@@ -68,7 +68,7 @@
       "required": ["market_slice", "intents"],
       "properties": {
         "market_slice": { "$ref": "https://github.com/fallblu/trading-engine/contracts/v3/scenario.schema.json#/$defs/marketSlice" },
-        "intents": { "type": "array", "items": { "$ref": "https://github.com/fallblu/trading-engine/contracts/v3/scenario.schema.json#/$defs/intent" } }
+        "intents": { "type": "array", "maxItems": 4096, "items": { "$ref": "https://github.com/fallblu/trading-engine/contracts/v3/scenario.schema.json#/$defs/intent" } }
       }
     }
   }
