@@ -307,6 +307,9 @@ let apply_borrow_fee (state : t) ~instrument_id ~quote_currency ~fee =
       }
 
 let value (state : t) ~instruments ~marks ~fx_rates =
+  let canonical_flat_mark =
+    Scalar.Price.of_micros Scalar.Price.scale |> Result.get_ok
+  in
   let instrument_map =
     List.fold_left
       (fun map instrument ->
@@ -350,6 +353,8 @@ let value (state : t) ~instruments ~marks ~fx_rates =
     let* mark =
       match Id.Instrument.Map.find_opt instrument_id mark_map with
       | Some value -> Ok value
+      | None when Scalar.Quantity.is_zero current.quantity ->
+          Ok canonical_flat_mark
       | None ->
           Error
             (Format.asprintf "missing mark for instrument %a" Id.Instrument.pp
@@ -395,20 +400,15 @@ let value (state : t) ~instruments ~marks ~fx_rates =
         base_total_fees;
       }
   in
-  let* positions =
+  let unknown_mark =
     Id.Instrument.Map.bindings mark_map
-    |> List.fold_left
-         (fun result (instrument_id, _) ->
-           let* values = result in
-           let* instrument =
-             match Id.Instrument.Map.find_opt instrument_id instrument_map with
-             | Some value -> Ok value
-             | None -> Error "mark has no configured instrument"
-           in
-           let* value = position_attribution instrument in
-           Ok (value :: values))
-         (Ok [])
-    |> Result.map List.rev
+    |> List.find_opt (fun (instrument_id, _) ->
+        not (Id.Instrument.Map.mem instrument_id instrument_map))
+  in
+  let* () =
+    match unknown_mark with
+    | None -> Ok ()
+    | Some _ -> Error "mark has no configured instrument"
   in
   let unknown_position =
     Id.Instrument.Map.bindings state.positions
@@ -436,6 +436,27 @@ let value (state : t) ~instruments ~marks ~fx_rates =
         Error
           (Format.asprintf "held position has no mark %a" Id.Instrument.pp
              instrument_id)
+  in
+  let attribution_ids =
+    Id.Instrument.Map.merge
+      (fun _ mark retained_position ->
+        match (mark, retained_position) with None, None -> None | _ -> Some ())
+      mark_map state.positions
+  in
+  let* positions =
+    Id.Instrument.Map.bindings attribution_ids
+    |> List.fold_left
+         (fun result (instrument_id, ()) ->
+           let* values = result in
+           let* instrument =
+             match Id.Instrument.Map.find_opt instrument_id instrument_map with
+             | Some value -> Ok value
+             | None -> Error "mark has no configured instrument"
+           in
+           let* value = position_attribution instrument in
+           Ok (value :: values))
+         (Ok [])
+    |> Result.map List.rev
   in
   let add = Scalar.Money.add in
   let* cash =
