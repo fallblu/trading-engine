@@ -15,8 +15,8 @@ let audit_context event =
   in
   (event_id, order_id, causation_ids)
 
-let create ?effects final_path =
-  Artifact_writer.create ?effects ~label:"journal" final_path
+let create ?effects ?durability final_path =
+  Artifact_writer.create ?effects ?durability ~label:"journal" final_path
   |> Result.map (fun artifact -> { artifact })
 
 let append journal event =

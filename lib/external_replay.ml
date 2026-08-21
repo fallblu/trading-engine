@@ -120,9 +120,9 @@ let process_slice respond runner market_slice =
   in
   drive respond progress
 
-let create_artifacts ~journal_path ~transcript_path =
-  let* journal = Journal.create journal_path in
-  match Strategy_transcript.create transcript_path with
+let create_artifacts ~durability ~journal_path ~transcript_path =
+  let* journal = Journal.create ~durability journal_path in
+  match Strategy_transcript.create ~durability transcript_path with
   | Ok transcript -> Ok (journal, transcript)
   | Error _ as error ->
       Journal.close_preserving_partial journal;
@@ -143,8 +143,9 @@ let commit_artifacts (journal, transcript) =
   Artifact_writer.commit
     [ Journal.artifact journal; Strategy_transcript.artifact transcript ]
 
-let run ~env ~scenario_sha256 ~journal_path ~transcript_path ~strategy_command
-    ~strategy_timeout (scenario : Scenario.t) =
+let run ?(durability = Artifact_writer.Buffered) ~env ~scenario_sha256
+    ~journal_path ~transcript_path ~strategy_command ~strategy_timeout
+    (scenario : Scenario.t) =
   if scenario.schedule <> [] then
     Error
       (replay "external strategy replay requires an empty scenario schedule")
@@ -157,7 +158,7 @@ let run ~env ~scenario_sha256 ~journal_path ~transcript_path ~strategy_command
         ~initial_cash:scenario.initial_cash
     in
     let* journal, transcript =
-      create_artifacts ~journal_path ~transcript_path
+      create_artifacts ~durability ~journal_path ~transcript_path
     in
     let journal_ref = Some journal in
     let session_result =
@@ -263,8 +264,8 @@ let replay_stream_pass ~scenario_sha256 ~journal ~session channel =
       let* audit_count = add_audit_count state.audit_count events in
       Ok (runner, valuation, audit_count, slice_count))
 
-let run_stream ~env ~journal_path ~transcript_path ~strategy_command
-    ~strategy_timeout path =
+let run_stream ?(durability = Artifact_writer.Buffered) ~env ~journal_path
+    ~transcript_path ~strategy_command ~strategy_timeout path =
   let artifacts_ref = ref None in
   let fail result =
     Option.iter close_artifacts !artifacts_ref;
@@ -284,7 +285,7 @@ let run_stream ~env ~journal_path ~transcript_path ~strategy_command
                "scenario stream changed during validation")
         else
           let* journal, transcript =
-            create_artifacts ~journal_path ~transcript_path
+            create_artifacts ~durability ~journal_path ~transcript_path
           in
           artifacts_ref := Some (journal, transcript);
           let session_result =

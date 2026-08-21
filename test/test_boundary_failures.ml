@@ -11,7 +11,8 @@ let with_absent_path suffix test =
   Fun.protect
     ~finally:(fun () ->
       remove_if_exists path;
-      remove_if_exists (path ^ ".partial"))
+      remove_if_exists (path ^ ".partial");
+      remove_if_exists (path ^ ".partial.cleanup"))
     (fun () -> test path)
 
 let injected_effects target =
@@ -86,6 +87,7 @@ let artifact_stages =
       Artifact_flush;
       Artifact_close;
       Artifact_publish;
+      Artifact_rename;
       Artifact_cleanup;
     ]
 
@@ -102,12 +104,14 @@ let exercise_artifact_failure (type writer) writer_name
           match stage with
           | T.Boundary_effects.Artifact_write | Artifact_flush ->
               Writer.append writer
-          | Artifact_close | Artifact_publish | Artifact_cleanup -> (
+          | Artifact_close | Artifact_publish | Artifact_rename
+          | Artifact_cleanup -> (
               match Writer.append writer with
               | Error _ as error -> error
               | Ok () -> Writer.commit writer)
           | Artifact_create -> Alcotest.fail "create failure was not injected"
-          | Artifact_restore -> Alcotest.fail "expected a lifecycle failure"
+          | Artifact_sync_file | Artifact_restore | Artifact_sync_directory ->
+              Alcotest.fail "expected a lifecycle failure"
           | Process_spawn | Process_exchange | Process_terminate | Process_reap
             ->
               Alcotest.fail "expected an artifact stage"
@@ -122,6 +126,7 @@ let exercise_artifact_failure (type writer) writer_name
     (T.Diagnostic.code_to_string diagnostic.code);
   let expected_final =
     stage = T.Boundary_effects.Artifact_publish
+    || stage = T.Boundary_effects.Artifact_rename
     || stage = T.Boundary_effects.Artifact_cleanup
   in
   let expected_partial = stage <> T.Boundary_effects.Artifact_create in
@@ -133,6 +138,10 @@ let exercise_artifact_failure (type writer) writer_name
     (writer_name ^ " partial invariant")
     expected_partial
     (Sys.file_exists partial_path);
+  Alcotest.(check bool)
+    (writer_name ^ " cleanup path invariant")
+    false
+    (Sys.file_exists (partial_path ^ ".cleanup"));
   if stage = T.Boundary_effects.Artifact_write then
     Alcotest.(check int64)
       "short write retained" 8L
@@ -141,7 +150,10 @@ let exercise_artifact_failure (type writer) writer_name
     Alcotest.(check string)
       "publication rival preserved" "rival\n"
       (In_channel.with_open_bin final_path In_channel.input_all);
-  if stage = T.Boundary_effects.Artifact_cleanup then
+  if
+    stage = T.Boundary_effects.Artifact_rename
+    || stage = T.Boundary_effects.Artifact_cleanup
+  then
     Alcotest.(check string)
       "published and partial bytes agree"
       (In_channel.with_open_bin partial_path In_channel.input_all)
@@ -184,18 +196,24 @@ let exercise_transaction_failure stage occurrence =
   T.Artifact_writer.append journal "journal\n" |> ok;
   T.Artifact_writer.append transcript "transcript\n" |> ok;
   let diagnostic = T.Artifact_writer.commit [ journal; transcript ] |> error in
-  Alcotest.(check int) "target occurrence reached" occurrence !seen;
+  Alcotest.(check bool) "target occurrence reached" true (!seen >= occurrence);
   Alcotest.(check string)
     "artifact diagnostic" "artifact.io"
     (T.Diagnostic.code_to_string diagnostic.code);
-  let finals_exist = stage = T.Boundary_effects.Artifact_cleanup in
+  let finals_exist =
+    stage = T.Boundary_effects.Artifact_rename
+    || stage = T.Boundary_effects.Artifact_cleanup
+  in
   List.iter
     (fun path ->
       Alcotest.(check bool)
         "final-set invariant" finals_exist (Sys.file_exists path);
       Alcotest.(check bool)
         "partial-set invariant" true
-        (Sys.file_exists (path ^ ".partial")))
+        (Sys.file_exists (path ^ ".partial"));
+      Alcotest.(check bool)
+        "cleanup-set invariant" false
+        (Sys.file_exists (path ^ ".partial.cleanup")))
     [ journal_path; transcript_path ];
   if finals_exist then
     List.iter
@@ -218,7 +236,83 @@ let transaction_cases =
             `Quick
             (fun () -> exercise_transaction_failure stage occurrence))
         [ 1; 2 ])
-    T.Boundary_effects.[ Artifact_close; Artifact_publish; Artifact_cleanup ]
+    T.Boundary_effects.
+      [ Artifact_close; Artifact_publish; Artifact_rename; Artifact_cleanup ]
+
+let create_durable_artifacts effects journal_path transcript_path =
+  let create label path =
+    T.Artifact_writer.create ~effects ~durability:T.Artifact_writer.Durable
+      ~label path
+    |> ok
+  in
+  let journal = create "journal" journal_path in
+  let transcript = create "strategy transcript" transcript_path in
+  T.Artifact_writer.append journal "journal\n" |> ok;
+  T.Artifact_writer.append transcript "transcript\n" |> ok;
+  (journal, transcript)
+
+let exercise_durability_failure stage occurrence =
+  with_absent_path ".durable-journal.jsonl" @@ fun journal_path ->
+  with_absent_path ".durable-strategy.jsonl" @@ fun transcript_path ->
+  let effects, seen = nth_failure stage occurrence in
+  let journal, transcript =
+    create_durable_artifacts effects journal_path transcript_path
+  in
+  let diagnostic = T.Artifact_writer.commit [ journal; transcript ] |> error in
+  Alcotest.(check bool) "target occurrence reached" true (!seen >= occurrence);
+  Alcotest.(check string)
+    "durability diagnostic" "artifact.io"
+    (T.Diagnostic.code_to_string diagnostic.code);
+  let finals_exist =
+    stage = T.Boundary_effects.Artifact_sync_directory && occurrence = 2
+  in
+  List.iter
+    (fun path ->
+      Alcotest.(check bool)
+        "durable final-set invariant" finals_exist (Sys.file_exists path);
+      Alcotest.(check bool)
+        "durable partial-set invariant" true
+        (Sys.file_exists (path ^ ".partial"));
+      Alcotest.(check bool)
+        "durable cleanup-set invariant" false
+        (Sys.file_exists (path ^ ".partial.cleanup")))
+    [ journal_path; transcript_path ]
+
+let durable_transaction_succeeds () =
+  with_absent_path ".durable-journal.jsonl" @@ fun journal_path ->
+  with_absent_path ".durable-strategy.jsonl" @@ fun transcript_path ->
+  let journal, transcript =
+    create_durable_artifacts T.Boundary_effects.direct journal_path
+      transcript_path
+  in
+  T.Artifact_writer.commit [ journal; transcript ] |> ok;
+  List.iter
+    (fun path ->
+      Alcotest.(check bool) "durable final exists" true (Sys.file_exists path);
+      Alcotest.(check bool)
+        "durable partial removed" false
+        (Sys.file_exists (path ^ ".partial"));
+      Alcotest.(check bool)
+        "durable cleanup path removed" false
+        (Sys.file_exists (path ^ ".partial.cleanup"));
+      Alcotest.(check int)
+        "private artifact mode" 0o600
+        ((Unix.stat path).st_perm land 0o777))
+    [ journal_path; transcript_path ]
+
+let durability_cases =
+  [
+    Alcotest.test_case "durable file sync 1" `Quick (fun () ->
+        exercise_durability_failure T.Boundary_effects.Artifact_sync_file 1);
+    Alcotest.test_case "durable file sync 2" `Quick (fun () ->
+        exercise_durability_failure T.Boundary_effects.Artifact_sync_file 2);
+    Alcotest.test_case "durable publication directory sync" `Quick (fun () ->
+        exercise_durability_failure T.Boundary_effects.Artifact_sync_directory 1);
+    Alcotest.test_case "durable cleanup directory sync" `Quick (fun () ->
+        exercise_durability_failure T.Boundary_effects.Artifact_sync_directory 2);
+    Alcotest.test_case "durable transaction succeeds" `Quick
+      durable_transaction_succeeds;
+  ]
 
 let initialization () =
   let instrument = instrument () in
@@ -270,4 +364,4 @@ let process_cases =
 let tests =
   artifact_cases "journal" (module Journal_writer)
   @ artifact_cases "transcript" (module Transcript_writer)
-  @ transaction_cases @ process_cases
+  @ transaction_cases @ durability_cases @ process_cases

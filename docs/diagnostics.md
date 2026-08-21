@@ -39,7 +39,7 @@ Version 1 defines these codes:
 | `strategy.process` | Strategy spawn, signaling, supervision, or process I/O failed |
 | `strategy.exit` | Strategy exited with an unsuccessful status |
 | `artifact.exists` | A final or partial artifact path already exists |
-| `artifact.io` | Artifact creation, append, close, or publication failed |
+| `artifact.io` | Artifact creation, append, synchronization, close, publication, or cleanup failed |
 | `artifact.state` | Artifact writer lifecycle operation is invalid |
 
 Adding codes or optional context fields does not change the diagnostic version. Removing a code,

@@ -56,11 +56,12 @@ let add_audit_count count events =
     Error (replay "audit event count is exhausted")
   else Ok (Int64.add count added)
 
-let run ~scenario_sha256 ?journal_path scenario =
+let run ~scenario_sha256 ?journal_path ?(durability = Artifact_writer.Buffered)
+    scenario =
   let journal_result =
     match journal_path with
     | None -> Ok None
-    | Some path -> Journal.create path |> Result.map Option.some
+    | Some path -> Journal.create ~durability path |> Result.map Option.some
   in
   match journal_result with
   | Error _ as error -> error
@@ -215,7 +216,7 @@ let run_stream_pass ~scenario_sha256 ~journal channel =
                     slice_count;
                   })))
 
-let run_stream ?journal_path path =
+let run_stream ?journal_path ?(durability = Artifact_writer.Buffered) path =
   let journal = ref None in
   let fail result =
     Option.iter Journal.close_preserving_partial !journal;
@@ -239,7 +240,7 @@ let run_stream ?journal_path path =
               match journal_path with
               | None -> Ok validated
               | Some path -> (
-                  match Journal.create path with
+                  match Journal.create ~durability path with
                   | Error _ as error -> error
                   | Ok created -> (
                       journal := Some created;
