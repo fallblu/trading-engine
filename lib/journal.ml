@@ -5,12 +5,34 @@ type t = {
   mutable closed : bool;
 }
 
+let diagnostic ?event_id ?order_id ?causation_ids ~code message =
+  Diagnostic.make ?event_id ?order_id ?causation_ids ~code
+    ~phase:Diagnostic.Artifact message
+
+let audit_context event =
+  let event_id = Id.Event.to_string event.Audit.event_id in
+  let causation_ids = List.map Id.Event.to_string event.causation_ids in
+  let order_id =
+    match event.event with
+    | Audit.Order_accepted order | Order_rejected order ->
+        Some (Id.Order.to_string order.Order.id)
+    | Order_cancelled { order; _ } -> Some (Id.Order.to_string order.id)
+    | Fill_applied fill -> Some (Id.Order.to_string fill.Fill.order_id)
+    | Margin_limited { order_id; _ } -> Some (Id.Order.to_string order_id)
+    | _ -> None
+  in
+  (event_id, order_id, causation_ids)
+
 let create final_path =
   let partial_path = final_path ^ ".partial" in
   if Sys.file_exists final_path then
-    Error ("journal already exists: " ^ final_path)
+    Error
+      (diagnostic ~code:Diagnostic.Artifact_exists
+         ("journal already exists: " ^ final_path))
   else if Sys.file_exists partial_path then
-    Error ("partial journal already exists: " ^ partial_path)
+    Error
+      (diagnostic ~code:Diagnostic.Artifact_exists
+         ("partial journal already exists: " ^ partial_path))
   else
     try
       let channel =
@@ -19,18 +41,34 @@ let create final_path =
           0o600 partial_path
       in
       Ok { final_path; partial_path; channel; closed = false }
-    with Sys_error message -> Error ("could not create journal: " ^ message)
+    with Sys_error message as exception_ ->
+      Error
+        (Diagnostic.of_exception ~code:Diagnostic.Artifact_io
+           ~phase:Diagnostic.Artifact
+           ~message:("could not create journal: " ^ message)
+           exception_)
 
 let append journal event =
-  if journal.closed then Error "cannot append to a closed journal"
+  let event_id, order_id, causation_ids = audit_context event in
+  if journal.closed then
+    Error
+      (diagnostic ~event_id ?order_id ~causation_ids
+         ~code:Diagnostic.Artifact_state "cannot append to a closed journal")
   else
     try
       output_string journal.channel (Codec.audit_to_string event);
       output_char journal.channel '\n';
       flush journal.channel;
       Ok ()
-    with Sys_error message ->
-      Error ("could not append journal " ^ journal.partial_path ^ ": " ^ message)
+    with Sys_error message as exception_ ->
+      Error
+        (Diagnostic.of_exception ~code:Diagnostic.Artifact_io
+           ~phase:Diagnostic.Artifact
+           ~message:
+             ("could not append journal " ^ journal.partial_path ^ ": "
+            ^ message)
+           exception_
+        |> Diagnostic.annotate ~event_id ?order_id ~causation_ids)
 
 let close_preserving_partial journal =
   if not journal.closed then (
@@ -38,7 +76,10 @@ let close_preserving_partial journal =
     close_out_noerr journal.channel)
 
 let commit journal =
-  if journal.closed then Error "cannot commit a closed journal"
+  if journal.closed then
+    Error
+      (diagnostic ~code:Diagnostic.Artifact_state
+         "cannot commit a closed journal")
   else
     try
       flush journal.channel;
@@ -48,11 +89,19 @@ let commit journal =
       Unix.unlink journal.partial_path;
       Ok ()
     with
-    | Sys_error message ->
-        close_preserving_partial journal;
-        Error ("could not finalize journal: " ^ message)
-    | Unix.Unix_error (code, operation, target) ->
+    | Sys_error message as exception_ ->
         close_preserving_partial journal;
         Error
-          (Printf.sprintf "could not finalize journal: %s(%s): %s" operation
-             target (Unix.error_message code))
+          (Diagnostic.of_exception ~code:Diagnostic.Artifact_io
+             ~phase:Diagnostic.Artifact
+             ~message:("could not finalize journal: " ^ message)
+             exception_)
+    | Unix.Unix_error (code, operation, target) as exception_ ->
+        close_preserving_partial journal;
+        Error
+          (Diagnostic.of_exception ~code:Diagnostic.Artifact_io
+             ~phase:Diagnostic.Artifact
+             ~message:
+               (Printf.sprintf "could not finalize journal: %s(%s): %s"
+                  operation target (Unix.error_message code))
+             exception_)

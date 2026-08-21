@@ -19,7 +19,12 @@ journal files, and the runtime shell.
 | `Engine` | Sequencing, portfolio reconciliation, and pure suspend/resume orchestration |
 | `Scenario`, `Scenario_stream`, `Replay` | Strict batch and bounded-memory scripted runners |
 | `Strategy_protocol`, `Strategy_process`, `External_replay` | Versioned child supervision and external runners |
-| `Sha256`, `Codec`, `Journal`, `Strategy_transcript` | Input identity, stable audit JSON, and file publication |
+| `Sha256`, `Codec`, `Diagnostic`, `Journal`, `Strategy_transcript` | Input identity, stable diagnostics and audit JSON, and file publication |
+
+Boundary failures use the versioned [diagnostic contract](diagnostics.md). Pure domain constructors
+and reducer internals keep plain errors inside the deterministic boundary; replay adapters attach
+stable codes, phases, source locations, event causality, and sanitized exception details before
+returning an error to callers.
 
 ## Reducer phases
 
