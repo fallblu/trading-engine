@@ -329,8 +329,7 @@ let await_exit session =
         (diagnostic ~code:Diagnostic.Strategy_exit
            (Printf.sprintf "external strategy was killed by signal %d" signal))
 
-let with_session ?(effects = Boundary_effects.direct) ~env ~command ~timeout
-    ~transcript_path ~(initialization : Strategy_protocol.initialization) use =
+let validate_configuration ~command ~timeout =
   if not (valid_timeout timeout) then
     Error
       (diagnostic ~code:Diagnostic.Strategy_invalid_configuration
@@ -345,91 +344,107 @@ let with_session ?(effects = Boundary_effects.direct) ~env ~command ~timeout
         Error
           (diagnostic ~code:Diagnostic.Strategy_invalid_configuration
              "external strategy executable must not be empty")
-    | executable :: _ -> (
-        match Strategy_transcript.create ~effects transcript_path with
-        | Error _ as error -> error
-        | Ok transcript -> (
-            let fail result =
-              Strategy_transcript.close_preserving_partial transcript;
-              result
-            in
-            try
-              let result =
-                Eio.Switch.run ~name:"external-strategy" @@ fun switch ->
-                let process_manager = Eio.Stdenv.process_mgr env in
-                if enable_child_subreaper () <> 0 then
-                  failwith "could not enable external strategy child reaping";
-                let child_stdout, strategy_stdout = Eio_unix.pipe switch in
-                let strategy_stdin, child_stdin = Eio_unix.pipe switch in
-                let fds =
-                  [
-                    (0, Eio_unix.Resource.fd strategy_stdin, `Blocking);
-                    (1, Eio_unix.Resource.fd strategy_stdout, `Blocking);
-                    (2, Eio_unix.Resource.fd (Eio.Stdenv.stderr env), `Blocking);
-                  ]
-                in
-                let process =
-                  Boundary_effects.perform effects
-                    Boundary_effects.Spawn_process (fun () ->
-                      Eio_unix.Process.spawn_unix ~sw:switch process_manager
-                        ~pgid:0 ~fds ~executable command)
-                in
-                Eio.Flow.close strategy_stdin;
-                Eio.Flow.close strategy_stdout;
-                let child =
-                  {
-                    process;
-                    pgid = Eio.Process.pid process;
-                    clock = Eio.Stdenv.clock env;
-                    effects;
-                    status = None;
-                  }
-                in
-                let close_input () = Eio.Flow.close child_stdin in
-                let session =
-                  {
-                    input = (child_stdin :> Eio.Flow.sink_ty Eio.Resource.t);
-                    close_input;
-                    output =
-                      Eio.Buf_read.of_flow
-                        ~max_size:(Strategy_protocol.max_message_bytes + 1)
-                        child_stdout;
-                    child;
-                    clock = Eio.Stdenv.clock env;
-                    transcript;
-                    effects;
-                    timeout;
-                    next_sequence = 1L;
-                  }
-                in
-                try
-                  let result =
-                    let* identity = initialize session initialization in
-                    let* value = use session in
-                    let* () = shutdown session in
-                    let* () = await_exit session in
-                    Ok (value, identity)
-                  in
-                  match result with
-                  | Ok _ -> result
-                  | Error _ -> append_cleanup_error result child
-                with exception_ ->
-                  let backtrace = Printexc.get_raw_backtrace () in
-                  ignore (terminate_process_group child);
-                  Printexc.raise_with_backtrace exception_ backtrace
-              in
-              match result with
-              | Error _ as error -> fail error
-              | Ok value -> (
-                  match Strategy_transcript.commit transcript with
-                  | Ok () -> Ok value
-                  | Error _ as error -> error)
+    | executable :: _ -> Ok executable
+
+let run_session ~effects ~env ~command ~executable ~timeout ~transcript
+    ~(initialization : Strategy_protocol.initialization) use =
+  try
+    Eio.Switch.run ~name:"external-strategy" @@ fun switch ->
+    let process_manager = Eio.Stdenv.process_mgr env in
+    if enable_child_subreaper () <> 0 then
+      failwith "could not enable external strategy child reaping";
+    let child_stdout, strategy_stdout = Eio_unix.pipe switch in
+    let strategy_stdin, child_stdin = Eio_unix.pipe switch in
+    let fds =
+      [
+        (0, Eio_unix.Resource.fd strategy_stdin, `Blocking);
+        (1, Eio_unix.Resource.fd strategy_stdout, `Blocking);
+        (2, Eio_unix.Resource.fd (Eio.Stdenv.stderr env), `Blocking);
+      ]
+    in
+    let process =
+      Boundary_effects.perform effects Boundary_effects.Spawn_process (fun () ->
+          Eio_unix.Process.spawn_unix ~sw:switch process_manager ~pgid:0 ~fds
+            ~executable command)
+    in
+    Eio.Flow.close strategy_stdin;
+    Eio.Flow.close strategy_stdout;
+    let child =
+      {
+        process;
+        pgid = Eio.Process.pid process;
+        clock = Eio.Stdenv.clock env;
+        effects;
+        status = None;
+      }
+    in
+    let close_input () = Eio.Flow.close child_stdin in
+    let session =
+      {
+        input = (child_stdin :> Eio.Flow.sink_ty Eio.Resource.t);
+        close_input;
+        output =
+          Eio.Buf_read.of_flow
+            ~max_size:(Strategy_protocol.max_message_bytes + 1)
+            child_stdout;
+        child;
+        clock = Eio.Stdenv.clock env;
+        transcript;
+        effects;
+        timeout;
+        next_sequence = 1L;
+      }
+    in
+    try
+      let result =
+        let* identity = initialize session initialization in
+        let* value = use session in
+        let* () = shutdown session in
+        let* () = await_exit session in
+        Ok (value, identity)
+      in
+      match result with
+      | Ok _ -> result
+      | Error _ -> append_cleanup_error result child
+    with exception_ ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      ignore (terminate_process_group child);
+      Printexc.raise_with_backtrace exception_ backtrace
+  with
+  | Eio.Cancel.Cancelled _ as exception_ -> raise exception_
+  | exception_ ->
+      Error (exception_diagnostic "external strategy process" exception_)
+
+let with_staged_session ?(effects = Boundary_effects.direct) ~env ~command
+    ~timeout ~transcript ~initialization use =
+  match validate_configuration ~command ~timeout with
+  | Error _ as error -> error
+  | Ok executable ->
+      run_session ~effects ~env ~command ~executable ~timeout ~transcript
+        ~initialization use
+
+let with_session ?(effects = Boundary_effects.direct) ~env ~command ~timeout
+    ~transcript_path ~initialization use =
+  match validate_configuration ~command ~timeout with
+  | Error _ as error -> error
+  | Ok executable -> (
+      match Strategy_transcript.create ~effects transcript_path with
+      | Error _ as error -> error
+      | Ok transcript -> (
+          let fail result =
+            Strategy_transcript.close_preserving_partial transcript;
+            result
+          in
+          try
+            match
+              run_session ~effects ~env ~command ~executable ~timeout
+                ~transcript ~initialization use
             with
-            | Eio.Cancel.Cancelled _ as exception_ ->
-                Strategy_transcript.close_preserving_partial transcript;
-                raise exception_
-            | exception_ ->
-                fail
-                  (Error
-                     (exception_diagnostic "external strategy process"
-                        exception_))))
+            | Error _ as error -> fail error
+            | Ok value -> (
+                match Strategy_transcript.commit transcript with
+                | Ok () -> Ok value
+                | Error _ as error -> error)
+          with Eio.Cancel.Cancelled _ as exception_ ->
+            Strategy_transcript.close_preserving_partial transcript;
+            raise exception_))

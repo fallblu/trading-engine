@@ -159,6 +159,24 @@ let rollback artifact =
         Error (exception_diagnostic ~label:file.label "roll back" exception_))
   | Open _ | Closed _ | Complete _ -> Ok ()
 
+let restore_partial artifact =
+  match artifact.state with
+  | Complete file -> (
+      try
+        if not (Sys.file_exists file.partial_path) then
+          Boundary_effects.perform file.effects
+            (Boundary_effects.Restore_artifact
+               {
+                 final_path = file.final_path;
+                 partial_path = file.partial_path;
+               })
+            (fun () -> Unix.link file.final_path file.partial_path);
+        artifact.state <- Published (transition file);
+        Ok ()
+      with exception_ ->
+        Error (exception_diagnostic ~label:file.label "restore" exception_))
+  | Open _ | Closed _ | Published _ -> Ok ()
+
 let combine original = function
   | Ok () -> original
   | Error cleanup -> Diagnostic.combine original cleanup
@@ -166,6 +184,11 @@ let combine original = function
 let rollback_all artifacts original =
   List.fold_left
     (fun diagnostic artifact -> rollback artifact |> combine diagnostic)
+    original artifacts
+
+let restore_all artifacts original =
+  List.fold_left
+    (fun diagnostic artifact -> restore_partial artifact |> combine diagnostic)
     original artifacts
 
 let rec close_all = function
@@ -191,12 +214,15 @@ let rec publish_all published = function
       | Ok () -> publish_all (artifact :: published) rest
       | Error diagnostic -> Error (rollback_all published diagnostic))
 
-let rec cleanup_all = function
-  | [] -> Ok ()
-  | artifact :: rest -> (
-      match cleanup_partial artifact with
-      | Ok () -> cleanup_all rest
-      | Error _ as error -> error)
+let cleanup_all artifacts =
+  let rec loop = function
+    | [] -> Ok ()
+    | artifact :: rest -> (
+        match cleanup_partial artifact with
+        | Ok () -> loop rest
+        | Error diagnostic -> Error (restore_all artifacts diagnostic))
+  in
+  loop artifacts
 
 let commit artifacts =
   match artifacts with
