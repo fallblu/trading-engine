@@ -114,7 +114,9 @@ own the child's standard input and output; strategy diagnostics belong on standa
 one request is outstanding. Initialization must return `ready`, each event must return `intents`,
 and shutdown must return `stopped`. Wrong versions or sequences, unknown or malformed fields,
 oversized responses, EOF, timeout, extra output, and nonzero exit all fail the replay. The journal
-and transcript retain partial artifacts for diagnosis.
+and transcript retain partial artifacts for diagnosis. The strategy runs in a dedicated process
+group. Failure and cancellation send `SIGTERM` to the complete group, allow one second for graceful
+exit, then send `SIGKILL` and allow five seconds to reap the process tree.
 
 Discover the executable version and machine-readable compatibility surface:
 

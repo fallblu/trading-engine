@@ -16,8 +16,18 @@
   ../contracts/v3/fixtures/demo.scenario.jsonl
   ../contracts/v3/journal.schema.json
   ../contracts/v3/scenario-stream.schema.json
-  ../contracts/v3/scenario.schema.json)
- (libraries trading_engine ptime yojson alcotest qcheck-core qcheck-alcotest))
+  ../contracts/v3/scenario.schema.json
+  fake_strategy.py)
+ (libraries
+  trading_engine
+  ptime
+  yojson
+  alcotest
+  qcheck-core
+  qcheck-alcotest
+  unix
+  eio
+  eio_main))
 
 (cram
  (deps
