@@ -188,6 +188,33 @@ let append_cleanup_error result child =
       | Ok _ -> Error cleanup
       | Error original -> Error (Diagnostic.combine original cleanup))
 
+let rejection_evidence response =
+  let observed_bytes = String.length response in
+  let captured_bytes =
+    Int.min observed_bytes Strategy_transcript.max_rejection_prefix_bytes
+  in
+  ( String.sub response 0 captured_bytes,
+    observed_bytes,
+    captured_bytes < observed_bytes )
+
+let buffered_rejection_evidence output =
+  let observed_bytes = Eio.Buf_read.buffered_bytes output in
+  let captured_bytes =
+    Int.min observed_bytes Strategy_transcript.max_rejection_prefix_bytes
+  in
+  ( Eio.Buf_read.take captured_bytes output,
+    observed_bytes,
+    captured_bytes < observed_bytes )
+
+let reject_response session ~expected_sequence rejection
+    (raw_prefix, observed_bytes, truncated) =
+  match
+    Strategy_transcript.append_rejection session.transcript ~expected_sequence
+      ~diagnostic:rejection ~raw_prefix ~observed_bytes ~truncated
+  with
+  | Ok () -> Error rejection
+  | Error artifact -> Error (Diagnostic.combine rejection artifact)
+
 let exchange session ~stage ~expected_sequence request =
   let request_document = Strategy_protocol.message_to_string request in
   let request_bytes = String.length request_document in
@@ -220,20 +247,30 @@ let exchange session ~stage ~expected_sequence request =
             (diagnostic ~sequence:expected_sequence
                ~code:Diagnostic.Strategy_timeout
                (stage ^ ": external strategy timed out"))
-    with exception_ ->
-      Error (exception_diagnostic ~sequence:expected_sequence stage exception_)
+    with
+    | (End_of_file | Eio.Buf_read.Buffer_limit_exceeded) as exception_ ->
+        reject_response session ~expected_sequence
+          (exception_diagnostic ~sequence:expected_sequence stage exception_)
+          (buffered_rejection_evidence session.output)
+    | exception_ ->
+        Error
+          (exception_diagnostic ~sequence:expected_sequence stage exception_)
   in
   let* response = response in
-  let* response, response_json =
+  match
     Strategy_protocol.response_of_string ~expected_sequence response
     |> Result.map_error
          (Diagnostic.annotate ~sequence:expected_sequence ~json_path:"$")
-  in
-  let* () =
-    Strategy_transcript.append session.transcript
-      ~direction:Strategy_protocol.Strategy_to_engine response_json
-  in
-  Ok response
+  with
+  | Error rejection ->
+      reject_response session ~expected_sequence rejection
+        (rejection_evidence response)
+  | Ok (response, response_json) ->
+      let* () =
+        Strategy_transcript.append session.transcript
+          ~direction:Strategy_protocol.Strategy_to_engine response_json
+      in
+      Ok response
 
 let exchange_at session ~stage ~sequence make_request =
   exchange session ~stage ~expected_sequence:sequence (make_request ~sequence)

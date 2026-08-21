@@ -100,11 +100,53 @@
   >   test -e "$directory/run.journal.jsonl.partial" || return 1
   >   test ! -e "$directory/run.strategy.jsonl" || return 1
   >   test -e "$directory/run.strategy.jsonl.partial" || return 1
+  >   if test "$#" -eq 3; then
+  >     python3 - "$directory/run.strategy.jsonl.partial" "$mode" "$3" <<'PY' || return 1
+  > import json
+  > import sys
+  > from pathlib import Path
+  > path, mode, expected_code = sys.argv[1:]
+  > records = [json.loads(line) for line in Path(path).read_text().splitlines()]
+  > rejection = records[-1]
+  > assert rejection["strategy_diagnostic_version"] == "1"
+  > assert rejection["record_type"] == "rejected_strategy_response"
+  > assert rejection["expected_strategy_sequence"] == "1"
+  > assert rejection["diagnostic"]["code"] == expected_code
+  > assert rejection["diagnostic"]["context"]["sequence"] == "1"
+  > assert "strategy_protocol_version" not in rejection
+  > assert "direction" not in rejection
+  > assert "message" not in rejection
+  > evidence = rejection["evidence"]
+  > assert evidence["encoding"] == "hex"
+  > raw = bytes.fromhex(evidence["prefix"])
+  > assert len(raw) <= 256
+  > if mode == "eof":
+  >     assert raw == b"" and evidence["observed_bytes"] == 0
+  >     assert evidence["truncated"] is False
+  > elif mode == "oversized":
+  >     assert raw == b"x" * 256
+  >     assert evidence["observed_bytes"] == 1_048_577
+  >     assert evidence["truncated"] is True
+  > elif mode == "malformed":
+  >     assert raw == b"{" and evidence["observed_bytes"] == 1
+  >     assert evidence["truncated"] is False
+  > else:
+  >     assert evidence["observed_bytes"] == len(raw)
+  >     assert evidence["truncated"] is False
+  >     response = json.loads(raw)
+  >     if mode == "bad-sequence":
+  >         assert response["strategy_sequence"] == "999"
+  >     elif mode == "wrong-version":
+  >         assert response["strategy_protocol_version"] == "1"
+  >     elif mode == "unknown-field":
+  >         assert response["unexpected"] is True
+  > PY
+  >   fi
   >   echo "$mode: rejected"
   > }
-  $ check_strategy_failure eof "closed stdout"
+  $ check_strategy_failure eof "closed stdout" strategy.protocol
   eof: rejected
-  $ check_strategy_failure bad-sequence "expected strategy sequence"
+  $ check_strategy_failure bad-sequence "expected strategy sequence" strategy.protocol
   bad-sequence: rejected
   $ check_strategy_failure error "fixture failure"
   error: rejected
@@ -112,13 +154,13 @@
   extra-output: rejected
   $ check_strategy_failure nonzero "exited with code 9"
   nonzero: rejected
-  $ check_strategy_failure malformed "invalid strategy response JSON"
+  $ check_strategy_failure malformed "invalid strategy response JSON" strategy.protocol
   malformed: rejected
-  $ check_strategy_failure oversized "exceeds the maximum message size"
+  $ check_strategy_failure oversized "exceeds the maximum message size" resource.limit
   oversized: rejected
-  $ check_strategy_failure wrong-version "unsupported strategy protocol version"
+  $ check_strategy_failure wrong-version "unsupported strategy protocol version" strategy.protocol
   wrong-version: rejected
-  $ check_strategy_failure unknown-field "unknown or missing fields"
+  $ check_strategy_failure unknown-field "unknown or missing fields" strategy.protocol
   unknown-field: rejected
 
   $ check_process_tree_failure () {

@@ -144,6 +144,12 @@ CLI binds that exact-byte hash into the journal. It writes to the partial path a
 requested path only after `run_completed` is fully written and the partial file is closed. An
 error preserves the partial artifact for diagnosis.
 
+A protocol-invalid strategy response is not stored as an accepted transcript exchange. The partial
+transcript instead ends with a versioned rejection record containing its structured diagnostic and
+a hexadecimal prefix of at most 256 raw response bytes. This covers malformed fields and JSON,
+wrong versions or sequences, EOF, and oversized output without retaining the complete rejected
+payload.
+
 Journal and transcript records are limited to 2 MiB each, including the terminating line feed.
 Limit failures use the stable `resource.limit` diagnostic code.
 
