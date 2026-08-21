@@ -1,6 +1,6 @@
 let version = "3"
 let strategy_protocol_version = "3"
-let engine_version = "0.1.0-dev"
+let engine_version = "1.0.0"
 let strings values = `List (List.map (fun value -> `String value) values)
 
 let capabilities_to_yojson () =

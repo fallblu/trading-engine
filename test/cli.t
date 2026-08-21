@@ -1,8 +1,8 @@
   $ ../bin/main.exe --version
-  0.1.0-dev
+  1.0.0
 
   $ ../bin/main.exe --capabilities
-  {"engine_version":"0.1.0-dev","scenario_contract_versions":["3"],"journal_contract_versions":["3"],"scenario_formats":["json","jsonl"],"journal_formats":["jsonl"],"execution_models":["completed_bar_v1"],"strategy_protocol_versions":["3"]}
+  {"engine_version":"1.0.0","scenario_contract_versions":["3"],"journal_contract_versions":["3"],"scenario_formats":["json","jsonl"],"journal_formats":["jsonl"],"execution_models":["completed_bar_v1"],"strategy_protocol_versions":["3"]}
 
   $ ../bin/main.exe --validate-only --input ../contracts/v3/fixtures/demo.scenario.json
   valid run=demo instruments=1 schedule=2 slices=4 scenario_sha256=3e19fa66bc6425bb8ed7a89b338080a831dd39ea778c3c7f9e8ce1d3370fbee0
