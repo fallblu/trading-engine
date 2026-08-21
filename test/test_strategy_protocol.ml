@@ -183,7 +183,8 @@ let responses_are_strict_and_typed () =
       Alcotest.(check string) "metric value" "0.5" value
   | _ -> Alcotest.fail "expected metric intent");
   let wrong_sequence =
-    T.Strategy_protocol.response_of_yojson ~expected_sequence:4L ready |> error
+    T.Strategy_protocol.response_of_yojson ~expected_sequence:4L ready
+    |> diagnostic_message
   in
   Alcotest.(check bool)
     "wrong sequence rejected" true
@@ -202,7 +203,7 @@ let responses_are_strict_and_typed () =
     "duplicate field rejected"
     "strategy response must not contain duplicate fields"
     (T.Strategy_protocol.response_of_yojson ~expected_sequence:3L duplicate
-    |> error);
+    |> diagnostic_message);
   let wrong_version =
     `Assoc
       [
@@ -215,7 +216,7 @@ let responses_are_strict_and_typed () =
   Alcotest.(check string)
     "wrong version rejected" "unsupported strategy protocol version: 1"
     (T.Strategy_protocol.response_of_yojson ~expected_sequence:3L wrong_version
-    |> error);
+    |> diagnostic_message);
   let unknown_field =
     `Assoc
       [
@@ -229,18 +230,18 @@ let responses_are_strict_and_typed () =
   Alcotest.(check string)
     "unknown field rejected" "strategy response has unknown or missing fields"
     (T.Strategy_protocol.response_of_yojson ~expected_sequence:3L unknown_field
-    |> error);
+    |> diagnostic_message);
   Alcotest.(check bool)
     "malformed JSON rejected" true
     (T.Strategy_protocol.response_of_string ~expected_sequence:3L "{"
-    |> error
+    |> diagnostic_message
     |> String.starts_with ~prefix:"invalid strategy response JSON:");
   Alcotest.(check string)
     "oversized response rejected"
     "strategy response exceeds the maximum message size"
     (T.Strategy_protocol.response_of_string ~expected_sequence:3L
        (String.make (T.Strategy_protocol.max_message_bytes + 1) 'x')
-    |> error)
+    |> diagnostic_message)
 
 let transcript_records_direction_and_sequence () =
   let message = T.Strategy_protocol.shutdown_message ~sequence:9L in
@@ -294,7 +295,7 @@ let callback_exception_reaps_process_tree () =
       ~timeout:1.0 ~transcript_path ~initialization:(initialization ())
       (fun _ -> raise Exit)
   in
-  let message = error result in
+  let message = diagnostic_message result in
   Alcotest.(check bool)
     "callback exception reported" true
     (String.ends_with ~suffix:"Stdlib.Exit" message);

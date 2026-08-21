@@ -1,6 +1,7 @@
 let () =
   Alcotest.run "trading-engine"
     [
+      ("diagnostic", Test_diagnostic.tests);
       ("domain", Test_domain.tests);
       ("accounting", Test_accounting.tests);
       ("execution", Test_execution.tests);

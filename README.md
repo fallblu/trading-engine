@@ -127,7 +127,10 @@ opam exec -- dune exec trading-engine -- --capabilities
 
 Clients must confirm that both `scenario_contract_versions` and `journal_contract_versions`
 contain the scenario's `contract_version` before starting a replay. External clients must also
-require their version in `strategy_protocol_versions`.
+require their version in `strategy_protocol_versions`. Runtime failures use the structured
+diagnostic contract advertised by `diagnostic_versions`. Human diagnostics remain the default.
+Use `--diagnostic-format json` to receive one JSON diagnostic on standard error with a stable code,
+phase, typed context, and sanitized underlying cause.
 
 The final and `.partial` journal paths must not already exist. Batch JSON hashes the same complete
 document it parses. JSON Lines input is hashed and validated in a bounded-memory pass before the
@@ -178,6 +181,7 @@ production recovery log.
 ## Architecture and contracts
 
 - [Architecture](docs/architecture.md)
+- [Diagnostic contract](docs/diagnostics.md)
 - [Scenario contract](docs/scenario.md)
 - [Current contract v3 and conformance fixtures](contracts/v3/README.md)
 - [Frozen contract v2](contracts/v2/README.md)

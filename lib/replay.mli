@@ -24,7 +24,9 @@ val run :
   scenario_sha256:string ->
   ?journal_path:string ->
   Scenario.t ->
-  (result, string) Stdlib.result
+  (result, Diagnostic.t) Stdlib.result
 
 val run_stream :
-  ?journal_path:string -> string -> (streamed_result, string) Stdlib.result
+  ?journal_path:string ->
+  string ->
+  (streamed_result, Diagnostic.t) Stdlib.result

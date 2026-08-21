@@ -34,10 +34,12 @@ val event_message :
 val shutdown_message : sequence:int64 -> Yojson.Safe.t
 
 val response_of_yojson :
-  expected_sequence:int64 -> Yojson.Safe.t -> (response, string) result
+  expected_sequence:int64 -> Yojson.Safe.t -> (response, Diagnostic.t) result
 
 val response_of_string :
-  expected_sequence:int64 -> string -> (response * Yojson.Safe.t, string) result
+  expected_sequence:int64 ->
+  string ->
+  (response * Yojson.Safe.t, Diagnostic.t) result
 
 val transcript_record :
   transcript_sequence:int64 ->

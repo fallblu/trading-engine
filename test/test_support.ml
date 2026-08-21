@@ -1,11 +1,14 @@
 module T = Trading_engine
 
-let ok = function Ok value -> value | Error message -> Alcotest.fail message
+let ok = function
+  | Ok value -> value
+  | Error _ -> Alcotest.fail "unexpected error"
 
 let error = function
   | Error message -> message
   | Ok _ -> Alcotest.fail "expected an error"
 
+let diagnostic_message result = error result |> T.Diagnostic.to_human
 let price value = T.Scalar.Price.of_decimal_string value |> ok
 let quantity value = T.Scalar.Quantity.of_decimal_string value |> ok
 let weight value = T.Scalar.Weight.of_decimal_string value |> ok

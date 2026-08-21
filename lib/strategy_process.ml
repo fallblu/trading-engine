@@ -28,20 +28,35 @@ let ( let* ) result function_ =
 
 let valid_timeout value = Float.is_finite value && Float.compare value 0.0 > 0
 
+let diagnostic ?sequence ~code message =
+  Diagnostic.make ?sequence ~code ~phase:Diagnostic.Strategy message
+
 let next_sequence session =
   if Int64.equal session.next_sequence Int64.max_int then
-    Error "strategy protocol sequence is exhausted"
+    Error
+      (diagnostic ~sequence:session.next_sequence
+         ~code:Diagnostic.Strategy_protocol
+         "strategy protocol sequence is exhausted")
   else
     let current = session.next_sequence in
     session.next_sequence <- Int64.succ current;
     Ok current
 
-let exception_message stage exception_ =
-  match exception_ with
-  | End_of_file -> stage ^ ": external strategy closed stdout"
-  | Eio.Buf_read.Buffer_limit_exceeded ->
-      stage ^ ": strategy response exceeds the maximum message size"
-  | _ -> stage ^ ": " ^ Printexc.to_string exception_
+let exception_diagnostic ?sequence stage exception_ =
+  let code, message =
+    match exception_ with
+    | End_of_file ->
+        ( Diagnostic.Strategy_protocol,
+          stage ^ ": external strategy closed stdout" )
+    | Eio.Buf_read.Buffer_limit_exceeded ->
+        ( Diagnostic.Strategy_protocol,
+          stage ^ ": strategy response exceeds the maximum message size" )
+    | _ ->
+        ( Diagnostic.Strategy_process,
+          stage ^ ": " ^ Printexc.to_string exception_ )
+  in
+  Diagnostic.of_exception ?sequence ~code ~phase:Diagnostic.Strategy ~message
+    exception_
 
 let await_child (child : child) =
   match child.status with
@@ -65,7 +80,9 @@ let await_child_for (child : child) timeout =
       with exception_ ->
         raise
           (Failure
-             (exception_message "waiting for external strategy" exception_)))
+             (Diagnostic.to_human
+                (exception_diagnostic "waiting for external strategy" exception_)))
+      )
 
 let process_group_exists pgid =
   try
@@ -81,11 +98,15 @@ let signal_process_group pgid signal =
     Ok ()
   with
   | Unix.Unix_error (Unix.ESRCH, _, _) -> Ok ()
-  | Unix.Unix_error (code, operation, target) ->
+  | Unix.Unix_error (code, operation, target) as exception_ ->
       Error
-        (Printf.sprintf
-           "could not signal external strategy process group: %s(%s): %s"
-           operation target (Unix.error_message code))
+        (Diagnostic.of_exception ~code:Diagnostic.Strategy_process
+           ~phase:Diagnostic.Strategy
+           ~message:
+             (Printf.sprintf
+                "could not signal external strategy process group: %s(%s): %s"
+                operation target (Unix.error_message code))
+           exception_)
 
 let rec reap_descendants pgid =
   try
@@ -134,13 +155,16 @@ let terminate_process_group (child : child) =
         in
         match direct_status with
         | None ->
-            Error "external strategy did not exit after forced termination"
+            Error
+              (diagnostic ~code:Diagnostic.Strategy_process
+                 "external strategy did not exit after forced termination")
         | Some _ ->
             if wait_for_process_group child forced_deadline then Ok ()
             else
               Error
-                "external strategy descendants remained after forced \
-                 termination")
+                (diagnostic ~code:Diagnostic.Strategy_process
+                   "external strategy descendants remained after forced \
+                    termination"))
 
 let append_cleanup_error result child =
   match terminate_process_group child with
@@ -148,7 +172,7 @@ let append_cleanup_error result child =
   | Error cleanup -> (
       match result with
       | Ok _ -> Error cleanup
-      | Error message -> Error (message ^ "; " ^ cleanup))
+      | Error original -> Error (Diagnostic.combine original cleanup))
 
 let exchange session ~stage ~expected_sequence request =
   let* () =
@@ -164,12 +188,19 @@ let exchange session ~stage ~expected_sequence request =
             Ok (Eio.Buf_read.line session.output))
       with
       | Ok response -> Ok response
-      | Error `Timeout -> Error (stage ^ ": external strategy timed out")
-    with exception_ -> Error (exception_message stage exception_)
+      | Error `Timeout ->
+          Error
+            (diagnostic ~sequence:expected_sequence
+               ~code:Diagnostic.Strategy_timeout
+               (stage ^ ": external strategy timed out"))
+    with exception_ ->
+      Error (exception_diagnostic ~sequence:expected_sequence stage exception_)
   in
   let* response = response in
   let* response, response_json =
     Strategy_protocol.response_of_string ~expected_sequence response
+    |> Result.map_error
+         (Diagnostic.annotate ~sequence:expected_sequence ~json_path:"$")
   in
   let* () =
     Strategy_transcript.append session.transcript
@@ -190,9 +221,13 @@ let initialize session initialization =
   match response with
   | Strategy_protocol.Ready identity -> Ok identity
   | Failed message ->
-      Error ("external strategy initialization failed: " ^ message)
+      Error
+        (diagnostic ~sequence ~code:Diagnostic.Strategy_protocol
+           ("external strategy initialization failed: " ^ message))
   | Intents _ | Stopped ->
-      Error "external strategy returned the wrong initialization response"
+      Error
+        (diagnostic ~sequence ~code:Diagnostic.Strategy_protocol
+           "external strategy returned the wrong initialization response")
 
 let on_event session context event =
   let* sequence = next_sequence session in
@@ -202,9 +237,14 @@ let on_event session context event =
   in
   match response with
   | Strategy_protocol.Intents intents -> Ok intents
-  | Failed message -> Error ("external strategy failed: " ^ message)
+  | Failed message ->
+      Error
+        (diagnostic ~sequence ~code:Diagnostic.Strategy_protocol
+           ("external strategy failed: " ^ message))
   | Ready _ | Stopped ->
-      Error "external strategy returned the wrong event response"
+      Error
+        (diagnostic ~sequence ~code:Diagnostic.Strategy_protocol
+           "external strategy returned the wrong event response")
 
 let shutdown session =
   let* sequence = next_sequence session in
@@ -214,9 +254,14 @@ let shutdown session =
   in
   match response with
   | Strategy_protocol.Stopped -> Ok ()
-  | Failed message -> Error ("external strategy shutdown failed: " ^ message)
+  | Failed message ->
+      Error
+        (diagnostic ~sequence ~code:Diagnostic.Strategy_protocol
+           ("external strategy shutdown failed: " ^ message))
   | Ready _ | Intents _ ->
-      Error "external strategy returned the wrong shutdown response"
+      Error
+        (diagnostic ~sequence ~code:Diagnostic.Strategy_protocol
+           "external strategy returned the wrong shutdown response")
 
 let await_exit session =
   session.close_input ();
@@ -227,9 +272,12 @@ let await_exit session =
             Ok (await_child session.child))
       with
       | Ok status -> Ok status
-      | Error `Timeout -> Error "external strategy did not exit after shutdown"
+      | Error `Timeout ->
+          Error
+            (diagnostic ~code:Diagnostic.Strategy_timeout
+               "external strategy did not exit after shutdown")
     with exception_ ->
-      Error (exception_message "waiting for external strategy" exception_)
+      Error (exception_diagnostic "waiting for external strategy" exception_)
   in
   let* status = status in
   match status with
@@ -243,29 +291,45 @@ let await_exit session =
           with
           | Ok value -> Ok value
           | Error `Timeout ->
-              Error "external strategy stdout did not close after exit"
+              Error
+                (diagnostic ~code:Diagnostic.Strategy_timeout
+                   "external strategy stdout did not close after exit")
         with exception_ ->
-          Error (exception_message "reading final strategy output" exception_)
+          Error
+            (exception_diagnostic "reading final strategy output" exception_)
       in
       let* trailing_output = trailing_output in
       match trailing_output with
       | None -> Ok ()
       | Some _ ->
-          Error "external strategy wrote data after its stopped response")
+          Error
+            (diagnostic ~code:Diagnostic.Strategy_protocol
+               "external strategy wrote data after its stopped response"))
   | `Exited code ->
-      Error (Printf.sprintf "external strategy exited with code %d" code)
+      Error
+        (diagnostic ~code:Diagnostic.Strategy_exit
+           (Printf.sprintf "external strategy exited with code %d" code))
   | `Signaled signal ->
-      Error (Printf.sprintf "external strategy was killed by signal %d" signal)
+      Error
+        (diagnostic ~code:Diagnostic.Strategy_exit
+           (Printf.sprintf "external strategy was killed by signal %d" signal))
 
 let with_session ~env ~command ~timeout ~transcript_path
     ~(initialization : Strategy_protocol.initialization) use =
   if not (valid_timeout timeout) then
-    Error "strategy response timeout must be finite and positive"
+    Error
+      (diagnostic ~code:Diagnostic.Strategy_invalid_configuration
+         "strategy response timeout must be finite and positive")
   else
     match command with
-    | [] -> Error "external strategy command must not be empty"
+    | [] ->
+        Error
+          (diagnostic ~code:Diagnostic.Strategy_invalid_configuration
+             "external strategy command must not be empty")
     | executable :: _ when String.length executable = 0 ->
-        Error "external strategy executable must not be empty"
+        Error
+          (diagnostic ~code:Diagnostic.Strategy_invalid_configuration
+             "external strategy executable must not be empty")
     | executable :: _ -> (
         match Strategy_transcript.create transcript_path with
         | Error _ as error -> error
@@ -348,5 +412,5 @@ let with_session ~env ~command ~timeout ~transcript_path
             | exception_ ->
                 fail
                   (Error
-                     (exception_message "external strategy process" exception_))
-            ))
+                     (exception_diagnostic "external strategy process"
+                        exception_))))

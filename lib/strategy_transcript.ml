@@ -6,12 +6,19 @@ type t = {
   mutable closed : bool;
 }
 
+let diagnostic ?sequence ~code message =
+  Diagnostic.make ?sequence ~code ~phase:Diagnostic.Artifact message
+
 let create final_path =
   let partial_path = final_path ^ ".partial" in
   if Sys.file_exists final_path then
-    Error ("strategy transcript already exists: " ^ final_path)
+    Error
+      (diagnostic ~code:Diagnostic.Artifact_exists
+         ("strategy transcript already exists: " ^ final_path))
   else if Sys.file_exists partial_path then
-    Error ("partial strategy transcript already exists: " ^ partial_path)
+    Error
+      (diagnostic ~code:Diagnostic.Artifact_exists
+         ("partial strategy transcript already exists: " ^ partial_path))
   else
     try
       let channel =
@@ -27,14 +34,24 @@ let create final_path =
           next_sequence = 1L;
           closed = false;
         }
-    with Sys_error message ->
-      Error ("could not create strategy transcript: " ^ message)
+    with Sys_error message as exception_ ->
+      Error
+        (Diagnostic.of_exception ~code:Diagnostic.Artifact_io
+           ~phase:Diagnostic.Artifact
+           ~message:("could not create strategy transcript: " ^ message)
+           exception_)
 
 let append transcript ~direction message =
   if transcript.closed then
-    Error "cannot append to a closed strategy transcript"
+    Error
+      (diagnostic ~sequence:transcript.next_sequence
+         ~code:Diagnostic.Artifact_state
+         "cannot append to a closed strategy transcript")
   else if Int64.equal transcript.next_sequence Int64.max_int then
-    Error "strategy transcript sequence is exhausted"
+    Error
+      (diagnostic ~sequence:transcript.next_sequence
+         ~code:Diagnostic.Artifact_state
+         "strategy transcript sequence is exhausted")
   else
     try
       let record =
@@ -47,10 +64,14 @@ let append transcript ~direction message =
       flush transcript.channel;
       transcript.next_sequence <- Int64.succ transcript.next_sequence;
       Ok ()
-    with Sys_error message ->
+    with Sys_error message as exception_ ->
       Error
-        ("could not append strategy transcript " ^ transcript.partial_path
-       ^ ": " ^ message)
+        (Diagnostic.of_exception ~sequence:transcript.next_sequence
+           ~code:Diagnostic.Artifact_io ~phase:Diagnostic.Artifact
+           ~message:
+             ("could not append strategy transcript " ^ transcript.partial_path
+            ^ ": " ^ message)
+           exception_)
 
 let close_preserving_partial transcript =
   if not transcript.closed then (
@@ -58,7 +79,11 @@ let close_preserving_partial transcript =
     close_out_noerr transcript.channel)
 
 let commit transcript =
-  if transcript.closed then Error "cannot commit a closed strategy transcript"
+  if transcript.closed then
+    Error
+      (diagnostic ~sequence:transcript.next_sequence
+         ~code:Diagnostic.Artifact_state
+         "cannot commit a closed strategy transcript")
   else
     try
       flush transcript.channel;
@@ -68,11 +93,20 @@ let commit transcript =
       Unix.unlink transcript.partial_path;
       Ok ()
     with
-    | Sys_error message ->
-        close_preserving_partial transcript;
-        Error ("could not finalize strategy transcript: " ^ message)
-    | Unix.Unix_error (code, operation, target) ->
+    | Sys_error message as exception_ ->
         close_preserving_partial transcript;
         Error
-          (Printf.sprintf "could not finalize strategy transcript: %s(%s): %s"
-             operation target (Unix.error_message code))
+          (Diagnostic.of_exception ~code:Diagnostic.Artifact_io
+             ~phase:Diagnostic.Artifact
+             ~message:("could not finalize strategy transcript: " ^ message)
+             exception_)
+    | Unix.Unix_error (code, operation, target) as exception_ ->
+        close_preserving_partial transcript;
+        Error
+          (Diagnostic.of_exception ~code:Diagnostic.Artifact_io
+             ~phase:Diagnostic.Artifact
+             ~message:
+               (Printf.sprintf
+                  "could not finalize strategy transcript: %s(%s): %s" operation
+                  target (Unix.error_message code))
+             exception_)
