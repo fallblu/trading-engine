@@ -8,6 +8,7 @@ type code =
   | Scenario_unsupported_contract
   | Scenario_stream_invalid
   | Scenario_stream_changed
+  | Resource_limit
   | Replay_failed
   | Reducer_failed
   | Strategy_invalid_configuration
@@ -53,6 +54,7 @@ let code_to_string = function
   | Scenario_unsupported_contract -> "scenario.unsupported_contract"
   | Scenario_stream_invalid -> "scenario_stream.invalid"
   | Scenario_stream_changed -> "scenario_stream.changed"
+  | Resource_limit -> "resource.limit"
   | Replay_failed -> "replay.failed"
   | Reducer_failed -> "reducer.failed"
   | Strategy_invalid_configuration -> "strategy.invalid_configuration"

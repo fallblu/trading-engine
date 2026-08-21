@@ -1,5 +1,5 @@
 let version = Contract.strategy_protocol_version
-let max_message_bytes = 1_048_576
+let max_message_bytes = Resource_limits.strategy_message_bytes
 
 type initialization = {
   scenario_contract_version : string;
@@ -265,6 +265,10 @@ let parse_intents_payload json =
   in
   let* intents_json = field fields "intents" in
   match intents_json with
+  | `List values when List.length values > Resource_limits.intents_per_batch ->
+      Error
+        (Printf.sprintf "intent count is %d; limit is %d" (List.length values)
+           Resource_limits.intents_per_batch)
   | `List values ->
       List.fold_left
         (fun result value ->
@@ -342,18 +346,39 @@ let response_of_yojson ~expected_sequence json =
             | _ -> "$"))
     | _ -> "$"
   in
-  response_of_yojson_result ~expected_sequence json
-  |> Result.map_error (fun message ->
-      Diagnostic.make ~code:Diagnostic.Strategy_protocol
-        ~phase:Diagnostic.Strategy ~sequence:expected_sequence ~json_path
-        message)
+  let intent_count =
+    match json with
+    | `Assoc fields -> (
+        match List.assoc_opt "payload" fields with
+        | Some (`Assoc payload_fields) -> (
+            match List.assoc_opt "intents" payload_fields with
+            | Some (`List values) -> Some (List.length values)
+            | _ -> None)
+        | _ -> None)
+    | _ -> None
+  in
+  match intent_count with
+  | Some observed when observed > Resource_limits.intents_per_batch ->
+      Error
+        (Diagnostic.make ~code:Diagnostic.Resource_limit
+           ~phase:Diagnostic.Strategy ~sequence:expected_sequence
+           ~json_path:"$.payload.intents"
+           (Printf.sprintf "intent count is %d; limit is %d" observed
+              Resource_limits.intents_per_batch))
+  | _ ->
+      response_of_yojson_result ~expected_sequence json
+      |> Result.map_error (fun message ->
+          Diagnostic.make ~code:Diagnostic.Strategy_protocol
+            ~phase:Diagnostic.Strategy ~sequence:expected_sequence ~json_path
+            message)
 
 let response_of_string ~expected_sequence document =
   if String.length document > max_message_bytes then
     Error
-      (Diagnostic.make ~code:Diagnostic.Strategy_protocol
+      (Diagnostic.make ~code:Diagnostic.Resource_limit
          ~phase:Diagnostic.Strategy ~sequence:expected_sequence
-         "strategy response exceeds the maximum message size")
+         (Printf.sprintf "strategy message is %d bytes; limit is %d bytes"
+            (String.length document) max_message_bytes))
   else
     try
       let json = Yojson.Safe.from_string document in

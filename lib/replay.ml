@@ -37,7 +37,19 @@ let replay ?sequence message =
     ~phase:Diagnostic.Replay message
 
 let reducer_result ?sequence result =
-  Result.map_error (reducer ?sequence) result
+  Result.map_error
+    (fun message ->
+      if
+        String.starts_with
+          ~prefix:"internal event count exceeds configured limit" message
+      then
+        Diagnostic.make ?sequence ~code:Diagnostic.Resource_limit
+          ~phase:Diagnostic.Reducer message
+      else reducer ?sequence message)
+    result
+
+let ( let* ) result function_ =
+  match result with Ok value -> function_ value | Error _ as error -> error
 
 let append_events journal events =
   match journal with
@@ -58,6 +70,21 @@ let add_audit_count count events =
 
 let run ~scenario_sha256 ?journal_path ?(durability = Artifact_writer.Buffered)
     scenario =
+  let* strategy_state =
+    Scripted_strategy.create scenario.Scenario.schedule |> reducer_result
+  in
+  let* config =
+    Engine.config ~contract_version:scenario.contract_version
+      ~risk:scenario.risk ~execution_model:scenario.execution_model
+      ~execution:scenario.execution
+      ~max_internal_events:scenario.max_internal_events
+    |> reducer_result
+  in
+  let* initial =
+    Runner.create ~run_id:scenario.run_id ~scenario_sha256 ~config
+      ~initial_cash:scenario.initial_cash ~strategy_state
+    |> reducer_result
+  in
   let journal_result =
     match journal_path with
     | None -> Ok None
@@ -78,66 +105,41 @@ let run ~scenario_sha256 ?journal_path ?(durability = Artifact_writer.Buffered)
             | Ok () -> result
             | Error _ as error -> error)
       in
-      match
-        Scripted_strategy.create scenario.Scenario.schedule |> reducer_result
-      with
+      let step result market_slice =
+        match result with
+        | Error _ as error -> error
+        | Ok (state, audits_rev) -> (
+            match
+              Runner.process_slice state market_slice
+              |> reducer_result
+                   ~sequence:market_slice.Market_slice.slice_sequence
+            with
+            | Error _ as error -> error
+            | Ok (state, events) -> (
+                match append_events journal events with
+                | Error _ as error -> error
+                | Ok () -> Ok (state, List.rev_append events audits_rev)))
+      in
+      match List.fold_left step (Ok (initial, [])) scenario.slices with
       | Error _ as error -> fail error
-      | Ok strategy_state -> (
-          match
-            Engine.config ~contract_version:scenario.contract_version
-              ~risk:scenario.risk ~execution_model:scenario.execution_model
-              ~execution:scenario.execution
-              ~max_internal_events:scenario.max_internal_events
-            |> reducer_result
-          with
+      | Ok (state, audits_rev) -> (
+          match Runner.complete state |> reducer_result with
           | Error _ as error -> fail error
-          | Ok config -> (
-              match
-                Runner.create ~run_id:scenario.run_id ~scenario_sha256 ~config
-                  ~initial_cash:scenario.initial_cash ~strategy_state
-                |> reducer_result
-              with
+          | Ok (state, valuation, completion_events) -> (
+              match append_events journal completion_events with
               | Error _ as error -> fail error
-              | Ok initial -> (
-                  let step result market_slice =
-                    match result with
-                    | Error _ as error -> error
-                    | Ok (state, audits_rev) -> (
-                        match
-                          Runner.process_slice state market_slice
-                          |> reducer_result
-                               ~sequence:
-                                 market_slice.Market_slice.slice_sequence
-                        with
-                        | Error _ as error -> error
-                        | Ok (state, events) -> (
-                            match append_events journal events with
-                            | Error _ as error -> error
-                            | Ok () ->
-                                Ok (state, List.rev_append events audits_rev)))
+              | Ok () ->
+                  let audits_rev =
+                    List.rev_append completion_events audits_rev
                   in
-                  match
-                    List.fold_left step (Ok (initial, [])) scenario.slices
-                  with
-                  | Error _ as error -> fail error
-                  | Ok (state, audits_rev) -> (
-                      match Runner.complete state |> reducer_result with
-                      | Error _ as error -> fail error
-                      | Ok (state, valuation, completion_events) -> (
-                          match append_events journal completion_events with
-                          | Error _ as error -> fail error
-                          | Ok () ->
-                              let audits_rev =
-                                List.rev_append completion_events audits_rev
-                              in
-                              succeed
-                                (Ok
-                                   {
-                                     account = Runner.account state;
-                                     orders = Oms.orders (Runner.oms state);
-                                     valuation;
-                                     audits = List.rev audits_rev;
-                                   })))))))
+                  succeed
+                    (Ok
+                       {
+                         account = Runner.account state;
+                         orders = Oms.orders (Runner.oms state);
+                         valuation;
+                         audits = List.rev audits_rev;
+                       }))))
 
 let run_stream_pass ~scenario_sha256 ~journal channel =
   Scenario_stream.fold_channel channel
