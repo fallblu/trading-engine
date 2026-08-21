@@ -52,6 +52,14 @@ type event =
       permitted_quantity : Scalar.Quantity.t;
       price : Scalar.Price.t;
     }
+  | Fill_clipped of {
+      order_id : Id.Order.t;
+      instrument_id : Id.Instrument.t;
+      proposed_quantity : Scalar.Quantity.t;
+      permitted_quantity : Scalar.Quantity.t;
+      price : Scalar.Price.t;
+      limit : Risk.fill_limit;
+    }
   | Borrow_fee_applied of {
       instrument_id : Id.Instrument.t;
       quote_currency : string;
@@ -88,9 +96,10 @@ let event_id ~run_id ~engine_sequence =
   Printf.sprintf "%s-event-%012Ld" (Id.Run.to_string run_id) engine_sequence
   |> Id.Event.of_string_exn
 
-let create ~engine_sequence ~causation_ids ~run_id ~recorded_at event =
+let create ~contract_version ~engine_sequence ~causation_ids ~run_id
+    ~recorded_at event =
   {
-    contract_version = Contract.version;
+    contract_version;
     engine_sequence;
     event_id = event_id ~run_id ~engine_sequence;
     causation_ids;
@@ -121,6 +130,7 @@ let event_name = function
   | Order_adjusted _ -> "order_adjusted"
   | Fill_applied _ -> "fill_applied"
   | Margin_limited _ -> "margin_limited"
+  | Fill_clipped _ -> "fill_clipped"
   | Borrow_fee_applied _ -> "borrow_fee_applied"
   | Margin_call_triggered _ -> "margin_call"
   | Margin_restored _ -> "margin_restored"

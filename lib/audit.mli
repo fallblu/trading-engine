@@ -54,6 +54,14 @@ type event =
       permitted_quantity : Scalar.Quantity.t;
       price : Scalar.Price.t;
     }
+  | Fill_clipped of {
+      order_id : Id.Order.t;
+      instrument_id : Id.Instrument.t;
+      proposed_quantity : Scalar.Quantity.t;
+      permitted_quantity : Scalar.Quantity.t;
+      price : Scalar.Price.t;
+      limit : Risk.fill_limit;
+    }
   | Borrow_fee_applied of {
       instrument_id : Id.Instrument.t;
       quote_currency : string;
@@ -89,6 +97,7 @@ type t = private {
 val event_id : run_id:Id.Run.t -> engine_sequence:int64 -> Id.Event.t
 
 val create :
+  contract_version:string ->
   engine_sequence:int64 ->
   causation_ids:Id.Event.t list ->
   run_id:Id.Run.t ->

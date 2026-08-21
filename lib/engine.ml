@@ -1,14 +1,26 @@
 type config = {
+  contract_version : string;
   risk : Risk.t;
   execution_model : Execution_model.t;
   execution : Execution.t;
   max_internal_events : int;
 }
 
-let config ~risk ~execution_model ~execution ~max_internal_events =
-  if max_internal_events <= 0 then
+let config ~contract_version ~risk ~execution_model ~execution
+    ~max_internal_events =
+  if not (Contract.is_supported contract_version) then
+    Error "engine contract version is unsupported"
+  else if max_internal_events <= 0 then
     Error "maximum internal events must be positive"
-  else Ok { risk; execution_model; execution; max_internal_events }
+  else
+    Ok
+      {
+        contract_version;
+        risk;
+        execution_model;
+        execution;
+        max_internal_events;
+      }
 
 let valid_sha256 value =
   String.length value = 64
@@ -134,7 +146,8 @@ module Interactive = struct
           Audit.event_id ~run_id:reduction.state.run_id ~engine_sequence
         in
         let audit =
-          Audit.create ~engine_sequence
+          Audit.create ~contract_version:reduction.state.config.contract_version
+            ~engine_sequence
             ~causation_ids:(normalize_causes reduction.causation_ids)
             ~run_id:reduction.state.run_id ~recorded_at:reduction.now event
         in
@@ -867,31 +880,36 @@ module Interactive = struct
       Account.position_quantity state.account instrument.Instrument.id
     in
     let candidate quantity =
-      let* fee =
-        fill_fee state.config.execution proposed.Execution.price quantity
+      let prepared =
+        let* fee =
+          fill_fee state.config.execution proposed.Execution.price quantity
+        in
+        let* fill =
+          Fill.create ~id:(fill_id state) ~order_id:order.Order.id
+            ~instrument_id:instrument.id
+            ~quote_currency:instrument.quote_currency ~side:order.request.side
+            ~quantity ~price:proposed.price ~fee
+            ~executed_at:proposed.executed_at
+            ~slice_sequence:market_slice.Market_slice.slice_sequence
+        in
+        let* account = Account.apply_fill state.account fill in
+        let after_position = Account.position_quantity account instrument.id in
+        let* after =
+          Account.value account ~instruments ~marks
+            ~fx_rates:state.latest_fx_rates
+        in
+        Ok (fee, after_position, after)
       in
-      let* fill =
-        Fill.create ~id:(fill_id state) ~order_id:order.Order.id
-          ~instrument_id:instrument.id ~quote_currency:instrument.quote_currency
-          ~side:order.request.side ~quantity ~price:proposed.price ~fee
-          ~executed_at:proposed.executed_at
-          ~slice_sequence:market_slice.Market_slice.slice_sequence
-      in
-      let* account = Account.apply_fill state.account fill in
-      let after_position = Account.position_quantity account instrument.id in
-      let* before_absolute = Scalar.Quantity.absolute before_position in
-      let* after_absolute = Scalar.Quantity.absolute after_position in
-      let* () =
-        if Scalar.Quantity.compare after_absolute before_absolute <= 0 then
-          Ok ()
-        else Risk.check_position state.config.risk after_position
-      in
-      let* after =
-        Account.value account ~instruments ~marks
-          ~fx_rates:state.latest_fx_rates
-      in
-      let* () = Risk.check_post_fill state.config.risk ~before ~after in
-      Ok fee
+      match prepared with
+      | Error message -> Error (`Invalid message)
+      | Ok (fee, after_position, after) -> (
+          match
+            Risk.check_post_fill state.config.risk ~before_position
+              ~after_position ~before ~after
+          with
+          | Ok () -> Ok fee
+          | Error (Risk.Limit limit) -> Error (`Limit limit)
+          | Error (Risk.Invalid message) -> Error (`Invalid message))
     in
     let lot_value = Scalar.Quantity.to_micros instrument.lot_size in
     let quantity_limit =
@@ -901,27 +919,47 @@ module Interactive = struct
     let requested_lots =
       Int64.div (Scalar.Quantity.to_micros quantity_limit) lot_value
     in
-    let allowed lots =
-      if Int64.equal lots 0L then true
-      else
-        let quantity = Scalar.Quantity.of_micros (Int64.mul lots lot_value) in
-        Result.is_ok (candidate quantity)
-    in
     let rec search low high =
-      if Int64.compare low high >= 0 then low
+      if Int64.compare low high >= 0 then Ok low
       else
         let difference = Int64.sub high low in
         let upper_half =
           Int64.add (Int64.div difference 2L) (Int64.rem difference 2L)
         in
         let middle = Int64.add low upper_half in
-        if allowed middle then search middle high
-        else search low (Int64.pred middle)
+        let quantity = Scalar.Quantity.of_micros (Int64.mul middle lot_value) in
+        match candidate quantity with
+        | Ok _ -> search middle high
+        | Error (`Limit _) -> search low (Int64.pred middle)
+        | Error (`Invalid message) -> Error message
     in
-    let lots = search 0L requested_lots in
+    let* lots = search 0L requested_lots in
     let quantity = Scalar.Quantity.of_micros (Int64.mul lots lot_value) in
-    if Scalar.Quantity.is_zero quantity then Ok (quantity, Scalar.Money.zero)
-    else candidate quantity |> Result.map (fun fee -> (quantity, fee))
+    let clipped = Scalar.Quantity.compare quantity proposed.quantity < 0 in
+    let* limit =
+      if not clipped then Ok None
+      else if Int64.equal lots requested_lots then
+        Ok
+          (Some
+             (Risk.Maximum_order_quantity
+                (Risk.max_order_quantity state.config.risk)))
+      else
+        let next_lots = Int64.succ lots in
+        let next_quantity =
+          Scalar.Quantity.of_micros (Int64.mul next_lots lot_value)
+        in
+        match candidate next_quantity with
+        | Error (`Limit limit) -> Ok (Some limit)
+        | Error (`Invalid message) -> Error message
+        | Ok _ -> Error "fill clipping search produced a nonmaximal quantity"
+    in
+    if Scalar.Quantity.is_zero quantity then
+      Ok (quantity, Scalar.Money.zero, limit)
+    else
+      match candidate quantity with
+      | Ok fee -> Ok (quantity, fee, limit)
+      | Error (`Invalid message) -> Error message
+      | Error (`Limit _) -> Error "permitted fill violates its limiting policy"
 
   let apply_fill reduction market_slice proposed quantity fee =
     match Oms.find reduction.state.oms proposed.Execution.order_id with
@@ -1003,24 +1041,37 @@ module Interactive = struct
           | Some value -> Ok value
           | None -> Error "execution order refers to an unknown instrument"
         in
-        let* permitted_quantity, fee =
+        let* permitted_quantity, fee, limit =
           permitted_fill reduction.state market_slice order proposed instrument
         in
-        let clipped =
-          Scalar.Quantity.compare permitted_quantity proposed.quantity < 0
-        in
         let* reduction =
-          if clipped then
-            emit reduction
-              (Audit.Margin_limited
-                 {
-                   order_id = order.id;
-                   instrument_id = order.request.instrument_id;
-                   requested_quantity = proposed.quantity;
-                   permitted_quantity;
-                   price = proposed.price;
-                 })
-          else Ok reduction
+          match limit with
+          | None -> Ok reduction
+          | Some limit ->
+              if
+                String.equal reduction.state.config.contract_version
+                  Contract.previous_version
+              then
+                emit reduction
+                  (Audit.Margin_limited
+                     {
+                       order_id = order.id;
+                       instrument_id = order.request.instrument_id;
+                       requested_quantity = proposed.quantity;
+                       permitted_quantity;
+                       price = proposed.price;
+                     })
+              else
+                emit reduction
+                  (Audit.Fill_clipped
+                     {
+                       order_id = order.id;
+                       instrument_id = order.request.instrument_id;
+                       proposed_quantity = proposed.quantity;
+                       permitted_quantity;
+                       price = proposed.price;
+                       limit;
+                     })
         in
         if Scalar.Quantity.is_zero permitted_quantity then
           Ok (reduction, permitted_quantity)
