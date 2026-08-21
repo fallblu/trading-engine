@@ -2,12 +2,12 @@ open Test_support
 module T = Trading_engine
 
 let demo_document () =
-  In_channel.with_open_bin "../contracts/v3/fixtures/demo.scenario.json"
+  In_channel.with_open_bin "../contracts/v4/fixtures/demo.scenario.json"
     In_channel.input_all
 
 let demo () = T.Scenario.of_string (demo_document ()) |> ok
 let demo_hash () = T.Sha256.digest_string (demo_document ())
-let stream_path = "../contracts/v3/fixtures/demo.scenario.jsonl"
+let stream_path = "../contracts/v4/fixtures/demo.scenario.jsonl"
 
 let stream_document () =
   In_channel.with_open_bin stream_path In_channel.input_all
@@ -109,9 +109,9 @@ let schema_artifacts_parse () =
           (List.mem_assoc "$defs" fields)
     | _ -> Alcotest.fail (path ^ " must contain a JSON object")
   in
-  check_schema "../contracts/v3/scenario.schema.json";
-  check_schema "../contracts/v3/scenario-stream.schema.json";
-  check_schema "../contracts/v3/journal.schema.json"
+  check_schema "../contracts/v4/scenario.schema.json";
+  check_schema "../contracts/v4/scenario-stream.schema.json";
+  check_schema "../contracts/v4/journal.schema.json"
 
 let timestamp_precision_is_bounded () =
   List.iter
@@ -173,7 +173,7 @@ let contract_version_is_required_and_supported () =
   let unsupported_diagnostic = T.Scenario.of_yojson unsupported |> error in
   Alcotest.(check string)
     "unsupported version diagnosed"
-    "unsupported scenario contract_version \"2\" (expected \"3\")"
+    "unsupported scenario contract_version \"2\" (expected one of 4, 3)"
     (T.Diagnostic.to_human unsupported_diagnostic);
   Alcotest.(check string)
     "unsupported version code" "scenario.unsupported_contract"
@@ -522,10 +522,50 @@ let replay_matches_golden_file () =
     |> fun value -> value ^ "\n"
   in
   let expected =
-    In_channel.with_open_bin "../contracts/v3/fixtures/demo.journal.jsonl"
+    In_channel.with_open_bin "../contracts/v4/fixtures/demo.journal.jsonl"
       In_channel.input_all
   in
   Alcotest.(check string) "stable audit contract" expected actual
+
+let v3_replay_matches_frozen_golden_file () =
+  let document =
+    In_channel.with_open_bin "../contracts/v3/fixtures/demo.scenario.json"
+      In_channel.input_all
+  in
+  let scenario = T.Scenario.of_string document |> ok in
+  let result =
+    T.Replay.run ~scenario_sha256:(T.Sha256.digest_string document) scenario
+    |> ok
+  in
+  let actual =
+    result.audits |> List.map T.Codec.audit_to_string |> String.concat "\n"
+    |> fun value -> value ^ "\n"
+  in
+  let expected =
+    In_channel.with_open_bin "../contracts/v3/fixtures/demo.journal.jsonl"
+      In_channel.input_all
+  in
+  Alcotest.(check string) "frozen v3 audit contract" expected actual
+
+let fill_clipping_fixture_reconciles () =
+  let document =
+    In_channel.with_open_bin
+      "../contracts/v4/fixtures/fill-clipped.scenario.json" In_channel.input_all
+  in
+  let scenario = T.Scenario.of_string document |> ok in
+  let result =
+    T.Replay.run ~scenario_sha256:(T.Sha256.digest_string document) scenario
+    |> ok
+  in
+  let actual =
+    result.audits |> List.map T.Codec.audit_to_string |> String.concat "\n"
+    |> fun value -> value ^ "\n"
+  in
+  let expected =
+    In_channel.with_open_bin
+      "../contracts/v4/fixtures/fill-clipped.journal.jsonl" In_channel.input_all
+  in
+  Alcotest.(check string) "fill clipping audit reconciliation" expected actual
 
 let journal_is_created_exclusively () =
   let scenario = demo () in
@@ -779,6 +819,10 @@ let tests =
       replay_ends_with_completion_summary;
     Alcotest.test_case "replay matches golden file" `Quick
       replay_matches_golden_file;
+    Alcotest.test_case "v3 replay matches frozen golden file" `Quick
+      v3_replay_matches_frozen_golden_file;
+    Alcotest.test_case "fill clipping fixture reconciles" `Quick
+      fill_clipping_fixture_reconciles;
     Alcotest.test_case "exclusive journal creation" `Quick
       journal_is_created_exclusively;
     Alcotest.test_case "exclusive journal finalization" `Quick

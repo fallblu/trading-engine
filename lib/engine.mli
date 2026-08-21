@@ -3,6 +3,7 @@
 type config
 
 val config :
+  contract_version:string ->
   risk:Risk.t ->
   execution_model:Execution_model.t ->
   execution:Execution.t ->

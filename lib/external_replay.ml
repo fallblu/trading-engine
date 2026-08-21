@@ -76,10 +76,11 @@ let initialization_of_header ~scenario_sha256 (header : Scenario.stream_header)
       execution = header.execution;
     }
 
-let create_runner ~run_id ~scenario_sha256 ~risk ~execution_model ~execution
-    ~max_internal_events ~initial_cash =
+let create_runner ~contract_version ~run_id ~scenario_sha256 ~risk
+    ~execution_model ~execution ~max_internal_events ~initial_cash =
   let* config =
-    Engine.config ~risk ~execution_model ~execution ~max_internal_events
+    Engine.config ~contract_version ~risk ~execution_model ~execution
+      ~max_internal_events
     |> reducer_result
   in
   Runner.create ~run_id ~scenario_sha256 ~config ~initial_cash |> reducer_result
@@ -130,7 +131,8 @@ let run ~env ~scenario_sha256 ~journal_path ~transcript_path ~strategy_command
       (replay "external strategy replay requires an empty scenario schedule")
   else
     let* initial =
-      create_runner ~run_id:scenario.run_id ~scenario_sha256 ~risk:scenario.risk
+      create_runner ~contract_version:scenario.contract_version
+        ~run_id:scenario.run_id ~scenario_sha256 ~risk:scenario.risk
         ~execution_model:scenario.execution_model ~execution:scenario.execution
         ~max_internal_events:scenario.max_internal_events
         ~initial_cash:scenario.initial_cash
@@ -182,9 +184,9 @@ let validate_stream_pass ~scenario_sha256 channel =
   Scenario_stream.fold_channel channel
     ~init:(fun header ->
       let* runner =
-        create_runner ~run_id:header.Scenario.run_id ~scenario_sha256
-          ~risk:header.risk ~execution_model:header.execution_model
-          ~execution:header.execution
+        create_runner ~contract_version:header.contract_version
+          ~run_id:header.Scenario.run_id ~scenario_sha256 ~risk:header.risk
+          ~execution_model:header.execution_model ~execution:header.execution
           ~max_internal_events:header.max_internal_events
           ~initial_cash:header.initial_cash
       in
@@ -210,9 +212,9 @@ let replay_stream_pass ~scenario_sha256 ~journal ~session channel =
   Scenario_stream.fold_channel channel
     ~init:(fun header ->
       let* runner =
-        create_runner ~run_id:header.Scenario.run_id ~scenario_sha256
-          ~risk:header.risk ~execution_model:header.execution_model
-          ~execution:header.execution
+        create_runner ~contract_version:header.contract_version
+          ~run_id:header.Scenario.run_id ~scenario_sha256 ~risk:header.risk
+          ~execution_model:header.execution_model ~execution:header.execution
           ~max_internal_events:header.max_internal_events
           ~initial_cash:header.initial_cash
       in

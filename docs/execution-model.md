@@ -124,8 +124,11 @@ post-fill position is within the long/short cap and whose fill quantity is no gr
 maximum order quantity.
 When absolute exposure increases, the projected account must also satisfy maximum gross exposure,
 maximum leverage, and initial margin. Reductions in absolute exposure are permitted without a new
-initial-margin test. A clipped proposal emits `margin_limited`; a zero permitted quantity produces
-no fill. Only the applied quantity consumes shared slice capacity.
+initial-margin test. A clipped proposal emits `fill_clipped`; a zero permitted quantity produces
+no fill. The event records reason taxonomy version `1`, the limiting policy, its typed threshold,
+and both the proposed and permitted quantities. Only the applied quantity consumes shared slice
+capacity. Candidate arithmetic, accounting, mark, and FX failures abort replay instead of being
+misreported as policy clipping.
 
 This bounded-fill policy preserves split-adjusted GTC limit orders: an oversized remainder may
 fill over multiple slices. Market orders remain IOC, so they fill at most one bounded quantity and

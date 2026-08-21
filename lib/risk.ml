@@ -19,6 +19,16 @@ type margin_snapshot = {
   margin_call : bool;
 }
 
+type fill_limit =
+  | Maximum_order_quantity of Scalar.Quantity.t
+  | Maximum_long_position of Scalar.Quantity.t
+  | Maximum_short_position of Scalar.Quantity.t
+  | Maximum_gross_exposure of Scalar.Money.t
+  | Maximum_leverage of Scalar.Ratio.t
+  | Initial_margin of int
+
+type fill_check_error = Limit of fill_limit | Invalid of string
+
 let ( let* ) result function_ =
   match result with Ok value -> function_ value | Error _ as error -> error
 
@@ -163,13 +173,49 @@ let check_initial state valuation =
   check_initial_values state ~equity:valuation.Account.equity
     ~gross_exposure:valuation.gross_exposure
 
-let check_post_fill state ~before ~after =
-  if
-    Scalar.Money.compare after.Account.gross_exposure
-      before.Account.gross_exposure
-    <= 0
-  then Ok ()
-  else check_initial state after
+let invalid result = Result.map_error (fun message -> Invalid message) result
+
+let check_fill_initial state ~equity ~gross_exposure =
+  if Scalar.Money.compare gross_exposure state.max_gross_exposure > 0 then
+    Error (Limit (Maximum_gross_exposure state.max_gross_exposure))
+  else
+    let* leveraged_equity =
+      Scalar.Money.multiply_ratio equity state.max_leverage |> invalid
+    in
+    if Scalar.Money.compare gross_exposure leveraged_equity > 0 then
+      Error (Limit (Maximum_leverage state.max_leverage))
+    else
+      let* initial_requirement =
+        Scalar.Money.bps_ceil gross_exposure ~bps:state.initial_margin_bps
+        |> invalid
+      in
+      let* initial_excess =
+        Scalar.Money.subtract equity initial_requirement |> invalid
+      in
+      if Scalar.Money.compare initial_excess Scalar.Money.zero < 0 then
+        Error (Limit (Initial_margin state.initial_margin_bps))
+      else Ok ()
+
+let check_post_fill state ~before_position ~after_position ~before ~after =
+  let* before_absolute = Scalar.Quantity.absolute before_position |> invalid in
+  let* after_absolute = Scalar.Quantity.absolute after_position |> invalid in
+  if Scalar.Quantity.compare after_absolute before_absolute <= 0 then Ok ()
+  else if Scalar.Quantity.compare after_position state.max_long_position > 0
+  then Error (Limit (Maximum_long_position state.max_long_position))
+  else
+    let* minimum_short =
+      Scalar.Quantity.negate state.max_short_position |> invalid
+    in
+    if Scalar.Quantity.compare after_position minimum_short < 0 then
+      Error (Limit (Maximum_short_position state.max_short_position))
+    else if
+      Scalar.Money.compare after.Account.gross_exposure
+        before.Account.gross_exposure
+      <= 0
+    then Ok ()
+    else
+      check_fill_initial state ~equity:after.equity
+        ~gross_exposure:after.gross_exposure
 
 let check_position state quantity =
   if Scalar.Quantity.compare quantity state.max_long_position > 0 then

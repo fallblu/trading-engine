@@ -10,6 +10,16 @@ type margin_snapshot = private {
   margin_call : bool;
 }
 
+type fill_limit =
+  | Maximum_order_quantity of Scalar.Quantity.t
+  | Maximum_long_position of Scalar.Quantity.t
+  | Maximum_short_position of Scalar.Quantity.t
+  | Maximum_gross_exposure of Scalar.Money.t
+  | Maximum_leverage of Scalar.Ratio.t
+  | Initial_margin of int
+
+type fill_check_error = Limit of fill_limit | Invalid of string
+
 val create :
   base_currency:string ->
   instruments:Instrument.t list ->
@@ -40,9 +50,11 @@ val check_initial : t -> Account.valuation -> (unit, string) result
 
 val check_post_fill :
   t ->
+  before_position:Scalar.Quantity.t ->
+  after_position:Scalar.Quantity.t ->
   before:Account.valuation ->
   after:Account.valuation ->
-  (unit, string) result
+  (unit, fill_check_error) result
 
 val check :
   t ->

@@ -82,6 +82,30 @@ let instrument_id value = string (Id.Instrument.to_string value)
 let order_id value = string (Id.Order.to_string value)
 let fill_id value = string (Id.Fill.to_string value)
 
+let fill_limit_to_yojson = function
+  | Risk.Maximum_order_quantity value ->
+      ( "max_order_quantity",
+        `Assoc [ ("unit", string "quantity"); ("value", quantity value) ] )
+  | Risk.Maximum_long_position value ->
+      ( "max_long_position",
+        `Assoc [ ("unit", string "quantity"); ("value", quantity value) ] )
+  | Risk.Maximum_short_position value ->
+      ( "max_short_position",
+        `Assoc [ ("unit", string "quantity"); ("value", quantity value) ] )
+  | Risk.Maximum_gross_exposure value ->
+      ( "max_gross_exposure",
+        `Assoc [ ("unit", string "money"); ("value", money value) ] )
+  | Risk.Maximum_leverage value ->
+      ( "max_leverage",
+        `Assoc
+          [
+            ("unit", string "ratio");
+            ("value", string (Scalar.Ratio.to_decimal_string value));
+          ] )
+  | Risk.Initial_margin value ->
+      ( "initial_margin",
+        `Assoc [ ("unit", string "basis_points"); ("value", `Int value) ] )
+
 let bar_to_yojson bar =
   `Assoc
     [
@@ -337,6 +361,31 @@ let payload_to_yojson = function
           ("order_id", order_id id);
           ("instrument_id", instrument_id instrument);
           ("requested_quantity", quantity requested_quantity);
+          ("permitted_quantity", quantity permitted_quantity);
+          ("price", price fill_price);
+        ]
+  | Audit.Fill_clipped
+      {
+        order_id = id;
+        instrument_id = instrument;
+        proposed_quantity;
+        permitted_quantity;
+        price = fill_price;
+        limit;
+      } ->
+      let limiting_policy, threshold = fill_limit_to_yojson limit in
+      `Assoc
+        [
+          ( "reason",
+            `Assoc
+              [
+                ("version", string "1");
+                ("policy", string limiting_policy);
+                ("threshold", threshold);
+              ] );
+          ("order_id", order_id id);
+          ("instrument_id", instrument_id instrument);
+          ("proposed_quantity", quantity proposed_quantity);
           ("permitted_quantity", quantity permitted_quantity);
           ("price", price fill_price);
         ]

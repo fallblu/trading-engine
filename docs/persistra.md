@@ -50,10 +50,12 @@ Persistra should:
 Do not let the engine read Persistra's internal DuckDB tables. Their schema and connection
 lifecycle belong to Persistra.
 
-Use the current v3 [scenario](../contracts/v3/scenario.schema.json) and
-[journal](../contracts/v3/journal.schema.json) JSON Schemas and their adjacent conformance fixtures
-for structural checks. The engine parser is authoritative for ordering, catalog coverage,
-causality, tick, lot, risk, and accounting invariants that JSON Schema cannot express.
+Persistra currently uses the transitional v3
+[scenario](../contracts/v3/scenario.schema.json) and
+[journal](../contracts/v3/journal.schema.json) schemas and their adjacent conformance fixtures for
+structural checks. The engine also advertises current contract v4 while retaining exact v3 journal
+output for v3 inputs. The engine parser is authoritative for ordering, catalog coverage, causality,
+tick, lot, risk, and accounting invariants that JSON Schema cannot express.
 
 External strategies use the separate
 [strategy protocol v3](../contracts/strategy/v3/README.md). Persistra's host turns protocol

@@ -2,10 +2,12 @@ open Test_support
 module T = Trading_engine
 module Runner = T.Engine.Make (T.Scripted_strategy)
 
-let runner ?(initial_cash = "10000") ?(risk = risk ()) ?execution_model
-    ?(execution = execution ()) schedule =
+let runner ?contract_version ?(initial_cash = "10000") ?(risk = risk ())
+    ?execution_model ?(execution = execution ()) schedule =
   let strategy_state = T.Scripted_strategy.create schedule |> ok in
-  let config = engine_config ~risk ?execution_model ~execution () in
+  let config =
+    engine_config ?contract_version ~risk ?execution_model ~execution ()
+  in
   Runner.create ~run_id:(run_id "test-run") ~scenario_sha256 ~config
     ~initial_cash:[ ("USD", money initial_cash) ]
     ~strategy_state
@@ -184,7 +186,7 @@ let superseding_target_replaces_retry () =
               (event_names events)))
   | _ -> Alcotest.fail "expected one replacement order"
 
-let margin_limit_clips_buy_to_lots () =
+let fill_limit_clips_buy_to_lots () =
   let constrained = risk ~max_leverage:"1" () in
   let state =
     runner ~initial_cash:"550" ~risk:constrained
@@ -210,18 +212,80 @@ let margin_limit_clips_buy_to_lots () =
   let limited =
     List.find
       (fun audit ->
-        String.equal (T.Audit.event_name audit.T.Audit.event) "margin_limited")
+        String.equal (T.Audit.event_name audit.T.Audit.event) "fill_clipped")
       events
   in
   match limited.event with
-  | T.Audit.Margin_limited
-      { requested_quantity; permitted_quantity; price = fill_price; _ } ->
-      Alcotest.check quantity_testable "ten requested" (quantity "10")
-        requested_quantity;
+  | T.Audit.Fill_clipped
+      {
+        proposed_quantity;
+        permitted_quantity;
+        price = fill_price;
+        limit = T.Risk.Maximum_leverage threshold;
+        _;
+      } ->
+      Alcotest.check quantity_testable "ten proposed" (quantity "10")
+        proposed_quantity;
       Alcotest.check quantity_testable "five permitted" (quantity "5")
         permitted_quantity;
-      Alcotest.check price_testable "actual price" (price "100") fill_price
-  | _ -> Alcotest.fail "expected margin limit audit"
+      Alcotest.check price_testable "actual price" (price "100") fill_price;
+      Alcotest.(check string)
+        "leverage threshold" "1"
+        (T.Scalar.Ratio.to_decimal_string threshold)
+  | _ -> Alcotest.fail "expected leverage clipping audit"
+
+let v3_replays_keep_the_legacy_clipping_record () =
+  let constrained = risk ~max_leverage:"1" () in
+  let state =
+    runner ~contract_version:T.Contract.previous_version ~initial_cash:"550"
+      ~risk:constrained
+      ~execution:(execution ~fixed_fee:"10" ())
+      [ (1L, [ target "10" ]) ]
+  in
+  let decision_bar =
+    bar ~open_price:"50" ~high_price:"50" ~low_price:"50" ~close_price:"50" 1L
+  in
+  let state, _ =
+    Runner.process_slice state (market_slice ~bars:[ decision_bar ] 1L) |> ok
+  in
+  let _, events =
+    Runner.process_slice state
+      (market_slice ~bars:[ bar ~open_price:"100" ~close_price:"100" 2L ] 2L)
+    |> ok
+  in
+  let limited =
+    List.find
+      (fun audit ->
+        String.equal (T.Audit.event_name audit.T.Audit.event) "margin_limited")
+      events
+  in
+  Alcotest.(check string)
+    "legacy journal version" T.Contract.previous_version
+    limited.contract_version;
+  match limited.event with
+  | T.Audit.Margin_limited { requested_quantity; permitted_quantity; _ } ->
+      Alcotest.check quantity_testable "legacy requested" (quantity "10")
+        requested_quantity;
+      Alcotest.check quantity_testable "legacy permitted" (quantity "5")
+        permitted_quantity
+  | _ -> Alcotest.fail "expected legacy margin_limited audit"
+
+let invalid_fill_candidates_fail_instead_of_clipping () =
+  let constrained = risk ~max_leverage:"1" () in
+  let state =
+    runner ~initial_cash:"9223372036854.775807" ~risk:constrained
+      [
+        ( 1L,
+          [
+            T.Strategy.Submit_order
+              (request ~side:T.Order.Sell ~quantity_value:"1" ());
+          ] );
+      ]
+  in
+  let state, _ = Runner.process_slice state (market_slice 1L) |> ok in
+  Alcotest.(check string)
+    "account overflow is not a clipping policy" "int64 addition overflow"
+    (Runner.process_slice state (market_slice 2L) |> error)
 
 let sells_precede_buys_in_the_same_slice () =
   let a = instrument ~id:"asset-a" ~symbol:"A" () in
@@ -673,8 +737,12 @@ let tests =
       bounded_target_orders_make_progress;
     Alcotest.test_case "superseding target replaces retry" `Quick
       superseding_target_replaces_retry;
-    Alcotest.test_case "margin limit clips buys" `Quick
-      margin_limit_clips_buy_to_lots;
+    Alcotest.test_case "fill clipping identifies leverage" `Quick
+      fill_limit_clips_buy_to_lots;
+    Alcotest.test_case "v3 keeps legacy clipping records" `Quick
+      v3_replays_keep_the_legacy_clipping_record;
+    Alcotest.test_case "invalid fill candidates fail" `Quick
+      invalid_fill_candidates_fail_instead_of_clipping;
     Alcotest.test_case "same-slice sells precede buys" `Quick
       sells_precede_buys_in_the_same_slice;
     Alcotest.test_case "external ordering validation" `Quick

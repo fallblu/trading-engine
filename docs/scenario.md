@@ -4,8 +4,8 @@ A replay scenario uses either one strict JSON object or a strict JSON Lines stre
 weights, quantities, money, and sequences are canonical JSON strings. Counts and basis points are
 JSON integers. Unknown, missing, duplicate, noncanonical, and non-finite values fail parsing.
 
-Use [the v3 demo](../contracts/v3/fixtures/demo.scenario.json) as the canonical complete example.
-The [scenario JSON Schema](../contracts/v3/scenario.schema.json) provides structural validation.
+Use [the v4 demo](../contracts/v4/fixtures/demo.scenario.json) as the canonical complete example.
+The [scenario JSON Schema](../contracts/v4/scenario.schema.json) provides structural validation.
 The engine parser also enforces cross-field and cross-record invariants.
 
 ```sh
@@ -27,8 +27,8 @@ adjacent to their decision slice rather than stored in a future-looking global s
 replay, the reader checks each intent-bearing slice against the next slice's start time while
 retaining only those two records.
 
-The [stream record JSON Schema](../contracts/v3/scenario-stream.schema.json) validates each line,
-and [the v3 stream fixture](../contracts/v3/fixtures/demo.scenario.jsonl) is the canonical example.
+The [stream record JSON Schema](../contracts/v4/scenario-stream.schema.json) validates each line,
+and [the v4 stream fixture](../contracts/v4/fixtures/demo.scenario.jsonl) is the canonical example.
 The engine validates the entire stream before creating a journal. It then replays one record at a
 time without retaining prior slices, scheduled batches, or audit events. Reducer state still
 retains current account, order, target, and latest-bar state required by execution semantics.
@@ -37,7 +37,7 @@ retains current account, order, target, and latest-bar state required by executi
 
 | Field | Meaning |
 |---|---|
-| `contract_version` | Required string identifying this file contract; v3 is `"3"` |
+| `contract_version` | Required string identifying this file contract; v4 is `"4"` |
 | `metadata` | Required arbitrary JSON object preserved for provenance and ignored by execution |
 | `run_id` | Stable identity used in generated IDs |
 | `base_currency` | Reporting currency used for aggregate risk and valuation |
@@ -72,7 +72,7 @@ exposure must satisfy every applicable limit; exposure-reducing orders remain ad
 
 Execution contains:
 
-- `model`, the compiled execution module selected by contract name; v3 supports
+- `model`, the compiled execution module selected by contract name; v4 supports
   `completed_bar_v1`
 - `participation_bps`, from 0 through 10,000
 - `fixed_fee`, a nonnegative money string
@@ -170,7 +170,7 @@ than the next slice `start_at`.
 
 ## Audit journal
 
-The [journal JSON Schema](../contracts/v3/journal.schema.json) validates each JSON Lines record.
+The [journal JSON Schema](../contracts/v4/journal.schema.json) validates each JSON Lines record.
 Every record contains `contract_version`, `engine_sequence`, deterministic `event_id`, ordered
 `causation_ids`, `run_id`, `recorded_at`, `event_type`, and an event-specific `payload`. Causal
 references are unique prior event IDs from the same run. The version is repeated on every record
@@ -180,10 +180,11 @@ The first record is `run_started` with `scenario_sha256` and the selected execut
 hashes the exact batch document or stream bytes it parses.
 `market_slice_received` contains the complete normalized slice. Portfolio requests record their
 basis, original weight when applicable, computed quantity, and sizing reference price. Orders use
-`eligible_after_slice_sequence`; fills use `slice_sequence`. `margin_limited` records a proposed
-fill and the greatest lot-aligned quantity permitted by maximum order quantity, position,
-exposure, leverage, and initial margin policy. Each order snapshot retains both creation and
-latest-update event IDs.
+`eligible_after_slice_sequence`; fills use `slice_sequence`. `fill_clipped` records the proposed
+fill and the greatest lot-aligned permitted quantity. Its reason taxonomy version `1` names one of
+`max_order_quantity`, `max_long_position`, `max_short_position`, `max_gross_exposure`,
+`max_leverage`, or `initial_margin` and carries a quantity, money, ratio, or basis-points threshold.
+Each order snapshot retains both creation and latest-update event IDs.
 
 The journal also records split/dividend application, split-driven order adjustments, short borrow
 fees, margin calls, liquidation-origin orders, and restoration. Every valuation contains complete
