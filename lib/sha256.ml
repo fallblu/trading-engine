@@ -247,4 +247,8 @@ let digest_file path =
   try
     In_channel.with_open_bin path (fun channel ->
         digest_channel channel |> Result.ok)
-  with Sys_error message -> Error ("could not hash scenario: " ^ message)
+  with Sys_error message as exception_ ->
+    Error
+      (Diagnostic.of_exception ~code:Diagnostic.Input_io ~phase:Diagnostic.Input
+         ~message:("could not hash scenario: " ^ message)
+         exception_)

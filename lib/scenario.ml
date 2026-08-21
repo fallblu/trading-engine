@@ -368,7 +368,11 @@ let parse_intent json =
       | None -> Error "intent is missing type")
   | _ -> Error "intent must be a JSON object"
 
-let intent_of_yojson = parse_intent
+let intent_of_yojson json =
+  parse_intent json
+  |> Result.map_error (fun message ->
+      Diagnostic.make ~code:Diagnostic.Scenario_invalid
+        ~phase:Diagnostic.Validation ~json_path:"$" message)
 
 let parse_schedule_item json =
   let* fields =
@@ -763,7 +767,7 @@ let validate_schedule risk catalog schedule slices =
   in
   validate None schedule
 
-let of_yojson json =
+let of_yojson_result json =
   let* fields =
     object_fields ~name:"scenario"
       ~expected:
@@ -865,15 +869,39 @@ let of_yojson json =
               slices;
             }
 
+let of_yojson json =
+  let code, json_path =
+    match json with
+    | `Assoc fields -> (
+        match List.assoc_opt "contract_version" fields with
+        | Some (`String supplied)
+          when not (String.equal supplied Contract.version) ->
+            (Diagnostic.Scenario_unsupported_contract, "$.contract_version")
+        | _ -> (Diagnostic.Scenario_invalid, "$"))
+    | _ -> (Diagnostic.Scenario_invalid, "$")
+  in
+  of_yojson_result json
+  |> Result.map_error (fun message ->
+      Diagnostic.make ~code ~phase:Diagnostic.Validation ~json_path message)
+
 let of_string document =
   try Yojson.Safe.from_string document |> of_yojson
-  with Yojson.Json_error message -> Error ("invalid scenario JSON: " ^ message)
+  with Yojson.Json_error message as exception_ ->
+    Error
+      (Diagnostic.of_exception ~code:Diagnostic.Scenario_invalid_json
+         ~phase:Diagnostic.Input ~json_path:"$"
+         ~message:("invalid scenario JSON: " ^ message)
+         exception_)
 
 let read_file path =
   try In_channel.with_open_bin path In_channel.input_all |> of_string
-  with Sys_error message -> Error ("could not read scenario: " ^ message)
+  with Sys_error message as exception_ ->
+    Error
+      (Diagnostic.of_exception ~code:Diagnostic.Input_io ~phase:Diagnostic.Input
+         ~message:("could not read scenario: " ^ message)
+         exception_)
 
-let stream_header_of_yojson ~contract_version json =
+let stream_header_of_yojson_result ~contract_version json =
   let* fields =
     object_fields ~name:"scenario stream header payload"
       ~expected:
@@ -894,7 +922,7 @@ let stream_header_of_yojson ~contract_version json =
       ((("contract_version", `String contract_version) :: fields)
       @ [ ("schedule", `List []); ("slices", `List []) ])
   in
-  let* scenario = of_yojson scenario_json in
+  let* scenario = of_yojson_result scenario_json in
   Ok
     {
       contract_version = scenario.contract_version;
@@ -909,7 +937,7 @@ let stream_header_of_yojson ~contract_version json =
       max_internal_events = scenario.max_internal_events;
     }
 
-let stream_item_of_yojson header ~previous json =
+let stream_item_of_yojson_result header ~previous json =
   let* fields =
     object_fields ~name:"scenario stream slice payload"
       ~expected:[ "market_slice"; "intents" ]
@@ -975,3 +1003,19 @@ let stream_item_of_yojson header ~previous json =
     | None | Some _ -> Ok ()
   in
   Ok { market_slice; intents; action_ids }
+
+let stream_header_of_yojson ~contract_version json =
+  let code, json_path =
+    if String.equal contract_version Contract.version then
+      (Diagnostic.Scenario_stream_invalid, "$.payload")
+    else (Diagnostic.Scenario_unsupported_contract, "$.contract_version")
+  in
+  stream_header_of_yojson_result ~contract_version json
+  |> Result.map_error (fun message ->
+      Diagnostic.make ~code ~phase:Diagnostic.Validation ~json_path message)
+
+let stream_item_of_yojson header ~previous json =
+  stream_item_of_yojson_result header ~previous json
+  |> Result.map_error (fun message ->
+      Diagnostic.make ~code:Diagnostic.Scenario_stream_invalid
+        ~phase:Diagnostic.Validation ~json_path:"$.payload" message)

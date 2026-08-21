@@ -28,7 +28,7 @@ val run :
   strategy_command:string list ->
   strategy_timeout:float ->
   Scenario.t ->
-  (result, string) Stdlib.result
+  (result, Diagnostic.t) Stdlib.result
 
 val run_stream :
   env:Eio_unix.Stdenv.base ->
@@ -37,4 +37,4 @@ val run_stream :
   strategy_command:string list ->
   strategy_timeout:float ->
   string ->
-  (streamed_result, string) Stdlib.result
+  (streamed_result, Diagnostic.t) Stdlib.result

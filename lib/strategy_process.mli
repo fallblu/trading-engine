@@ -8,11 +8,11 @@ val with_session :
   timeout:float ->
   transcript_path:string ->
   initialization:Strategy_protocol.initialization ->
-  (t -> ('a, string) result) ->
-  ('a * Strategy_protocol.identity, string) result
+  (t -> ('a, Diagnostic.t) result) ->
+  ('a * Strategy_protocol.identity, Diagnostic.t) result
 
 val on_event :
   t ->
   Strategy.context ->
   Strategy.event ->
-  (Strategy.intent list, string) result
+  (Strategy.intent list, Diagnostic.t) result

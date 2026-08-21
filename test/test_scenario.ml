@@ -170,16 +170,23 @@ let contract_version_is_required_and_supported () =
             else (name, value))
           fields)
   in
+  let unsupported_diagnostic = T.Scenario.of_yojson unsupported |> error in
   Alcotest.(check string)
     "unsupported version diagnosed"
     "unsupported scenario contract_version \"2\" (expected \"3\")"
-    (T.Scenario.of_yojson unsupported |> error)
+    (T.Diagnostic.to_human unsupported_diagnostic);
+  Alcotest.(check string)
+    "unsupported version code" "scenario.unsupported_contract"
+    (T.Diagnostic.code_to_string unsupported_diagnostic.code);
+  Alcotest.(check (option string))
+    "contract path" (Some "$.contract_version")
+    unsupported_diagnostic.context.json_path
 
 let duplicate_fields_are_rejected () =
   let changed =
     map_root (fun fields -> ("initial_cash", `String "0") :: fields)
   in
-  let message = T.Scenario.of_yojson changed |> error in
+  let message = T.Scenario.of_yojson changed |> diagnostic_message in
   Alcotest.(check bool)
     "duplicate field diagnosed" true
     (String.starts_with ~prefix:"scenario has duplicate JSON fields" message)
@@ -264,7 +271,7 @@ let market_slice_timeline_is_non_overlapping () =
       Alcotest.(check string)
         label "market slice start must not precede previous end"
         (scenario_with_second_slice_start start_at
-        |> T.Scenario.of_yojson |> error))
+        |> T.Scenario.of_yojson |> diagnostic_message))
     [
       ("backward start rejected", "2026-01-01T14:30:00Z");
       ("overlapping start rejected", "2026-01-02T20:00:00Z");
@@ -291,7 +298,7 @@ let invalid_schedule_sequences_are_rejected () =
   let missing =
     update_first_schedule (change_field "after_slice_sequence" (`String "999"))
   in
-  let message = T.Scenario.of_yojson missing |> error in
+  let message = T.Scenario.of_yojson missing |> diagnostic_message in
   Alcotest.(check string)
     "missing sequence diagnosed"
     "scheduled intents refer to missing market slice sequence 999" message;
@@ -312,7 +319,7 @@ let invalid_schedule_sequences_are_rejected () =
   in
   Alcotest.(check string)
     "duplicate schedule rejected" "schedule sequences must increase"
-    (T.Scenario.of_yojson duplicate |> error)
+    (T.Scenario.of_yojson duplicate |> diagnostic_message)
 
 let duplicate_and_incomplete_slice_bars_are_rejected () =
   let duplicate =
@@ -408,7 +415,7 @@ let execution_model_is_required_and_supported () =
   in
   Alcotest.(check string)
     "unsupported model diagnosed" "unsupported execution model \"future_model\""
-    (T.Scenario.of_yojson unsupported |> error)
+    (T.Scenario.of_yojson unsupported |> diagnostic_message)
 
 let deterministic_replay () =
   let scenario = demo () in
@@ -639,7 +646,8 @@ let streamed_contract_requires_ordered_terminal_records () =
           Alcotest.(check string)
             "truncation diagnosed"
             "scenario_end must terminate the scenario stream"
-            (T.Replay.run_stream ~journal_path:journal path |> error);
+            (T.Replay.run_stream ~journal_path:journal path
+            |> diagnostic_message);
           Alcotest.(check bool)
             "invalid stream has no journal" false (Sys.file_exists journal);
           Alcotest.(check bool)
@@ -656,10 +664,21 @@ let streamed_contract_requires_ordered_terminal_records () =
       records
   in
   with_stream skipped (fun path ->
+      let diagnostic = T.Replay.run_stream path |> error in
       Alcotest.(check string)
         "sequence gap diagnosed"
         "scenario_sequence must be contiguous and start at one"
-        (T.Replay.run_stream path |> error))
+        (T.Diagnostic.to_human diagnostic);
+      Alcotest.(check string)
+        "stream diagnostic code" "scenario_stream.invalid"
+        (T.Diagnostic.code_to_string diagnostic.code);
+      Alcotest.(check (option int))
+        "record line" (Some 3) diagnostic.context.line;
+      Alcotest.(check (option int64))
+        "observed sequence" (Some 9L) diagnostic.context.sequence;
+      Alcotest.(check (option string))
+        "sequence path" (Some "$.scenario_sequence")
+        diagnostic.context.json_path)
 
 let stream_with_second_slice_start start_at =
   stream_records ()
@@ -683,7 +702,7 @@ let streamed_market_slice_timeline_is_non_overlapping () =
       with_stream (stream_with_second_slice_start start_at) (fun path ->
           Alcotest.(check string)
             label "market slice start must not precede previous end"
-            (T.Replay.run_stream path |> error)))
+            (T.Replay.run_stream path |> diagnostic_message)))
     [
       ("backward start rejected", "2026-01-01T14:30:00Z");
       ("overlapping start rejected", "2026-01-02T20:00:00Z");
@@ -711,7 +730,7 @@ let streamed_intents_are_causal_before_execution () =
         "lookahead intent rejected"
         "scheduled order intent after slice 1 is received after the next \
          executable market slice starts"
-        (T.Replay.run_stream path |> error))
+        (T.Replay.run_stream path |> diagnostic_message))
 
 let large_stream_replay_does_not_retain_audit_history () =
   let slice_count = 10_000 in
