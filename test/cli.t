@@ -107,6 +107,40 @@
   $ check_strategy_failure unknown-field "unknown or missing fields"
   unknown-field: rejected
 
+  $ check_process_tree_failure () {
+  >   mode="$1"
+  >   expected="$2"
+  >   directory="process-tree-$mode"
+  >   mkdir "$directory"
+  >   pid_path="$directory/grandchild.pid"
+  >   output=$(../bin/main.exe --input ../contracts/strategy/v3/fixtures/external.scenario.json --journal "$directory/run.journal.jsonl" --strategy-executable ./fake_strategy.py --strategy-arg "$mode" --strategy-arg "$pid_path" --strategy-transcript "$directory/run.strategy.jsonl" --strategy-timeout 0.2 2>&1)
+  >   status=$?
+  >   test "$status" -eq 123 || return 1
+  >   case "$output" in *"$expected"*) ;; *) return 1 ;; esac
+  >   test -s "$pid_path" || return 1
+  >   pid=$(cat "$pid_path")
+  >   python3 - "$pid" <<'PY' || return 1
+  > import os
+  > import sys
+  > import time
+  > pid = int(sys.argv[1])
+  > deadline = time.monotonic() + 2
+  > while True:
+  >     try:
+  >         os.kill(pid, 0)
+  >     except ProcessLookupError:
+  >         break
+  >     if time.monotonic() >= deadline:
+  >         raise SystemExit("grandchild process survived cleanup")
+  >     time.sleep(0.01)
+  > PY
+  >   echo "$mode: process tree reaped"
+  > }
+  $ check_process_tree_failure spawn-grandchild "timed out"
+  spawn-grandchild: process tree reaped
+  $ check_process_tree_failure grandchild-malformed "invalid strategy response JSON"
+  grandchild-malformed: process tree reaped
+
   $ mkdir external-stream
   $ ../bin/main.exe --input-format jsonl --input ../contracts/strategy/v3/fixtures/external.scenario.jsonl --journal external-stream/run.journal.jsonl --strategy-executable ./fake_strategy.py --strategy-transcript external-stream/run.strategy.jsonl --strategy-timeout 5
   run=external-demo audits=10 orders=1 active=0 filled=1 rejected=0

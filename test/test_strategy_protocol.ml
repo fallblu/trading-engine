@@ -259,6 +259,67 @@ let transcript_records_direction_and_sequence () =
     | `String value -> value
     | _ -> Alcotest.fail "expected transcript direction")
 
+let absent_temp_path suffix =
+  let path = Filename.temp_file "trading-engine-process" suffix in
+  Sys.remove path;
+  path
+
+let remove_if_exists path = if Sys.file_exists path then Sys.remove path
+
+let grandchild_pid pid_path =
+  In_channel.with_open_text pid_path (fun channel ->
+      In_channel.input_all channel |> String.trim |> int_of_string)
+
+let check_process_gone pid =
+  match Unix.kill pid 0 with
+  | () -> Alcotest.fail "grandchild process survived session cleanup"
+  | exception Unix.Unix_error (Unix.ESRCH, _, _) -> ()
+
+let with_process_tree_paths test =
+  let pid_path = absent_temp_path ".pid" in
+  let transcript_path = absent_temp_path ".jsonl" in
+  Fun.protect
+    ~finally:(fun () ->
+      remove_if_exists pid_path;
+      remove_if_exists transcript_path;
+      remove_if_exists (transcript_path ^ ".partial"))
+    (fun () -> test pid_path transcript_path)
+
+let callback_exception_reaps_process_tree () =
+  with_process_tree_paths @@ fun pid_path transcript_path ->
+  let result =
+    Eio_main.run @@ fun env ->
+    T.Strategy_process.with_session ~env
+      ~command:[ "./fake_strategy.py"; "spawn-grandchild-success"; pid_path ]
+      ~timeout:1.0 ~transcript_path ~initialization:(initialization ())
+      (fun _ -> raise Exit)
+  in
+  let message = error result in
+  Alcotest.(check bool)
+    "callback exception reported" true
+    (String.ends_with ~suffix:"Stdlib.Exit" message);
+  grandchild_pid pid_path |> check_process_gone
+
+let cancellation_reaps_process_tree () =
+  with_process_tree_paths @@ fun pid_path transcript_path ->
+  let timed_out =
+    Eio_main.run @@ fun env ->
+    try
+      ignore
+        (Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 0.2 (fun () ->
+             T.Strategy_process.with_session ~env
+               ~command:
+                 [ "./fake_strategy.py"; "spawn-grandchild-success"; pid_path ]
+               ~timeout:1.0 ~transcript_path ~initialization:(initialization ())
+               (fun _ ->
+                 Eio.Time.sleep (Eio.Stdenv.clock env) 60.0;
+                 Ok ())));
+      false
+    with Eio.Time.Timeout -> true
+  in
+  Alcotest.(check bool) "session cancellation timed out" true timed_out;
+  grandchild_pid pid_path |> check_process_gone
+
 let tests =
   [
     Alcotest.test_case "initialize message is complete" `Quick
@@ -271,4 +332,8 @@ let tests =
       responses_are_strict_and_typed;
     Alcotest.test_case "transcript records direction" `Quick
       transcript_records_direction_and_sequence;
+    Alcotest.test_case "callback exception reaps process tree" `Slow
+      callback_exception_reaps_process_tree;
+    Alcotest.test_case "cancellation reaps process tree" `Slow
+      cancellation_reaps_process_tree;
   ]
