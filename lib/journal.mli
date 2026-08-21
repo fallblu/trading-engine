@@ -6,3 +6,4 @@ val create : ?effects:Boundary_effects.t -> string -> (t, Diagnostic.t) result
 val append : t -> Audit.t -> (unit, Diagnostic.t) result
 val close_preserving_partial : t -> unit
 val commit : t -> (unit, Diagnostic.t) result
+val artifact : t -> Artifact_writer.t
