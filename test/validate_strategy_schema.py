@@ -103,6 +103,41 @@ def main() -> None:
     malformed_transcript["direction"] = "network"
     expect_invalid(transcript_validator, malformed_transcript)
 
+    rejected_response = {
+        "strategy_diagnostic_version": "1",
+        "transcript_sequence": "2",
+        "record_type": "rejected_strategy_response",
+        "expected_strategy_sequence": "1",
+        "diagnostic": {
+            "diagnostic_version": "1",
+            "code": "strategy.protocol",
+            "phase": "strategy",
+            "message": "strategy initialization: invalid strategy response JSON",
+            "context": {"json_path": "$", "sequence": "1"},
+            "cause": None,
+        },
+        "evidence": {
+            "encoding": "hex",
+            "prefix": "7b",
+            "observed_bytes": 1,
+            "truncated": False,
+        },
+    }
+    transcript_validator.validate(rejected_response)
+    assert "direction" not in rejected_response
+    assert "message" not in rejected_response
+
+    rejection_as_exchange = copy.deepcopy(rejected_response)
+    rejection_as_exchange["direction"] = "strategy_to_engine"
+    rejection_as_exchange["message"] = records[1]["message"]
+    expect_invalid(transcript_validator, rejection_as_exchange)
+    oversized_prefix = copy.deepcopy(rejected_response)
+    oversized_prefix["evidence"]["prefix"] = "00" * 257
+    expect_invalid(transcript_validator, oversized_prefix)
+    unversioned_rejection = copy.deepcopy(rejected_response)
+    del unversioned_rejection["strategy_diagnostic_version"]
+    expect_invalid(transcript_validator, unversioned_rejection)
+
 
 if __name__ == "__main__":
     main()
