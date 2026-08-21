@@ -4,11 +4,47 @@
 from __future__ import annotations
 
 import json
+import os
+import signal
+import subprocess
 import sys
 import time
 
 
 MODE = sys.argv[1] if len(sys.argv) > 1 else "success"
+
+
+if MODE in {
+    "spawn-grandchild",
+    "spawn-grandchild-success",
+    "grandchild-malformed",
+}:
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    grandchild_pid_path = sys.argv[2]
+    grandchild = """
+import os
+import signal
+import sys
+import time
+
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+with open(sys.argv[1], "w", encoding="ascii") as channel:
+    channel.write(str(os.getpid()))
+    channel.flush()
+time.sleep(60)
+"""
+    subprocess.Popen(
+        [sys.executable, "-c", grandchild, grandchild_pid_path],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        close_fds=True,
+    )
+    deadline = time.monotonic() + 1
+    while not os.path.exists(grandchild_pid_path):
+        if time.monotonic() >= deadline:
+            raise RuntimeError("grandchild did not publish its PID")
+        time.sleep(0.01)
 
 
 def response(request: dict[str, object]) -> dict[str, object]:
@@ -98,7 +134,9 @@ for line in sys.stdin:
         raise SystemExit(0)
     if MODE == "stall":
         time.sleep(60)
-    if MODE == "malformed":
+    if MODE == "spawn-grandchild":
+        time.sleep(60)
+    if MODE in {"malformed", "grandchild-malformed"}:
         print("{", flush=True)
         continue
     if MODE == "oversized":
