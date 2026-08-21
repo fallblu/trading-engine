@@ -66,6 +66,26 @@ module Interactive = struct
     | Notify of Id.Event.t list * Strategy.event
     | Act of Id.Event.t list * Strategy.intent
 
+  module Pending_queue = struct
+    type t = { front : pending list; back : pending list }
+
+    let empty = { front = []; back = [] }
+    let is_empty queue = queue.front = [] && queue.back = []
+
+    let enqueue queue items =
+      { queue with back = List.rev_append items queue.back }
+
+    let prepend queue items = { queue with front = items @ queue.front }
+
+    let pop queue =
+      match queue.front with
+      | item :: front -> Some (item, { queue with front })
+      | [] -> (
+          match List.rev queue.back with
+          | [] -> None
+          | item :: front -> Some (item, { front; back = [] }))
+  end
+
   type reduction = {
     state : t;
     now : Ptime.t;
@@ -73,7 +93,7 @@ module Interactive = struct
     slice_event_id : Id.Event.t option;
     causation_ids : Id.Event.t list;
     audits_rev : Audit.t list;
-    pending : pending list;
+    pending : Pending_queue.t;
     processed : int;
   }
 
@@ -178,10 +198,10 @@ module Interactive = struct
           with_causes reduction [ event_id ])
 
   let enqueue reduction items =
-    { reduction with pending = reduction.pending @ items }
+    { reduction with pending = Pending_queue.enqueue reduction.pending items }
 
   let prepend reduction items =
-    { reduction with pending = items @ reduction.pending }
+    { reduction with pending = Pending_queue.prepend reduction.pending items }
 
   let value state =
     let marks =
@@ -778,28 +798,31 @@ module Interactive = struct
       }
 
   let rec drain reduction =
-    match reduction.pending with
-    | [] -> Ok (Drained reduction)
-    | _ when reduction.processed >= reduction.state.config.max_internal_events
-      ->
-        Error
-          (Printf.sprintf "internal event count exceeds configured limit of %d"
-             reduction.state.config.max_internal_events)
-    | item :: pending -> (
-        let reduction =
-          { reduction with pending; processed = reduction.processed + 1 }
-        in
-        match item with
-        | Notify (causation_ids, event) ->
-            let reduction = with_causes reduction causation_ids in
-            let* context = strategy_context reduction.state reduction.now in
-            Ok (Strategy_requested { reduction; causation_ids; context; event })
-        | Act (causation_ids, intent) -> (
-            match
-              handle_intent (with_causes reduction causation_ids) intent
-            with
-            | Error _ as error -> error
-            | Ok reduction -> drain reduction))
+    if Pending_queue.is_empty reduction.pending then Ok (Drained reduction)
+    else if reduction.processed >= reduction.state.config.max_internal_events
+    then
+      Error
+        (Printf.sprintf "internal event count exceeds configured limit of %d"
+           reduction.state.config.max_internal_events)
+    else
+      match Pending_queue.pop reduction.pending with
+      | None -> Ok (Drained reduction)
+      | Some (item, pending) -> (
+          let reduction =
+            { reduction with pending; processed = reduction.processed + 1 }
+          in
+          match item with
+          | Notify (causation_ids, event) ->
+              let reduction = with_causes reduction causation_ids in
+              let* context = strategy_context reduction.state reduction.now in
+              Ok
+                (Strategy_requested { reduction; causation_ids; context; event })
+          | Act (causation_ids, intent) -> (
+              match
+                handle_intent (with_causes reduction causation_ids) intent
+              with
+              | Error _ as error -> error
+              | Ok reduction -> drain reduction))
 
   let validate_slice state market_slice =
     let expected =
@@ -1342,7 +1365,7 @@ module Interactive = struct
             continue Finish_slice reduction
         | Finish_slice ->
             let* reduction = assess_margin reduction in
-            if reduction.pending = [] then
+            if Pending_queue.is_empty reduction.pending then
               let* reduction = valuation reduction in
               Ok
                 (Slice_completed (reduction.state, List.rev reduction.audits_rev))
@@ -1405,7 +1428,7 @@ module Interactive = struct
           slice_event_id = None;
           causation_ids = [];
           audits_rev = [];
-          pending = [];
+          pending = Pending_queue.empty;
           processed = 0;
         }
       in
@@ -1473,7 +1496,7 @@ module Interactive = struct
               slice_event_id = None;
               causation_ids;
               audits_rev = [];
-              pending = [];
+              pending = Pending_queue.empty;
               processed = 0;
             }
           in

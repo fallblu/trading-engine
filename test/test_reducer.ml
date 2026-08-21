@@ -416,6 +416,36 @@ let exact_internal_event_limit_succeeds () =
     "one callback fits a limit of one" true
     (Result.is_ok (Runner.process_slice state (market_slice 1L)))
 
+let reducer_feedback_queue_handles_large_batches () =
+  let batch_size = T.Resource_limits.intents_per_batch in
+  let invalid_intent =
+    T.Strategy.Submit_order
+      (request ~quantity_value:"1" ~origin:T.Order.Target_rebalance ())
+  in
+  let intents = List.init batch_size (fun _ -> invalid_intent) in
+  let strategy_state = T.Scripted_strategy.create [ (1L, intents) ] |> ok in
+  let max_internal_events = (2 * batch_size) + 1 in
+  let config = engine_config ~max_internal_events () in
+  let state =
+    Runner.create ~run_id:(run_id "large-feedback") ~scenario_sha256 ~config
+      ~initial_cash:[ ("USD", money "10000") ]
+      ~strategy_state
+    |> ok
+  in
+  let _, events = Runner.process_slice state (market_slice 1L) |> ok in
+  let rejection_count =
+    List.fold_left
+      (fun count audit ->
+        match audit.T.Audit.event with
+        | T.Audit.Intent_rejected _ -> count + 1
+        | _ -> count)
+      0 events
+  in
+  Alcotest.(check int) "every intent rejected" batch_size rejection_count;
+  Alcotest.(check int)
+    "batch completes at the exact feedback limit" (batch_size + 3)
+    (List.length events)
+
 let completed_run_is_terminal_and_hash_bound () =
   let state = runner [] in
   let state, valuation, events = Runner.complete state |> ok in
@@ -753,6 +783,8 @@ let tests =
       internal_feedback_is_capped;
     Alcotest.test_case "exact internal event limit" `Quick
       exact_internal_event_limit_succeeds;
+    Alcotest.test_case "large reducer feedback batch" `Slow
+      reducer_feedback_queue_handles_large_batches;
     Alcotest.test_case "completed run is terminal and hash-bound" `Quick
       completed_run_is_terminal_and_hash_bound;
     Alcotest.test_case "invalid initial state rejected" `Quick
