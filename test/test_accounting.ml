@@ -202,6 +202,85 @@ let risk_reserves_working_sells () =
     "second sell oversubscribes holdings" true
     (Result.is_error (risk_check risk ~account ~oms second))
 
+let add_working_order oms ~id ~accepted_sequence request =
+  T.Oms.accept oms ~id:(order_id id)
+    ~created_event_id:(event_id (id ^ "-event"))
+    ~accepted_sequence
+    ~created_at:(timestamp "2026-01-02T21:00:02Z")
+    ~eligible_after_slice_sequence:1L request
+  |> ok |> fst
+
+let risk_rejects_self_crossing_orders () =
+  let account = test_account () in
+  let configured = risk () in
+  let buy = request ~side:T.Order.Buy ~quantity_value:"4" () in
+  let buy_oms =
+    add_working_order T.Oms.empty ~id:"buy" ~accepted_sequence:1L buy
+  in
+  let sell = request ~side:T.Order.Sell ~quantity_value:"1" () in
+  Alcotest.(check string)
+    "sell against working buy"
+    "order would self-cross an active opposite-side order"
+    (risk_check configured ~account ~oms:buy_oms sell |> error);
+  let sell_oms =
+    add_working_order T.Oms.empty ~id:"sell" ~accepted_sequence:1L sell
+  in
+  Alcotest.(check string)
+    "buy against working sell"
+    "order would self-cross an active opposite-side order"
+    (risk_check configured ~account ~oms:sell_oms buy |> error)
+
+let risk_reserves_partial_order_remainders () =
+  let account = test_account () in
+  let configured = risk ~max_long:"5" () in
+  let oms, order =
+    oms_with_order (request ~side:T.Order.Buy ~quantity_value:"10" ())
+  in
+  let partial = fill ~quantity_value:"6" order in
+  let oms =
+    match T.Oms.apply_fill oms partial with
+    | Ok (oms, T.Oms.Applied _) -> oms
+    | Ok (_, T.Oms.Duplicate) -> Alcotest.fail "expected an applied fill"
+    | Error message -> Alcotest.fail message
+  in
+  Alcotest.(check (result unit string))
+    "one unit fits after partial fill" (Ok ())
+    (risk_check configured ~account ~oms
+       (request ~side:T.Order.Buy ~quantity_value:"1" ()));
+  Alcotest.(check string)
+    "two units exceed the reserved long limit"
+    "position would exceed the maximum long position"
+    (risk_check configured ~account ~oms
+       (request ~side:T.Order.Buy ~quantity_value:"2" ())
+    |> error)
+
+let risk_values_directional_reservations_without_netting () =
+  let primary = instrument () in
+  let hedge = instrument ~id:"hedge" ~symbol:"HEDGE" () in
+  let configured = risk ~instruments:[ primary; hedge ] ~max_gross:"1000" () in
+  let account = test_account () in
+  let primary_id = instrument_id "test-equity" in
+  let buy =
+    request ~instrument:primary_id ~side:T.Order.Buy ~quantity_value:"8" ()
+  in
+  let sell =
+    request ~instrument:primary_id ~side:T.Order.Sell ~quantity_value:"8" ()
+  in
+  let oms =
+    add_working_order T.Oms.empty ~id:"buy" ~accepted_sequence:1L buy
+    |> fun oms -> add_working_order oms ~id:"sell" ~accepted_sequence:2L sell
+  in
+  let result =
+    T.Risk.check configured ~account ~oms
+      ~marks:[ (primary_id, price "100"); (instrument_id "hedge", price "100") ]
+      ~fx_rates:[ ("USD", price "1") ]
+      (request ~instrument:(instrument_id "hedge") ~side:T.Order.Buy
+         ~quantity_value:"4" ())
+  in
+  Alcotest.(check string)
+    "opposing reservations retain their directional exposure"
+    "portfolio would exceed maximum gross exposure" (result |> error)
+
 let accounting_identity_property =
   let open QCheck2 in
   let generator =
@@ -265,5 +344,11 @@ let tests =
       fills_settle_to_explicit_margin_cash;
     Alcotest.test_case "risk reserves working sells" `Quick
       risk_reserves_working_sells;
+    Alcotest.test_case "risk rejects self-crossing orders" `Quick
+      risk_rejects_self_crossing_orders;
+    Alcotest.test_case "risk reserves partial-order remainders" `Quick
+      risk_reserves_partial_order_remainders;
+    Alcotest.test_case "risk values directional reservations without netting"
+      `Quick risk_values_directional_reservations_without_netting;
     QCheck_alcotest.to_alcotest ~speed_level:`Quick accounting_identity_property;
   ]
