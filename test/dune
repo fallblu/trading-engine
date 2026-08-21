@@ -9,6 +9,7 @@
   test_reducer
   test_checkpoint4
   test_strategy_protocol
+  test_boundary_failures
   test_scenario
   test_engine)
  (deps

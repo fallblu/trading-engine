@@ -5,6 +5,7 @@ type t = {
   child : child;
   clock : float Eio.Time.clock_ty Eio.Resource.t;
   transcript : Strategy_transcript.t;
+  effects : Boundary_effects.t;
   timeout : float;
   mutable next_sequence : int64;
 }
@@ -13,6 +14,7 @@ and child = {
   process : Eio_unix.Process.ty Eio.Resource.t;
   pgid : int;
   clock : float Eio.Time.clock_ty Eio.Resource.t;
+  effects : Boundary_effects.t;
   mutable status : Eio.Process.exit_status option;
 }
 
@@ -62,7 +64,10 @@ let await_child (child : child) =
   match child.status with
   | Some status -> status
   | None ->
-      let status = Eio.Process.await child.process in
+      let status =
+        Boundary_effects.perform child.effects Boundary_effects.Reap_process
+          (fun () -> Eio.Process.await child.process)
+      in
       child.status <- Some status;
       status
 
@@ -125,7 +130,7 @@ let rec wait_for_process_group (child : child) deadline =
       Eio.Time.sleep child.clock (Float.min process_poll_interval remaining);
       wait_for_process_group child deadline)
 
-let terminate_process_group (child : child) =
+let terminate_process_group_direct (child : child) =
   Eio.Cancel.protect (fun () ->
       let graceful_deadline =
         Eio.Time.now child.clock +. graceful_termination_timeout
@@ -166,6 +171,13 @@ let terminate_process_group (child : child) =
                    "external strategy descendants remained after forced \
                     termination"))
 
+let terminate_process_group (child : child) =
+  try
+    Boundary_effects.perform child.effects Boundary_effects.Terminate_process
+      (fun () -> terminate_process_group_direct child)
+  with exception_ ->
+    Error (exception_diagnostic "terminating external strategy" exception_)
+
 let append_cleanup_error result child =
   match terminate_process_group child with
   | Ok () -> result
@@ -184,8 +196,11 @@ let exchange session ~stage ~expected_sequence request =
     try
       match
         Eio.Time.with_timeout session.clock session.timeout (fun () ->
-            Eio.Flow.copy_string request_line session.input;
-            Ok (Eio.Buf_read.line session.output))
+            Ok
+              (Boundary_effects.perform session.effects
+                 Boundary_effects.Exchange_process (fun () ->
+                   Eio.Flow.copy_string request_line session.input;
+                   Eio.Buf_read.line session.output)))
       with
       | Ok response -> Ok response
       | Error `Timeout ->
@@ -314,8 +329,8 @@ let await_exit session =
         (diagnostic ~code:Diagnostic.Strategy_exit
            (Printf.sprintf "external strategy was killed by signal %d" signal))
 
-let with_session ~env ~command ~timeout ~transcript_path
-    ~(initialization : Strategy_protocol.initialization) use =
+let with_session ?(effects = Boundary_effects.direct) ~env ~command ~timeout
+    ~transcript_path ~(initialization : Strategy_protocol.initialization) use =
   if not (valid_timeout timeout) then
     Error
       (diagnostic ~code:Diagnostic.Strategy_invalid_configuration
@@ -331,7 +346,7 @@ let with_session ~env ~command ~timeout ~transcript_path
           (diagnostic ~code:Diagnostic.Strategy_invalid_configuration
              "external strategy executable must not be empty")
     | executable :: _ -> (
-        match Strategy_transcript.create transcript_path with
+        match Strategy_transcript.create ~effects transcript_path with
         | Error _ as error -> error
         | Ok transcript -> (
             let fail result =
@@ -354,8 +369,10 @@ let with_session ~env ~command ~timeout ~transcript_path
                   ]
                 in
                 let process =
-                  Eio_unix.Process.spawn_unix ~sw:switch process_manager ~pgid:0
-                    ~fds ~executable command
+                  Boundary_effects.perform effects
+                    Boundary_effects.Spawn_process (fun () ->
+                      Eio_unix.Process.spawn_unix ~sw:switch process_manager
+                        ~pgid:0 ~fds ~executable command)
                 in
                 Eio.Flow.close strategy_stdin;
                 Eio.Flow.close strategy_stdout;
@@ -364,6 +381,7 @@ let with_session ~env ~command ~timeout ~transcript_path
                     process;
                     pgid = Eio.Process.pid process;
                     clock = Eio.Stdenv.clock env;
+                    effects;
                     status = None;
                   }
                 in
@@ -379,6 +397,7 @@ let with_session ~env ~command ~timeout ~transcript_path
                     child;
                     clock = Eio.Stdenv.clock env;
                     transcript;
+                    effects;
                     timeout;
                     next_sequence = 1L;
                   }
