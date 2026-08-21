@@ -2,4 +2,4 @@
 
 val digest_string : string -> string
 val digest_channel : in_channel -> string
-val digest_file : string -> (string, string) result
+val digest_file : string -> (string, Diagnostic.t) result

@@ -269,7 +269,10 @@ let parse_intents_payload json =
       List.fold_left
         (fun result value ->
           let* intents = result in
-          let* intent = Scenario.intent_of_yojson value in
+          let* intent =
+            Scenario.intent_of_yojson value
+            |> Result.map_error Diagnostic.to_human
+          in
           Ok (intent :: intents))
         (Ok []) values
       |> Result.map (fun values -> Intents (List.rev values))
@@ -279,7 +282,7 @@ let parse_stopped_payload json =
   let* _ = object_fields ~name:"strategy stopped payload" ~expected:[] json in
   Ok Stopped
 
-let response_of_yojson ~expected_sequence json =
+let response_of_yojson_result ~expected_sequence json =
   let* fields =
     object_fields ~name:"strategy response"
       ~expected:
@@ -322,16 +325,46 @@ let response_of_yojson ~expected_sequence json =
           |> Result.map (fun message -> Failed message)
       | value -> Error ("unsupported strategy response type: " ^ value)
 
+let response_of_yojson ~expected_sequence json =
+  let json_path =
+    match json with
+    | `Assoc fields -> (
+        match List.assoc_opt "strategy_protocol_version" fields with
+        | Some (`String supplied) when not (String.equal supplied version) ->
+            "$.strategy_protocol_version"
+        | _ -> (
+            match List.assoc_opt "strategy_sequence" fields with
+            | Some (`String supplied)
+              when not
+                     (String.equal supplied (Int64.to_string expected_sequence))
+              ->
+                "$.strategy_sequence"
+            | _ -> "$"))
+    | _ -> "$"
+  in
+  response_of_yojson_result ~expected_sequence json
+  |> Result.map_error (fun message ->
+      Diagnostic.make ~code:Diagnostic.Strategy_protocol
+        ~phase:Diagnostic.Strategy ~sequence:expected_sequence ~json_path
+        message)
+
 let response_of_string ~expected_sequence document =
   if String.length document > max_message_bytes then
-    Error "strategy response exceeds the maximum message size"
+    Error
+      (Diagnostic.make ~code:Diagnostic.Strategy_protocol
+         ~phase:Diagnostic.Strategy ~sequence:expected_sequence
+         "strategy response exceeds the maximum message size")
   else
     try
       let json = Yojson.Safe.from_string document in
       response_of_yojson ~expected_sequence json
       |> Result.map (fun response -> (response, json))
-    with Yojson.Json_error message ->
-      Error ("invalid strategy response JSON: " ^ message)
+    with Yojson.Json_error message as exception_ ->
+      Error
+        (Diagnostic.of_exception ~code:Diagnostic.Strategy_protocol
+           ~phase:Diagnostic.Strategy ~sequence:expected_sequence ~json_path:"$"
+           ~message:("invalid strategy response JSON: " ^ message)
+           exception_)
 
 let direction_to_string = function
   | Engine_to_strategy -> "engine_to_strategy"

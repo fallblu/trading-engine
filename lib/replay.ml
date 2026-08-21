@@ -28,6 +28,17 @@ type stream_state = {
   schedule_count : int64;
 }
 
+let reducer ?sequence message =
+  Diagnostic.make ?sequence ~code:Diagnostic.Reducer_failed
+    ~phase:Diagnostic.Reducer message
+
+let replay ?sequence message =
+  Diagnostic.make ?sequence ~code:Diagnostic.Replay_failed
+    ~phase:Diagnostic.Replay message
+
+let reducer_result ?sequence result =
+  Result.map_error (reducer ?sequence) result
+
 let append_events journal events =
   match journal with
   | None -> Ok ()
@@ -42,7 +53,7 @@ let append_events journal events =
 let add_audit_count count events =
   let added = Int64.of_int (List.length events) in
   if Int64.compare count (Int64.sub Int64.max_int added) > 0 then
-    Error "audit event count is exhausted"
+    Error (replay "audit event count is exhausted")
   else Ok (Int64.add count added)
 
 let run ~scenario_sha256 ?journal_path scenario =
@@ -66,7 +77,9 @@ let run ~scenario_sha256 ?journal_path scenario =
             | Ok () -> result
             | Error _ as error -> error)
       in
-      match Scripted_strategy.create scenario.Scenario.schedule with
+      match
+        Scripted_strategy.create scenario.Scenario.schedule |> reducer_result
+      with
       | Error _ as error -> fail error
       | Ok strategy_state -> (
           match
@@ -74,12 +87,14 @@ let run ~scenario_sha256 ?journal_path scenario =
               ~execution_model:scenario.execution_model
               ~execution:scenario.execution
               ~max_internal_events:scenario.max_internal_events
+            |> reducer_result
           with
           | Error _ as error -> fail error
           | Ok config -> (
               match
                 Runner.create ~run_id:scenario.run_id ~scenario_sha256 ~config
                   ~initial_cash:scenario.initial_cash ~strategy_state
+                |> reducer_result
               with
               | Error _ as error -> fail error
               | Ok initial -> (
@@ -87,7 +102,12 @@ let run ~scenario_sha256 ?journal_path scenario =
                     match result with
                     | Error _ as error -> error
                     | Ok (state, audits_rev) -> (
-                        match Runner.process_slice state market_slice with
+                        match
+                          Runner.process_slice state market_slice
+                          |> reducer_result
+                               ~sequence:
+                                 market_slice.Market_slice.slice_sequence
+                        with
                         | Error _ as error -> error
                         | Ok (state, events) -> (
                             match append_events journal events with
@@ -100,7 +120,7 @@ let run ~scenario_sha256 ?journal_path scenario =
                   with
                   | Error _ as error -> fail error
                   | Ok (state, audits_rev) -> (
-                      match Runner.complete state with
+                      match Runner.complete state |> reducer_result with
                       | Error _ as error -> fail error
                       | Ok (state, valuation, completion_events) -> (
                           match append_events journal completion_events with
@@ -121,7 +141,7 @@ let run ~scenario_sha256 ?journal_path scenario =
 let run_stream_pass ~scenario_sha256 ~journal channel =
   Scenario_stream.fold_channel channel
     ~init:(fun header ->
-      match Scripted_strategy.create [] with
+      match Scripted_strategy.create [] |> reducer_result with
       | Error _ as error -> error
       | Ok strategy_state -> (
           match
@@ -129,12 +149,14 @@ let run_stream_pass ~scenario_sha256 ~journal channel =
               ~execution_model:header.execution_model
               ~execution:header.execution
               ~max_internal_events:header.max_internal_events
+            |> reducer_result
           with
           | Error _ as error -> error
           | Ok config -> (
               match
                 Runner.create ~run_id:header.run_id ~scenario_sha256 ~config
                   ~initial_cash:header.initial_cash ~strategy_state
+                |> reducer_result
               with
               | Error _ as error -> error
               | Ok runner ->
@@ -151,11 +173,15 @@ let run_stream_pass ~scenario_sha256 ~journal channel =
       match
         Scripted_strategy.create
           [ (item.Scenario.market_slice.slice_sequence, item.intents) ]
+        |> reducer_result ~sequence:item.market_slice.slice_sequence
       with
       | Error _ as error -> error
       | Ok strategy_state -> (
           let runner = Runner.with_strategy_state state.runner strategy_state in
-          match Runner.process_slice runner item.market_slice with
+          match
+            Runner.process_slice runner item.market_slice
+            |> reducer_result ~sequence:item.market_slice.slice_sequence
+          with
           | Error _ as error -> error
           | Ok (runner, events) -> (
               match append_events state.journal events with
@@ -169,7 +195,7 @@ let run_stream_pass ~scenario_sha256 ~journal channel =
                   |> Result.map (fun audit_count ->
                       { state with runner; audit_count; schedule_count }))))
     ~finish:(fun state ~slice_count ->
-      match Runner.complete state.runner with
+      match Runner.complete state.runner |> reducer_result with
       | Error _ as error -> error
       | Ok (runner, valuation, events) -> (
           match append_events state.journal events with
@@ -205,7 +231,10 @@ let run_stream ?journal_path path =
             seek_in channel 0;
             let validated_sha256 = Sha256.digest_channel channel in
             if not (String.equal scenario_sha256 validated_sha256) then
-              Error "scenario stream changed during validation"
+              Error
+                (Diagnostic.make ~code:Diagnostic.Scenario_stream_changed
+                   ~phase:Diagnostic.Input
+                   "scenario stream changed during validation")
             else
               match journal_path with
               | None -> Ok validated
@@ -225,10 +254,20 @@ let run_stream ?journal_path path =
                           let replayed_sha256 = Sha256.digest_channel channel in
                           if not (String.equal scenario_sha256 replayed_sha256)
                           then
-                            fail (Error "scenario stream changed during replay")
+                            fail
+                              (Error
+                                 (Diagnostic.make
+                                    ~code:Diagnostic.Scenario_stream_changed
+                                    ~phase:Diagnostic.Input
+                                    "scenario stream changed during replay"))
                           else
                             match Journal.commit created with
                             | Error _ as error -> error
                             | Ok () -> Ok replayed)))))
-  with Sys_error message ->
-    fail (Error ("could not read scenario stream: " ^ message))
+  with Sys_error message as exception_ ->
+    fail
+      (Error
+         (Diagnostic.of_exception ~code:Diagnostic.Input_io
+            ~phase:Diagnostic.Input
+            ~message:("could not read scenario stream: " ^ message)
+            exception_))

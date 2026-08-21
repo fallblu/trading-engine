@@ -34,16 +34,18 @@ type stream_item = private {
   action_ids : Id.Corporate_action.Set.t;
 }
 
-val of_yojson : Yojson.Safe.t -> (t, string) result
-val of_string : string -> (t, string) result
-val read_file : string -> (t, string) result
-val intent_of_yojson : Yojson.Safe.t -> (Strategy.intent, string) result
+val of_yojson : Yojson.Safe.t -> (t, Diagnostic.t) result
+val of_string : string -> (t, Diagnostic.t) result
+val read_file : string -> (t, Diagnostic.t) result
+val intent_of_yojson : Yojson.Safe.t -> (Strategy.intent, Diagnostic.t) result
 
 val stream_header_of_yojson :
-  contract_version:string -> Yojson.Safe.t -> (stream_header, string) result
+  contract_version:string ->
+  Yojson.Safe.t ->
+  (stream_header, Diagnostic.t) result
 
 val stream_item_of_yojson :
   stream_header ->
   previous:stream_item option ->
   Yojson.Safe.t ->
-  (stream_item, string) result
+  (stream_item, Diagnostic.t) result

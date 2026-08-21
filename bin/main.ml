@@ -1,5 +1,17 @@
 open Cmdliner
 
+type diagnostic_format = Human | Json
+
+let cli_error message =
+  Trading_engine.Diagnostic.make
+    ~code:Trading_engine.Diagnostic.Cli_invalid_arguments
+    ~phase:Trading_engine.Diagnostic.Cli message
+
+let input_error ~message exception_ =
+  Trading_engine.Diagnostic.of_exception
+    ~code:Trading_engine.Diagnostic.Input_io
+    ~phase:Trading_engine.Diagnostic.Input ~message exception_
+
 let count predicate values =
   List.fold_left
     (fun total value -> total + Bool.to_int (predicate value))
@@ -138,7 +150,11 @@ let run_external_stream environment input journal strategy =
 let execute_json environment input journal validate_only strategy =
   let document =
     try Ok (In_channel.with_open_bin input In_channel.input_all)
-    with Sys_error message -> Error ("could not read scenario: " ^ message)
+    with Sys_error message as exception_ ->
+      Error
+        (input_error
+           ~message:("could not read scenario: " ^ message)
+           exception_)
   in
   match document with
   | Error _ as error -> error
@@ -149,7 +165,9 @@ let execute_json environment input journal validate_only strategy =
       | Ok scenario -> (
           if validate_only then
             match journal with
-            | Some _ -> Error "--journal cannot be used with --validate-only"
+            | Some _ ->
+                Error
+                  (cli_error "--journal cannot be used with --validate-only")
             | None -> (
                 match Trading_engine.Replay.run ~scenario_sha256 scenario with
                 | Error message -> Error message
@@ -166,7 +184,9 @@ let execute_json environment input journal validate_only strategy =
           else
             match journal with
             | None ->
-                Error "--journal is required unless --validate-only is set"
+                Error
+                  (cli_error
+                     "--journal is required unless --validate-only is set")
             | Some path -> (
                 match strategy with
                 | None -> run_replay scenario_sha256 scenario path
@@ -177,7 +197,8 @@ let execute_json environment input journal validate_only strategy =
 let execute_jsonl environment input journal validate_only strategy =
   if validate_only then
     match journal with
-    | Some _ -> Error "--journal cannot be used with --validate-only"
+    | Some _ ->
+        Error (cli_error "--journal cannot be used with --validate-only")
     | None -> (
         match Trading_engine.Replay.run_stream input with
         | Error message -> Error message
@@ -190,7 +211,8 @@ let execute_jsonl environment input journal validate_only strategy =
             Ok ())
   else
     match journal with
-    | None -> Error "--journal is required unless --validate-only is set"
+    | None ->
+        Error (cli_error "--journal is required unless --validate-only is set")
     | Some path -> (
         match strategy with
         | None -> run_stream input path
@@ -207,14 +229,17 @@ let external_strategy executable arguments timeout transcript =
   | None, None, [], None -> Ok None
   | None, _, _, _ ->
       Error
-        "--strategy-arg, --strategy-timeout, and --strategy-transcript require \
-         --strategy-executable"
+        (cli_error
+           "--strategy-arg, --strategy-timeout, and --strategy-transcript \
+            require --strategy-executable")
   | Some _, None, _, _ ->
-      Error "--strategy-transcript is required with --strategy-executable"
+      Error
+        (cli_error
+           "--strategy-transcript is required with --strategy-executable")
   | Some executable, Some transcript, arguments, timeout ->
       let timeout = Option.value timeout ~default:30.0 in
       if (not (Float.is_finite timeout)) || Float.compare timeout 0.0 <= 0 then
-        Error "--strategy-timeout must be finite and positive"
+        Error (cli_error "--strategy-timeout must be finite and positive")
       else Ok (Some { command = executable :: arguments; timeout; transcript })
 
 let execute environment input journal validate_only capabilities input_format
@@ -235,10 +260,12 @@ let execute environment input journal validate_only capabilities input_format
         Ok ()
     | _ ->
         Error
-          "--capabilities cannot be combined with replay or strategy options"
+          (cli_error
+             "--capabilities cannot be combined with replay or strategy options")
   else
     match input with
-    | None -> Error "--input is required unless --capabilities is set"
+    | None ->
+        Error (cli_error "--input is required unless --capabilities is set")
     | Some path -> (
         match
           external_strategy strategy_executable strategy_arguments
@@ -247,7 +274,8 @@ let execute environment input journal validate_only capabilities input_format
         | Error _ as error -> error
         | Ok (Some _) when validate_only ->
             Error
-              "external strategy options cannot be used with --validate-only"
+              (cli_error
+                 "external strategy options cannot be used with --validate-only")
         | Ok strategy ->
             execute_scenario environment path journal validate_only strategy
               input_format)
@@ -276,6 +304,12 @@ let validate_only =
 let capabilities =
   let doc = "Print machine-readable engine capabilities as JSON and exit." in
   Arg.(value & flag & info [ "capabilities" ] ~doc)
+
+let diagnostic_format =
+  let formats = Arg.enum [ ("human", Human); ("json", Json) ] in
+  let doc = "Render runtime diagnostics as $(docv) (default: human)." in
+  Arg.(
+    value & opt formats Human & info [ "diagnostic-format" ] ~docv:"FORMAT" ~doc)
 
 let strategy_executable =
   let doc =
@@ -329,12 +363,39 @@ let command environment =
     (Cmd.info "trading-engine" ~version:Trading_engine.Contract.engine_version
        ~doc ~man)
     Term.(
-      const (execute environment)
+      const
+        (fun
+          input
+          journal
+          validate_only
+          capabilities
+          input_format
+          strategy_executable
+          strategy_arguments
+          strategy_timeout
+          strategy_transcript
+          diagnostic_format
+        ->
+          ( diagnostic_format,
+            execute environment input journal validate_only capabilities
+              input_format strategy_executable strategy_arguments
+              strategy_timeout strategy_transcript ))
       $ input $ journal $ validate_only $ capabilities $ input_format
       $ strategy_executable $ strategy_argument $ strategy_timeout
-      $ strategy_transcript)
+      $ strategy_transcript $ diagnostic_format)
 
 let () =
   Fmt_tty.setup_std_outputs ();
   Eio_main.run @@ fun environment ->
-  exit (Cmd.eval_result (command environment))
+  match Cmd.eval_value' (command environment) with
+  | `Exit code -> exit code
+  | `Ok (_, Ok ()) -> exit Cmd.Exit.ok
+  | `Ok (format, Error diagnostic) ->
+      let rendered =
+        match format with
+        | Human ->
+            "trading-engine: " ^ Trading_engine.Diagnostic.to_human diagnostic
+        | Json -> Trading_engine.Diagnostic.to_json diagnostic
+      in
+      Fmt.epr "%s@." rendered;
+      exit Cmd.Exit.some_error
