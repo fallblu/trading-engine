@@ -2,6 +2,12 @@
 
 type t
 
+val validate_configuration :
+  command:string list ->
+  timeout:float ->
+  initialization:Strategy_protocol.initialization ->
+  (unit, Diagnostic.t) result
+
 val with_staged_session :
   ?effects:Boundary_effects.t ->
   env:Eio_unix.Stdenv.base ->

@@ -12,6 +12,10 @@ let config ~contract_version ~risk ~execution_model ~execution
     Error "engine contract version is unsupported"
   else if max_internal_events <= 0 then
     Error "maximum internal events must be positive"
+  else if max_internal_events > Resource_limits.internal_events then
+    Error
+      (Printf.sprintf "maximum internal events is %d; limit is %d"
+         max_internal_events Resource_limits.internal_events)
   else
     Ok
       {
@@ -778,7 +782,9 @@ module Interactive = struct
     | [] -> Ok (Drained reduction)
     | _ when reduction.processed >= reduction.state.config.max_internal_events
       ->
-        Error "maximum internal event count exceeded"
+        Error
+          (Printf.sprintf "internal event count exceeds configured limit of %d"
+             reduction.state.config.max_internal_events)
     | item :: pending -> (
         let reduction =
           { reduction with pending; processed = reduction.processed + 1 }

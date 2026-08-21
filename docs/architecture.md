@@ -117,8 +117,9 @@ maps, or audit events. A required terminal record distinguishes completion from 
 
 External replay requires an empty batch schedule or empty streamed intent batches. The effectful
 supervisor launches an explicit argument vector, permits one request at a time, enforces a
-per-exchange timeout and 1 MiB response limit, then requires a clean child exit with no extra
-standard output. It records every accepted request and response in sequence. Failures preserve
+per-exchange timeout and 1 MiB message limit, then requires a clean child exit with no extra
+standard output. A response may contain at most 4,096 intents. It records every accepted request
+and response in sequence. Failures preserve
 the transcript and journal partials. After both writers close, publication links every final path
 without replacement before moving any partial path to a reserved cleanup name. Only after every
 move succeeds does the transaction unlink those cleanup names. A close or link failure rolls back

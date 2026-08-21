@@ -114,15 +114,23 @@ let append artifact contents =
         (diagnostic ~code:Diagnostic.Artifact_state
            ("cannot append to a closed " ^ state_label artifact.state))
   | Open file -> (
-      try
-        Boundary_effects.perform file.effects
-          (Boundary_effects.Write_artifact { channel = file.channel; contents })
-          (fun () -> output_string file.channel contents);
-        Boundary_effects.perform file.effects Boundary_effects.Flush_artifact
-          (fun () -> flush file.channel);
-        Ok ()
-      with exception_ ->
-        Error (exception_diagnostic ~label:file.label "append" exception_))
+      if String.length contents > Resource_limits.artifact_record_bytes then
+        Error
+          (diagnostic ~code:Diagnostic.Resource_limit
+             (Printf.sprintf "%s record is %d bytes; limit is %d bytes"
+                file.label (String.length contents)
+                Resource_limits.artifact_record_bytes))
+      else
+        try
+          Boundary_effects.perform file.effects
+            (Boundary_effects.Write_artifact
+               { channel = file.channel; contents })
+            (fun () -> output_string file.channel contents);
+          Boundary_effects.perform file.effects Boundary_effects.Flush_artifact
+            (fun () -> flush file.channel);
+          Ok ()
+        with exception_ ->
+          Error (exception_diagnostic ~label:file.label "append" exception_))
 
 let close_file artifact file =
   let closed = transition file in

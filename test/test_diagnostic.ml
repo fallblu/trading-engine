@@ -62,10 +62,40 @@ let preserves_sanitized_exception () =
     | `String value -> value
     | _ -> Alcotest.fail "expected target")
 
+let capabilities_publish_versioned_resource_limits () =
+  let limits =
+    T.Contract.capabilities_to_yojson () |> field "resource_limits"
+  in
+  Alcotest.(check string)
+    "resource contract version" T.Resource_limits.version
+    (match field "version" limits with
+    | `String value -> value
+    | _ -> Alcotest.fail "expected resource limit version");
+  List.iter
+    (fun (name, expected) ->
+      Alcotest.(check int)
+        name expected
+        (match field name limits with
+        | `Int value -> value
+        | _ -> Alcotest.fail ("expected integer limit: " ^ name)))
+    [
+      ("scenario_record_bytes", T.Resource_limits.scenario_record_bytes);
+      ("strategy_message_bytes", T.Resource_limits.strategy_message_bytes);
+      ("internal_events", T.Resource_limits.internal_events);
+      ("catalog_instruments", T.Resource_limits.catalog_instruments);
+      ("intents_per_batch", T.Resource_limits.intents_per_batch);
+      ("artifact_record_bytes", T.Resource_limits.artifact_record_bytes);
+    ];
+  Alcotest.(check string)
+    "resource diagnostic code" "resource.limit"
+    (T.Diagnostic.code_to_string T.Diagnostic.Resource_limit)
+
 let tests =
   [
     Alcotest.test_case "renders stable machine context" `Quick
       renders_stable_machine_context;
     Alcotest.test_case "preserves sanitized exception" `Quick
       preserves_sanitized_exception;
+    Alcotest.test_case "versioned resource capabilities" `Quick
+      capabilities_publish_versioned_resource_limits;
   ]
