@@ -196,3 +196,8 @@ A successful replay ends with exactly one `run_completed` record containing the 
 hash, reconciled valuation, and mutually exclusive order-status counts. A journal without that
 terminal record is incomplete. The requested journal path appears only after exclusive successful
 finalization; a failed run retains the `.partial` artifact.
+
+`--durable-artifacts` synchronizes staged contents before publication and containing-directory
+metadata after publication and partial cleanup. The filesystem must support hard links plus file
+and directory synchronization. Unsupported durability operations fail with `artifact.io` and do
+not silently fall back to buffered publication.

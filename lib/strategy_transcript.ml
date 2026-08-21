@@ -3,8 +3,9 @@ type t = { artifact : Artifact_writer.t; mutable next_sequence : int64 }
 let diagnostic ?sequence ~code message =
   Diagnostic.make ?sequence ~code ~phase:Diagnostic.Artifact message
 
-let create ?effects final_path =
-  Artifact_writer.create ?effects ~label:"strategy transcript" final_path
+let create ?effects ?durability final_path =
+  Artifact_writer.create ?effects ?durability ~label:"strategy transcript"
+    final_path
   |> Result.map (fun artifact -> { artifact; next_sequence = 1L })
 
 let append transcript ~direction message =

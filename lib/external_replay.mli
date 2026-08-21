@@ -21,6 +21,7 @@ type streamed_result = private {
 }
 
 val run :
+  ?durability:Artifact_writer.durability ->
   env:Eio_unix.Stdenv.base ->
   scenario_sha256:string ->
   journal_path:string ->
@@ -31,6 +32,7 @@ val run :
   (result, Diagnostic.t) Stdlib.result
 
 val run_stream :
+  ?durability:Artifact_writer.durability ->
   env:Eio_unix.Stdenv.base ->
   journal_path:string ->
   transcript_path:string ->

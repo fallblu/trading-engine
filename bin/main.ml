@@ -17,9 +17,10 @@ let count predicate values =
     (fun total value -> total + Bool.to_int (predicate value))
     0 values
 
-let run_replay scenario_sha256 scenario journal =
+let run_replay scenario_sha256 scenario journal durability =
   match
-    Trading_engine.Replay.run ~scenario_sha256 ~journal_path:journal scenario
+    Trading_engine.Replay.run ~scenario_sha256 ~journal_path:journal ~durability
+      scenario
   with
   | Error message -> Error message
   | Ok result ->
@@ -47,8 +48,10 @@ let run_replay scenario_sha256 scenario journal =
       Fmt.pr "journal=%s@." journal;
       Ok ()
 
-let run_stream input journal =
-  match Trading_engine.Replay.run_stream ~journal_path:journal input with
+let run_stream input journal durability =
+  match
+    Trading_engine.Replay.run_stream ~journal_path:journal ~durability input
+  with
   | Error message -> Error message
   | Ok result ->
       let active = count Trading_engine.Order.is_active result.orders in
@@ -80,12 +83,13 @@ type external_strategy = {
   transcript : string;
 }
 
-let run_external_replay environment scenario_sha256 scenario journal strategy =
+let run_external_replay environment scenario_sha256 scenario journal strategy
+    durability =
   match
-    Trading_engine.External_replay.run ~env:environment ~scenario_sha256
-      ~journal_path:journal ~transcript_path:strategy.transcript
-      ~strategy_command:strategy.command ~strategy_timeout:strategy.timeout
-      scenario
+    Trading_engine.External_replay.run ~durability ~env:environment
+      ~scenario_sha256 ~journal_path:journal
+      ~transcript_path:strategy.transcript ~strategy_command:strategy.command
+      ~strategy_timeout:strategy.timeout scenario
   with
   | Error message -> Error message
   | Ok result ->
@@ -114,9 +118,9 @@ let run_external_replay environment scenario_sha256 scenario journal strategy =
       Fmt.pr "strategy_transcript=%s@." strategy.transcript;
       Ok ()
 
-let run_external_stream environment input journal strategy =
+let run_external_stream environment input journal strategy durability =
   match
-    Trading_engine.External_replay.run_stream ~env:environment
+    Trading_engine.External_replay.run_stream ~durability ~env:environment
       ~journal_path:journal ~transcript_path:strategy.transcript
       ~strategy_command:strategy.command ~strategy_timeout:strategy.timeout
       input
@@ -147,7 +151,7 @@ let run_external_stream environment input journal strategy =
       Fmt.pr "strategy_transcript=%s@." strategy.transcript;
       Ok ()
 
-let execute_json environment input journal validate_only strategy =
+let execute_json environment input journal validate_only strategy durability =
   let document =
     try Ok (In_channel.with_open_bin input In_channel.input_all)
     with Sys_error message as exception_ ->
@@ -189,12 +193,12 @@ let execute_json environment input journal validate_only strategy =
                      "--journal is required unless --validate-only is set")
             | Some path -> (
                 match strategy with
-                | None -> run_replay scenario_sha256 scenario path
+                | None -> run_replay scenario_sha256 scenario path durability
                 | Some strategy ->
                     run_external_replay environment scenario_sha256 scenario
-                      path strategy)))
+                      path strategy durability)))
 
-let execute_jsonl environment input journal validate_only strategy =
+let execute_jsonl environment input journal validate_only strategy durability =
   if validate_only then
     match journal with
     | Some _ ->
@@ -215,14 +219,18 @@ let execute_jsonl environment input journal validate_only strategy =
         Error (cli_error "--journal is required unless --validate-only is set")
     | Some path -> (
         match strategy with
-        | None -> run_stream input path
-        | Some strategy -> run_external_stream environment input path strategy)
+        | None -> run_stream input path durability
+        | Some strategy ->
+            run_external_stream environment input path strategy durability)
 
 type input_format = Json | Jsonl
 
-let execute_scenario environment input journal validate_only strategy = function
-  | Json -> execute_json environment input journal validate_only strategy
-  | Jsonl -> execute_jsonl environment input journal validate_only strategy
+let execute_scenario environment input journal validate_only strategy durability
+    = function
+  | Json ->
+      execute_json environment input journal validate_only strategy durability
+  | Jsonl ->
+      execute_jsonl environment input journal validate_only strategy durability
 
 let external_strategy executable arguments timeout transcript =
   match (executable, transcript, arguments, timeout) with
@@ -244,7 +252,7 @@ let external_strategy executable arguments timeout transcript =
 
 let execute environment input journal validate_only capabilities input_format
     strategy_executable strategy_arguments strategy_timeout strategy_transcript
-    =
+    durable_artifacts =
   if capabilities then
     match
       ( input,
@@ -253,15 +261,18 @@ let execute environment input journal validate_only capabilities input_format
         strategy_executable,
         strategy_arguments,
         strategy_timeout,
-        strategy_transcript )
+        strategy_transcript,
+        durable_artifacts )
     with
-    | None, None, false, None, [], None, None ->
+    | None, None, false, None, [], None, None, false ->
         Fmt.pr "%s@." (Trading_engine.Contract.capabilities_to_string ());
         Ok ()
     | _ ->
         Error
           (cli_error
              "--capabilities cannot be combined with replay or strategy options")
+  else if validate_only && durable_artifacts then
+    Error (cli_error "--durable-artifacts cannot be used with --validate-only")
   else
     match input with
     | None ->
@@ -277,8 +288,12 @@ let execute environment input journal validate_only capabilities input_format
               (cli_error
                  "external strategy options cannot be used with --validate-only")
         | Ok strategy ->
+            let durability =
+              if durable_artifacts then Trading_engine.Artifact_writer.Durable
+              else Trading_engine.Artifact_writer.Buffered
+            in
             execute_scenario environment path journal validate_only strategy
-              input_format)
+              durability input_format)
 
 let input =
   let doc = "Read the replay scenario from $(docv)." in
@@ -296,6 +311,13 @@ let journal =
     value
     & opt (some string) None
     & info [ "journal"; "j" ] ~docv:"JOURNAL.jsonl" ~doc)
+
+let durable_artifacts =
+  let doc =
+    "Synchronize staged artifact contents and directory metadata before \
+     reporting success."
+  in
+  Arg.(value & flag & info [ "durable-artifacts" ] ~doc)
 
 let validate_only =
   let doc = "Validate the scenario and exit without creating a journal." in
@@ -374,15 +396,16 @@ let command environment =
           strategy_arguments
           strategy_timeout
           strategy_transcript
+          durable_artifacts
           diagnostic_format
         ->
           ( diagnostic_format,
             execute environment input journal validate_only capabilities
               input_format strategy_executable strategy_arguments
-              strategy_timeout strategy_transcript ))
+              strategy_timeout strategy_transcript durable_artifacts ))
       $ input $ journal $ validate_only $ capabilities $ input_format
       $ strategy_executable $ strategy_argument $ strategy_timeout
-      $ strategy_transcript $ diagnostic_format)
+      $ strategy_transcript $ durable_artifacts $ diagnostic_format)
 
 let () =
   Fmt_tty.setup_std_outputs ();

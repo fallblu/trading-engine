@@ -54,9 +54,9 @@ scenario slices and scheduled or external intents
 - Strict batch JSON and bounded-memory JSON Lines scenario parsing with JSON Schemas
 - Versioned synchronous JSON Lines strategy processes with per-request timeouts and strict
   lifecycle supervision
-- Complete bidirectional strategy transcripts with exclusive partial and no-replace publication
+- Complete bidirectional strategy transcripts with coordinated no-replace journal publication
 - Scenario SHA-256 binding in `run_started` and `run_completed`
-- Exclusive partial journal creation and atomic no-replace finalization
+- Exclusive partial artifact creation with optional file and directory synchronization
 - Unit, schema-conformance, scenario, golden-contract, and property tests
 
 ## Quick start
@@ -142,6 +142,10 @@ CLI binds that exact-byte hash into the journal. It writes to the partial path a
 requested path only after `run_completed` is fully written and the partial file is closed. An
 error preserves the partial artifact for diagnosis.
 
+Pass `--durable-artifacts` to synchronize each staged file before publication and synchronize each
+containing directory after final links and partial cleanup. The default buffered mode flushes every
+record but does not make a restart-durability claim.
+
 ## Execution summary
 
 An order emitted after slice `n` cannot execute on slice `n`. It first becomes eligible on a later
@@ -174,12 +178,13 @@ The current scope omits:
 - External execution-report ingestion
 - Exchange calendars and time-zone databases
 - Durable reducer snapshots and broker reconciliation
-- `fsync` and restart recovery for journals
 - Tick, trade, and order-book replay
 
-The journal writer flushes each record, creates its partial file exclusively, and finalizes with an
-exclusive hard link. It does not call `fsync`, so the journal is an audit artifact rather than a
-production recovery log.
+Artifact publication requires a filesystem that supports exclusive file creation, hard links, and
+atomic unlink. Durable mode additionally requires file and directory synchronization. An
+unsupported synchronization operation returns `artifact.io`, never reports success, and preserves
+or restores partial names for diagnosis. Durable artifacts strengthen publication persistence; they
+do not provide reducer snapshots or restart recovery.
 
 ## Architecture and contracts
 

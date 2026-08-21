@@ -14,6 +14,7 @@ val with_staged_session :
 
 val with_session :
   ?effects:Boundary_effects.t ->
+  ?durability:Artifact_writer.durability ->
   env:Eio_unix.Stdenv.base ->
   command:string list ->
   timeout:float ->
