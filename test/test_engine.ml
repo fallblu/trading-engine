@@ -8,5 +8,6 @@ let () =
       ("reducer", Test_reducer.tests);
       ("checkpoint4", Test_checkpoint4.tests);
       ("strategy-protocol", Test_strategy_protocol.tests);
+      ("boundary-failures", Test_boundary_failures.tests);
       ("scenario", Test_scenario.tests);
     ]
