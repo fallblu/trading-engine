@@ -29,11 +29,16 @@ Event payloads cover completed market slices, fills, order updates, and rejected
 intents use the scenario v3 intent shapes.
 
 External replay requires an empty batch schedule and empty streamed intent batches. The engine
-records both directions in a deterministic transcript. The transcript and audit journal retain
-partial files after failure and finalize only after their respective success checks.
+records accepted messages in both directions in a deterministic transcript. A response rejected
+for invalid JSON, fields, version, sequence, EOF, or size is never stored as an accepted exchange.
+Instead, the partial transcript ends with a `rejected_strategy_response` diagnostic record. Version
+1 includes the structured rejection diagnostic and at most the first 256 raw response bytes encoded
+as lowercase hexadecimal. `observed_bytes` counts bytes available when the engine rejected the
+response, and `truncated` reports whether the prefix omits observed bytes. The transcript and audit
+journal retain partial files after failure and finalize only after their respective success checks.
 
 - `message.schema.json` validates individual requests and responses.
-- `transcript.schema.json` validates retained transcript records.
+- `transcript.schema.json` validates accepted exchanges and rejected-response diagnostics.
 - `fixtures/external.scenario.json` is the batch replay fixture.
 - `fixtures/external.scenario.jsonl` is its bounded-memory stream form.
 - `fixtures/external.strategy.jsonl` is the canonical protocol transcript.
