@@ -12,3 +12,4 @@ val append :
 
 val close_preserving_partial : t -> unit
 val commit : t -> (unit, Diagnostic.t) result
+val artifact : t -> Artifact_writer.t
