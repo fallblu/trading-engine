@@ -146,11 +146,13 @@ unrealized P&L   = net market value - remaining base cost basis
 equity           = base cash + net market value
 ```
 
-Each valuation also emits one deterministic attribution row per marked instrument. Row market
-value, basis, realized P&L, dividend P&L, execution fees, and borrow fees is present in both native
-and base values and sums exactly to the corresponding account totals. A separate row attributes
-each currency ledger. Closed instruments retain cumulative realized P&L and fees with zero
-quantity and basis.
+Each valuation also emits one deterministic attribution row per marked instrument or retained
+account position. A nonzero position requires a mark. A flat retained position does not; when its
+mark is omitted, the row uses the canonical mark one because every mark produces zero market value
+for zero quantity. Row market value, basis, realized P&L, dividend P&L, execution fees, and borrow
+fees is present in both native and base values and sums exactly to the corresponding account totals.
+A separate row attributes each currency ledger. Closed instruments retain cumulative realized P&L
+and fees with zero quantity and basis.
 
 The valuation includes initial and maintenance requirements and excesses. After strategy and
 target processing, negative maintenance excess triggers one `margin_call`, cancels all active

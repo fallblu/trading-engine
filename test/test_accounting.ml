@@ -78,6 +78,67 @@ let exact_cost_basis_and_pnl () =
         closed.total_fees attribution.total_fees
   | _ -> Alcotest.fail "expected the closed position attribution to persist"
 
+let flat_attribution_does_not_require_a_mark () =
+  let account = test_account () in
+  let account =
+    apply_trade account ~id:"buy" ~side:T.Order.Buy ~quantity_value:"2"
+      ~price_value:"100" ~fee_value:"1"
+  in
+  let account =
+    T.Account.apply_cash_dividend account
+      ~instrument_id:(instrument_id "test-equity")
+      ~quote_currency:"USD" ~amount_per_unit:(money "3")
+    |> ok
+  in
+  let account =
+    apply_trade account ~id:"sell-long" ~side:T.Order.Sell ~quantity_value:"2"
+      ~price_value:"110" ~fee_value:"1"
+  in
+  let account =
+    apply_trade account ~id:"sell-short" ~side:T.Order.Sell ~quantity_value:"1"
+      ~price_value:"100" ~fee_value:"1"
+  in
+  let account =
+    T.Account.apply_borrow_fee account
+      ~instrument_id:(instrument_id "test-equity")
+      ~quote_currency:"USD" ~fee:(money "2")
+    |> ok
+  in
+  let account =
+    apply_trade account ~id:"cover" ~side:T.Order.Buy ~quantity_value:"1"
+      ~price_value:"90" ~fee_value:"1"
+  in
+  let valuation = account_value account ~marks:[] in
+  let attribution =
+    match valuation.positions with
+    | [ value ] -> value
+    | _ -> Alcotest.fail "expected one flat position attribution"
+  in
+  Alcotest.check quantity_testable "flat quantity" T.Scalar.Quantity.zero
+    attribution.quantity;
+  Alcotest.check price_testable "canonical flat mark" (price "1")
+    attribution.mark;
+  Alcotest.check money_testable "attributed realized P&L" (money "30")
+    attribution.realized_pnl;
+  Alcotest.check money_testable "attributed dividend P&L" (money "6")
+    attribution.dividend_pnl;
+  Alcotest.check money_testable "attributed execution fees" (money "4")
+    attribution.execution_fees;
+  Alcotest.check money_testable "attributed borrow fees" (money "2")
+    attribution.borrow_fees;
+  Alcotest.check money_testable "attributed total fees" (money "6")
+    attribution.total_fees;
+  Alcotest.check money_testable "aggregate realized P&L"
+    attribution.base_realized_pnl valuation.realized_pnl;
+  Alcotest.check money_testable "aggregate dividend P&L"
+    attribution.base_dividend_pnl valuation.dividend_pnl;
+  Alcotest.check money_testable "aggregate execution fees"
+    attribution.base_execution_fees valuation.execution_fees;
+  Alcotest.check money_testable "aggregate borrow fees"
+    attribution.base_borrow_fees valuation.borrow_fees;
+  Alcotest.check money_testable "aggregate total fees"
+    attribution.base_total_fees valuation.total_fees
+
 let sell_opens_short_position () =
   let account = test_account ~initial_cash:[ ("USD", money "1000") ] () in
   let sell =
@@ -196,6 +257,8 @@ let tests =
   [
     Alcotest.test_case "exact cost basis and P&L" `Quick
       exact_cost_basis_and_pnl;
+    Alcotest.test_case "flat attribution does not require a mark" `Quick
+      flat_attribution_does_not_require_a_mark;
     Alcotest.test_case "sell opens a short position" `Quick
       sell_opens_short_position;
     Alcotest.test_case "fills settle to explicit margin cash" `Quick
