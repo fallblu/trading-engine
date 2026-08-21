@@ -682,9 +682,9 @@ let validate_slices ~base_currency ~currencies ~instruments slices =
         then Error "market slice sequence must increase"
         else if
           Option.exists
-            (fun end_at -> Ptime.compare market_slice.end_at end_at <= 0)
+            (fun end_at -> Ptime.compare market_slice.start_at end_at < 0)
             previous_end
-        then Error "market slice end must increase"
+        then Error "market slice start must not precede previous end"
         else if
           Option.exists
             (fun received_at ->
