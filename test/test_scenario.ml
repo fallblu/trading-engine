@@ -264,6 +264,65 @@ let map_field key change = function
            fields)
   | _ -> Alcotest.fail "expected object"
 
+let dense_schedule_document slice_count =
+  let base = timestamp "2026-02-01T00:00:00Z" in
+  let slices =
+    List.init slice_count (fun offset ->
+        let index = offset + 1 in
+        let time_offset = offset * 4 in
+        T.Market_slice.create ~slice_sequence:(Int64.of_int index)
+          ~start_at:(add_seconds base time_offset)
+          ~end_at:(add_seconds base (time_offset + 1))
+          ~available_at:(add_seconds base (time_offset + 2))
+          ~received_at:(add_seconds base (time_offset + 3))
+          ~bars:
+            [
+              bar
+                ~instrument:(instrument_id "demo-equity-acme")
+                (Int64.of_int index);
+            ]
+          ~fx_rates:[ fx_mark () ]
+          ~corporate_actions:[]
+        |> ok |> T.Codec.market_slice_to_yojson)
+  in
+  let schedule =
+    List.init slice_count (fun offset ->
+        let sequence = offset + 1 in
+        `Assoc
+          [
+            ("after_slice_sequence", `String (string_of_int sequence));
+            ( "intents",
+              `List
+                [
+                  `Assoc
+                    [
+                      ("type", `String "emit_metric");
+                      ("name", `String "dense_schedule");
+                      ("value", `String (string_of_int sequence));
+                    ];
+                ] );
+          ])
+  in
+  map_root (fun fields ->
+      List.map
+        (fun (name, value) ->
+          if String.equal name "slices" then (name, `List slices)
+          else if String.equal name "schedule" then (name, `List schedule)
+          else (name, value))
+        fields)
+
+let dense_batch_schedule_validation_scales () =
+  let slice_count = 20_000 in
+  let scenario =
+    dense_schedule_document slice_count |> T.Scenario.of_yojson |> ok
+  in
+  Alcotest.(check int)
+    "all slices retained" slice_count
+    (List.length scenario.slices);
+  Alcotest.(check int)
+    "all schedule entries retained" slice_count
+    (List.length scenario.schedule)
+
 let configured_resources_are_bounded () =
   let document = Yojson.Safe.from_string (demo_document ()) in
   let check_limit expected_path changed =
@@ -390,7 +449,29 @@ let invalid_schedule_sequences_are_rejected () =
   in
   Alcotest.(check string)
     "duplicate schedule rejected" "schedule sequences must increase"
-    (T.Scenario.of_yojson duplicate |> diagnostic_message)
+    (T.Scenario.of_yojson duplicate |> diagnostic_message);
+  let late_anchor =
+    map_root (fun fields ->
+        List.map
+          (fun (name, json) ->
+            if String.equal name "slices" then
+              match json with
+              | `List (first :: second :: rest) ->
+                  ( name,
+                    `List
+                      (first
+                      :: change_field "start_at"
+                           (`String "2026-01-02T21:00:01Z") second
+                      :: rest) )
+              | _ -> Alcotest.fail "demo must contain at least two slices"
+            else (name, json))
+          fields)
+  in
+  Alcotest.(check string)
+    "late anchor diagnosed"
+    "scheduled order intent after slice 1 is received after the next \
+     executable market slice starts"
+    (T.Scenario.of_yojson late_anchor |> diagnostic_message)
 
 let duplicate_and_incomplete_slice_bars_are_rejected () =
   let duplicate =
@@ -934,6 +1015,8 @@ let tests =
       configured_resources_are_bounded;
     Alcotest.test_case "invalid schedule sequences rejected" `Quick
       invalid_schedule_sequences_are_rejected;
+    Alcotest.test_case "dense batch schedule validation" `Slow
+      dense_batch_schedule_validation_scales;
     Alcotest.test_case "duplicate slice bars rejected" `Quick
       duplicate_and_incomplete_slice_bars_are_rejected;
     Alcotest.test_case "market slice timeline is non-overlapping" `Quick

@@ -214,5 +214,6 @@ do not provide reducer snapshots or restart recovery.
 - [Strategy message JSON Schema](contracts/strategy/v3/message.schema.json)
 - [Strategy transcript JSON Schema](contracts/strategy/v3/transcript.schema.json)
 - [Execution model](docs/execution-model.md)
+- [Performance](docs/performance.md)
 - [Persistra integration](docs/persistra.md)
 - [Contributing](CONTRIBUTING.md)

@@ -33,6 +33,7 @@ type stream_item = {
 }
 
 module Int64_set = Set.Make (Int64)
+module Int64_map = Map.Make (Int64)
 module String_set = Set.Make (String)
 
 let ( let* ) result function_ =
@@ -774,50 +775,46 @@ let validate_slices ~base_currency ~currencies ~instruments slices =
   validate None None None Id.Corporate_action.Set.empty slices
 
 let validate_schedule risk catalog schedule slices =
-  let slice_sequences =
-    List.fold_left
-      (fun sequences market_slice ->
-        Int64_set.add market_slice.Market_slice.slice_sequence sequences)
-      Int64_set.empty slices
+  let rec index_slices index = function
+    | [] -> index
+    | [ anchor ] ->
+        Int64_map.add anchor.Market_slice.slice_sequence (anchor, None) index
+    | anchor :: (next :: _ as remaining) ->
+        let index =
+          Int64_map.add anchor.Market_slice.slice_sequence (anchor, Some next)
+            index
+        in
+        index_slices index remaining
   in
-  let slice_at sequence =
-    List.find_opt
-      (fun market_slice ->
-        Int64.equal market_slice.Market_slice.slice_sequence sequence)
-      slices
-  in
-  let next_slice sequence =
-    List.find_opt
-      (fun market_slice ->
-        Int64.compare market_slice.Market_slice.slice_sequence sequence > 0)
-      slices
-  in
+  let slice_index = index_slices Int64_map.empty slices in
   let validate_item sequence intents =
     if Int64.compare sequence 0L <= 0 then
       Error "scheduled slice sequence must be positive"
-    else if not (Int64_set.mem sequence slice_sequences) then
-      Error
-        (Printf.sprintf
-           "scheduled intents refer to missing market slice sequence %Ld"
-           sequence)
     else
-      let* () =
-        List.fold_left
-          (fun result intent ->
-            let* () = result in
-            validate_portfolio_target risk catalog intent)
-          (Ok ()) intents
-      in
-      match (slice_at sequence, next_slice sequence) with
-      | Some anchor, Some next
-        when List.exists changes_orders intents
-             && Ptime.compare anchor.received_at next.start_at > 0 ->
+      match Int64_map.find_opt sequence slice_index with
+      | None ->
           Error
             (Printf.sprintf
-               "scheduled order intent after slice %Ld is received after the \
-                next executable market slice starts"
+               "scheduled intents refer to missing market slice sequence %Ld"
                sequence)
-      | _ -> Ok ()
+      | Some (anchor, next) -> (
+          let* () =
+            List.fold_left
+              (fun result intent ->
+                let* () = result in
+                validate_portfolio_target risk catalog intent)
+              (Ok ()) intents
+          in
+          match next with
+          | Some next
+            when List.exists changes_orders intents
+                 && Ptime.compare anchor.received_at next.start_at > 0 ->
+              Error
+                (Printf.sprintf
+                   "scheduled order intent after slice %Ld is received after \
+                    the next executable market slice starts"
+                   sequence)
+          | None | Some _ -> Ok ())
   in
   let rec validate previous = function
     | [] -> Ok ()

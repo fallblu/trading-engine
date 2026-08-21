@@ -82,6 +82,10 @@ Schedule sequences and slice sequences are positive and strictly increasing. Eve
 anchors to an existing slice. A scheduled order-changing intent must be received no later than the
 next slice start.
 
+Batch validation indexes each slice together with its successor in an ordered map. Building that
+index costs `O(s log s)` for `s` slices, and each of the `m` scheduled sequence lookups costs
+`O(log s)`. Validation does not rescan the slice list for each schedule entry.
+
 ## Determinism
 
 Determinism depends on:
@@ -110,6 +114,11 @@ for a slice use its receipt time, completed bars, and FX vector. A callback resp
 before any later callback or eligible order, so the next context exposes its effects.
 Positive-equity accounts expose realized portfolio weights; zero- and negative-equity accounts
 explicitly omit weights.
+
+Reducer feedback uses an immutable two-list queue. Adding generated notifications to the tail and
+removing the next item are amortized constant-time operations. Prepending one callback's response
+costs only the size of that response. Queue representation changes do not affect processing order
+or the exact `max_internal_events` count.
 
 The JSON Lines runner hashes and validates the complete stream before journal creation. It then
 replays one slice-plus-intents record at a time and does not accumulate market slices, schedule
