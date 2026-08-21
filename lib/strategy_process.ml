@@ -2,12 +2,26 @@ type t = {
   input : Eio.Flow.sink_ty Eio.Resource.t;
   close_input : unit -> unit;
   output : Eio.Buf_read.t;
-  await_process : unit -> Eio.Process.exit_status;
+  child : child;
   clock : float Eio.Time.clock_ty Eio.Resource.t;
   transcript : Strategy_transcript.t;
   timeout : float;
   mutable next_sequence : int64;
 }
+
+and child = {
+  process : Eio_unix.Process.ty Eio.Resource.t;
+  pgid : int;
+  clock : float Eio.Time.clock_ty Eio.Resource.t;
+  mutable status : Eio.Process.exit_status option;
+}
+
+external enable_child_subreaper : unit -> int
+  = "trading_engine_enable_child_subreaper"
+
+let graceful_termination_timeout = 1.0
+let forced_reap_timeout = 5.0
+let process_poll_interval = 0.01
 
 let ( let* ) result function_ =
   match result with Ok value -> function_ value | Error _ as error -> error
@@ -28,6 +42,113 @@ let exception_message stage exception_ =
   | Eio.Buf_read.Buffer_limit_exceeded ->
       stage ^ ": strategy response exceeds the maximum message size"
   | _ -> stage ^ ": " ^ Printexc.to_string exception_
+
+let await_child (child : child) =
+  match child.status with
+  | Some status -> status
+  | None ->
+      let status = Eio.Process.await child.process in
+      child.status <- Some status;
+      status
+
+let await_child_for (child : child) timeout =
+  match child.status with
+  | Some _ as status -> status
+  | None -> (
+      try
+        match
+          Eio.Time.with_timeout child.clock timeout (fun () ->
+              Ok (await_child child))
+        with
+        | Ok status -> Some status
+        | Error `Timeout -> None
+      with exception_ ->
+        raise
+          (Failure
+             (exception_message "waiting for external strategy" exception_)))
+
+let process_group_exists pgid =
+  try
+    Unix.kill (-pgid) 0;
+    true
+  with
+  | Unix.Unix_error (Unix.ESRCH, _, _) -> false
+  | Unix.Unix_error (Unix.EPERM, _, _) -> true
+
+let signal_process_group pgid signal =
+  try
+    Unix.kill (-pgid) signal;
+    Ok ()
+  with
+  | Unix.Unix_error (Unix.ESRCH, _, _) -> Ok ()
+  | Unix.Unix_error (code, operation, target) ->
+      Error
+        (Printf.sprintf
+           "could not signal external strategy process group: %s(%s): %s"
+           operation target (Unix.error_message code))
+
+let rec reap_descendants pgid =
+  try
+    match Unix.waitpid [ Unix.WNOHANG ] (-pgid) with
+    | 0, _ -> ()
+    | _, _ -> reap_descendants pgid
+  with Unix.Unix_error (Unix.ECHILD, _, _) -> ()
+
+let rec wait_for_process_group (child : child) deadline =
+  reap_descendants child.pgid;
+  if not (process_group_exists child.pgid) then true
+  else
+    let remaining = deadline -. Eio.Time.now child.clock in
+    if Float.compare remaining 0.0 <= 0 then false
+    else (
+      Eio.Time.sleep child.clock (Float.min process_poll_interval remaining);
+      wait_for_process_group child deadline)
+
+let terminate_process_group (child : child) =
+  Eio.Cancel.protect (fun () ->
+      let graceful_deadline =
+        Eio.Time.now child.clock +. graceful_termination_timeout
+      in
+      let* () = signal_process_group child.pgid Sys.sigterm in
+      let direct_status =
+        match child.status with
+        | Some _ as status -> status
+        | None ->
+            let remaining = graceful_deadline -. Eio.Time.now child.clock in
+            if Float.compare remaining 0.0 <= 0 then None
+            else await_child_for child remaining
+      in
+      let group_stopped =
+        match direct_status with
+        | None -> false
+        | Some _ -> wait_for_process_group child graceful_deadline
+      in
+      if group_stopped then Ok ()
+      else
+        let forced_deadline = Eio.Time.now child.clock +. forced_reap_timeout in
+        let* () = signal_process_group child.pgid Sys.sigkill in
+        let direct_status =
+          match direct_status with
+          | Some _ as status -> status
+          | None -> await_child_for child forced_reap_timeout
+        in
+        match direct_status with
+        | None ->
+            Error "external strategy did not exit after forced termination"
+        | Some _ ->
+            if wait_for_process_group child forced_deadline then Ok ()
+            else
+              Error
+                "external strategy descendants remained after forced \
+                 termination")
+
+let append_cleanup_error result child =
+  match terminate_process_group child with
+  | Ok () -> result
+  | Error cleanup -> (
+      match result with
+      | Ok _ -> Error cleanup
+      | Error message -> Error (message ^ "; " ^ cleanup))
 
 let exchange session ~stage ~expected_sequence request =
   let* () =
@@ -103,7 +224,7 @@ let await_exit session =
     try
       match
         Eio.Time.with_timeout session.clock session.timeout (fun () ->
-            Ok (session.await_process ()))
+            Ok (await_child session.child))
       with
       | Ok status -> Ok status
       | Error `Timeout -> Error "external strategy did not exit after shutdown"
@@ -113,7 +234,21 @@ let await_exit session =
   let* status = status in
   match status with
   | `Exited 0 -> (
-      match Eio.Buf_read.peek_char session.output with
+      let* () = terminate_process_group session.child in
+      let trailing_output =
+        try
+          match
+            Eio.Time.with_timeout session.clock session.timeout (fun () ->
+                Ok (Eio.Buf_read.peek_char session.output))
+          with
+          | Ok value -> Ok value
+          | Error `Timeout ->
+              Error "external strategy stdout did not close after exit"
+        with exception_ ->
+          Error (exception_message "reading final strategy output" exception_)
+      in
+      let* trailing_output = trailing_output in
+      match trailing_output with
       | None -> Ok ()
       | Some _ ->
           Error "external strategy wrote data after its stopped response")
@@ -143,19 +278,31 @@ let with_session ~env ~command ~timeout ~transcript_path
               let result =
                 Eio.Switch.run ~name:"external-strategy" @@ fun switch ->
                 let process_manager = Eio.Stdenv.process_mgr env in
-                let child_stdout, strategy_stdout =
-                  Eio.Process.pipe ~sw:switch process_manager
-                in
-                let strategy_stdin, child_stdin =
-                  Eio.Process.pipe ~sw:switch process_manager
+                if enable_child_subreaper () <> 0 then
+                  failwith "could not enable external strategy child reaping";
+                let child_stdout, strategy_stdout = Eio_unix.pipe switch in
+                let strategy_stdin, child_stdin = Eio_unix.pipe switch in
+                let fds =
+                  [
+                    (0, Eio_unix.Resource.fd strategy_stdin, `Blocking);
+                    (1, Eio_unix.Resource.fd strategy_stdout, `Blocking);
+                    (2, Eio_unix.Resource.fd (Eio.Stdenv.stderr env), `Blocking);
+                  ]
                 in
                 let process =
-                  Eio.Process.spawn ~sw:switch process_manager
-                    ~stdin:strategy_stdin ~stdout:strategy_stdout
-                    ~stderr:(Eio.Stdenv.stderr env) ~executable command
+                  Eio_unix.Process.spawn_unix ~sw:switch process_manager ~pgid:0
+                    ~fds ~executable command
                 in
                 Eio.Flow.close strategy_stdin;
                 Eio.Flow.close strategy_stdout;
+                let child =
+                  {
+                    process;
+                    pgid = Eio.Process.pid process;
+                    clock = Eio.Stdenv.clock env;
+                    status = None;
+                  }
+                in
                 let close_input () = Eio.Flow.close child_stdin in
                 let session =
                   {
@@ -165,18 +312,28 @@ let with_session ~env ~command ~timeout ~transcript_path
                       Eio.Buf_read.of_flow
                         ~max_size:(Strategy_protocol.max_message_bytes + 1)
                         child_stdout;
-                    await_process = (fun () -> Eio.Process.await process);
+                    child;
                     clock = Eio.Stdenv.clock env;
                     transcript;
                     timeout;
                     next_sequence = 1L;
                   }
                 in
-                let* identity = initialize session initialization in
-                let* value = use session in
-                let* () = shutdown session in
-                let* () = await_exit session in
-                Ok (value, identity)
+                try
+                  let result =
+                    let* identity = initialize session initialization in
+                    let* value = use session in
+                    let* () = shutdown session in
+                    let* () = await_exit session in
+                    Ok (value, identity)
+                  in
+                  match result with
+                  | Ok _ -> result
+                  | Error _ -> append_cleanup_error result child
+                with exception_ ->
+                  let backtrace = Printexc.get_raw_backtrace () in
+                  ignore (terminate_process_group child);
+                  Printexc.raise_with_backtrace exception_ backtrace
               in
               match result with
               | Error _ as error -> fail error
@@ -184,7 +341,12 @@ let with_session ~env ~command ~timeout ~transcript_path
                   match Strategy_transcript.commit transcript with
                   | Ok () -> Ok value
                   | Error _ as error -> error)
-            with exception_ ->
-              fail
-                (Error
-                   (exception_message "external strategy process" exception_))))
+            with
+            | Eio.Cancel.Cancelled _ as exception_ ->
+                Strategy_transcript.close_preserving_partial transcript;
+                raise exception_
+            | exception_ ->
+                fail
+                  (Error
+                     (exception_message "external strategy process" exception_))
+            ))
