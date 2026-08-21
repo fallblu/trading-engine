@@ -18,7 +18,8 @@ let audit_context event =
         Some (Id.Order.to_string order.Order.id)
     | Order_cancelled { order; _ } -> Some (Id.Order.to_string order.id)
     | Fill_applied fill -> Some (Id.Order.to_string fill.Fill.order_id)
-    | Margin_limited { order_id; _ } -> Some (Id.Order.to_string order_id)
+    | Margin_limited { order_id; _ } | Fill_clipped { order_id; _ } ->
+        Some (Id.Order.to_string order_id)
     | _ -> None
   in
   (event_id, order_id, causation_ids)
