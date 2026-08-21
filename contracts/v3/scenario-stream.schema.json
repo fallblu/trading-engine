@@ -2,6 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/fallblu/trading-engine/contracts/v3/scenario-stream.schema.json",
   "title": "Trading Engine v3 replay scenario stream record",
+  "description": "Market-slice records are ordered and non-overlapping: each start_at is at or after the prior end_at. Equal boundaries are valid. This cross-record rule is enforced semantically.",
   "oneOf": [
     { "$ref": "#/$defs/headerRecord" },
     { "$ref": "#/$defs/sliceRecord" },

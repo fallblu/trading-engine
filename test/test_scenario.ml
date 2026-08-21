@@ -241,6 +241,40 @@ let map_field key change = function
            fields)
   | _ -> Alcotest.fail "expected object"
 
+let scenario_with_second_slice_start start_at =
+  map_root (fun fields ->
+      List.map
+        (fun (name, json) ->
+          if String.equal name "schedule" then (name, `List [])
+          else if String.equal name "slices" then
+            match json with
+            | `List (first :: second :: rest) ->
+                ( name,
+                  `List
+                    (first
+                    :: change_field "start_at" (`String start_at) second
+                    :: rest) )
+            | _ -> Alcotest.fail "demo must contain at least two slices"
+          else (name, json))
+        fields)
+
+let market_slice_timeline_is_non_overlapping () =
+  List.iter
+    (fun (label, start_at) ->
+      Alcotest.(check string)
+        label "market slice start must not precede previous end"
+        (scenario_with_second_slice_start start_at
+        |> T.Scenario.of_yojson |> error))
+    [
+      ("backward start rejected", "2026-01-01T14:30:00Z");
+      ("overlapping start rejected", "2026-01-02T20:00:00Z");
+    ];
+  Alcotest.(check bool)
+    "equal boundary accepted" true
+    (Result.is_ok
+       (scenario_with_second_slice_start "2026-01-02T21:00:00Z"
+       |> T.Scenario.of_yojson))
+
 let invalid_schedule_sequences_are_rejected () =
   let zero =
     update_first_schedule (change_field "after_slice_sequence" (`String "0"))
@@ -627,6 +661,39 @@ let streamed_contract_requires_ordered_terminal_records () =
         "scenario_sequence must be contiguous and start at one"
         (T.Replay.run_stream path |> error))
 
+let stream_with_second_slice_start start_at =
+  stream_records ()
+  |> List.mapi (fun index line ->
+      let record = Yojson.Safe.from_string line in
+      let changed =
+        if index = 1 then
+          map_field "payload" (change_field "intents" (`List [])) record
+        else if index = 2 then
+          map_field "payload"
+            (map_field "market_slice"
+               (change_field "start_at" (`String start_at)))
+            record
+        else record
+      in
+      Yojson.Safe.to_string changed)
+
+let streamed_market_slice_timeline_is_non_overlapping () =
+  List.iter
+    (fun (label, start_at) ->
+      with_stream (stream_with_second_slice_start start_at) (fun path ->
+          Alcotest.(check string)
+            label "market slice start must not precede previous end"
+            (T.Replay.run_stream path |> error)))
+    [
+      ("backward start rejected", "2026-01-01T14:30:00Z");
+      ("overlapping start rejected", "2026-01-02T20:00:00Z");
+    ];
+  with_stream (stream_with_second_slice_start "2026-01-02T21:00:00Z")
+    (fun path ->
+      Alcotest.(check bool)
+        "equal boundary accepted" true
+        (Result.is_ok (T.Replay.run_stream path)))
+
 let streamed_intents_are_causal_before_execution () =
   let changed =
     stream_records ()
@@ -680,6 +747,8 @@ let tests =
       invalid_schedule_sequences_are_rejected;
     Alcotest.test_case "duplicate slice bars rejected" `Quick
       duplicate_and_incomplete_slice_bars_are_rejected;
+    Alcotest.test_case "market slice timeline is non-overlapping" `Quick
+      market_slice_timeline_is_non_overlapping;
     Alcotest.test_case "portfolio target validation" `Quick
       portfolio_targets_are_total_and_aligned;
     Alcotest.test_case "execution model required and supported" `Quick
@@ -703,6 +772,8 @@ let tests =
       streamed_replay_matches_batch_semantics;
     Alcotest.test_case "stream requires ordered terminal records" `Quick
       streamed_contract_requires_ordered_terminal_records;
+    Alcotest.test_case "streamed market slice timeline is non-overlapping"
+      `Quick streamed_market_slice_timeline_is_non_overlapping;
     Alcotest.test_case "streamed intents are causal" `Quick
       streamed_intents_are_causal_before_execution;
     Alcotest.test_case "large stream avoids retained audit history" `Slow

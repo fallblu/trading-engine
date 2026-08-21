@@ -149,11 +149,12 @@ Audit timestamps use the same boundary.
 ```
 
 Use `null` volume when unavailable; it means unlimited simulation capacity, not zero. Sequences
-are positive and strictly increasing. End times strictly increase and receipt time never moves
-backward. Start precedes end, availability does not precede end, and receipt does not precede
-availability. OHLC values satisfy their usual range relationships. Volume may be fractional but
-must align to the instrument lot. Each slice supplies exactly one positive FX rate for every
-scenario currency, and the base-currency rate is exactly one.
+are positive and strictly increasing. Slices do not overlap: each start is at or after the prior
+end, so equal boundaries are valid. Receipt time never moves backward. Start precedes end,
+availability does not precede end, and receipt does not precede availability. OHLC values satisfy
+their usual range relationships. Volume may be fractional but must align to the instrument lot.
+Each slice supplies exactly one positive FX rate for every scenario currency, and the
+base-currency rate is exactly one.
 
 Supported corporate actions are exact-ratio `split` and per-unit `cash_dividend` records. Action
 IDs are unique across the scenario. Actions are applied in canonical ID order before borrow fees

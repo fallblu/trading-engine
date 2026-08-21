@@ -275,6 +275,42 @@ let external_ordering_is_validated () =
     "slice sequence cannot repeat" true
     (Result.is_error (Runner.process_slice state (market_slice 2L)))
 
+let interactive_market_slice_timeline_is_non_overlapping () =
+  let config = engine_config () in
+  let initial =
+    T.Engine.Interactive.create ~run_id:(run_id "timeline-test")
+      ~scenario_sha256 ~config
+      ~initial_cash:[ ("USD", money "10000") ]
+    |> ok
+  in
+  let rec finish progress =
+    match T.Engine.Interactive.strategy_request progress with
+    | Some _ -> T.Engine.Interactive.resume progress [] |> ok |> finish
+    | None -> (
+        match T.Engine.Interactive.slice_result progress with
+        | Some (state, _) -> state
+        | None -> Alcotest.fail "expected completed interactive slice")
+  in
+  let state =
+    T.Engine.Interactive.process_slice initial (market_slice 1L) |> ok |> finish
+  in
+  List.iter
+    (fun (label, start_at) ->
+      Alcotest.(check string)
+        label "market slice start must not precede previous end"
+        (T.Engine.Interactive.process_slice state
+           (market_slice ~start_at:(timestamp start_at) 2L)
+        |> error))
+    [
+      ("backward start rejected", "2026-01-01T14:30:00Z");
+      ("overlapping start rejected", "2026-01-02T20:00:00Z");
+    ];
+  Alcotest.(check bool)
+    "equal boundary accepted" true
+    (Result.is_ok
+       (T.Engine.Interactive.process_slice state
+          (market_slice ~start_at:(timestamp "2026-01-02T21:00:00Z") 2L)))
+
 module Looping_strategy = struct
   type state = T.Order.request
 
@@ -468,6 +504,8 @@ let tests =
       sells_precede_buys_in_the_same_slice;
     Alcotest.test_case "external ordering validation" `Quick
       external_ordering_is_validated;
+    Alcotest.test_case "interactive market slice timeline is non-overlapping"
+      `Quick interactive_market_slice_timeline_is_non_overlapping;
     Alcotest.test_case "internal feedback cap" `Quick
       internal_feedback_is_capped;
     Alcotest.test_case "exact internal event limit" `Quick
