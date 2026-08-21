@@ -407,8 +407,8 @@ let one_valuation_per_slice () =
 module No_fill_execution = struct
   let name = "test_no_fill"
 
-  let fold_slice _execution ~instruments:_ ~oms:_ _slice ~init ~apply:_ =
-    Ok (init, [])
+  let start_slice _execution ~instruments:_ ~oms:_ _slice =
+    Ok (T.Execution.finished [])
 end
 
 let configured_execution_model_is_dispatched () =
@@ -436,6 +436,181 @@ let configured_execution_model_is_dispatched () =
       Alcotest.(check string)
         "selected model is audited" No_fill_execution.name actual
   | _ -> Alcotest.fail "expected run start"
+
+module Cancel_next_strategy = struct
+  type state = { submitted : bool; cancelled : bool }
+
+  let name = "cancel-next"
+
+  let orders =
+    [
+      T.Strategy.Submit_order (request ~quantity_value:"1" ());
+      T.Strategy.Submit_order (request ~quantity_value:"1" ());
+    ]
+
+  let on_event state context = function
+    | T.Strategy.Market_slice_closed slice
+      when Int64.equal slice.T.Market_slice.slice_sequence 1L
+           && not state.submitted ->
+        ({ state with submitted = true }, orders)
+    | T.Strategy.Fill_received _ when not state.cancelled -> (
+        match T.Strategy.working_orders context with
+        | [ order ] ->
+            ( { state with cancelled = true },
+              [ T.Strategy.Cancel_order order.T.Order.id ] )
+        | _ -> Alcotest.fail "first fill must expose one remaining order")
+    | _ -> (state, [])
+end
+
+module Cancel_next_runner = T.Engine.Make (Cancel_next_strategy)
+
+let callbacks_use_current_slice_and_apply_responses_before_matching () =
+  let configured = instrument ~currency:"EUR" () in
+  let configured_risk = risk ~instruments:[ configured ] () in
+  let config = engine_config ~risk:configured_risk () in
+  let initial_cash = [ ("USD", money "10000"); ("EUR", money "0") ] in
+  let first_slice =
+    market_slice
+      ~bars:[ bar ~close_price:"104" 1L ]
+      ~fx_rates:[ fx_mark (); fx_mark ~currency:"EUR" ~rate:"1" () ]
+      1L
+  in
+  let second_slice =
+    market_slice
+      ~bars:
+        [
+          bar ~open_price:"103" ~high_price:"108" ~low_price:"102"
+            ~close_price:"107" 2L;
+        ]
+      ~fx_rates:[ fx_mark (); fx_mark ~currency:"EUR" ~rate:"2" () ]
+      2L
+  in
+  let strategy_state =
+    Cancel_next_strategy.{ submitted = false; cancelled = false }
+  in
+  let scripted =
+    Cancel_next_runner.create
+      ~run_id:(run_id "callback-consistency")
+      ~scenario_sha256 ~config ~initial_cash ~strategy_state
+    |> ok
+  in
+  let scripted, _ =
+    Cancel_next_runner.process_slice scripted first_slice |> ok
+  in
+  let scripted, scripted_events =
+    Cancel_next_runner.process_slice scripted second_slice |> ok
+  in
+  let interactive =
+    T.Engine.Interactive.create
+      ~run_id:(run_id "callback-consistency")
+      ~scenario_sha256 ~config ~initial_cash
+    |> ok
+  in
+  let rec finish_first submitted progress =
+    match T.Engine.Interactive.strategy_request progress with
+    | Some (_, T.Strategy.Market_slice_closed _) when not submitted ->
+        T.Engine.Interactive.resume progress Cancel_next_strategy.orders
+        |> ok |> finish_first true
+    | Some _ ->
+        T.Engine.Interactive.resume progress [] |> ok |> finish_first submitted
+    | None -> (
+        match T.Engine.Interactive.slice_result progress with
+        | Some (state, _) -> state
+        | None -> Alcotest.fail "expected completed first slice")
+  in
+  let interactive =
+    T.Engine.Interactive.process_slice interactive first_slice
+    |> ok |> finish_first false
+  in
+  let contexts_rev = ref [] in
+  let rec finish_second cancelled progress =
+    match T.Engine.Interactive.strategy_request progress with
+    | Some (context, event) ->
+        contexts_rev := (context, event) :: !contexts_rev;
+        let intents, cancelled =
+          match (event, cancelled, T.Strategy.working_orders context) with
+          | T.Strategy.Fill_received _, false, [ order ] ->
+              ([ T.Strategy.Cancel_order order.T.Order.id ], true)
+          | _ -> ([], cancelled)
+        in
+        T.Engine.Interactive.resume progress intents
+        |> ok |> finish_second cancelled
+    | None -> (
+        match T.Engine.Interactive.slice_result progress with
+        | Some result -> result
+        | None -> Alcotest.fail "expected completed second slice")
+  in
+  let interactive, interactive_events =
+    T.Engine.Interactive.process_slice interactive second_slice
+    |> ok |> finish_second false
+  in
+  Alcotest.(check (list string))
+    "scripted and interactive audit bytes"
+    (List.map T.Codec.audit_to_string scripted_events)
+    (List.map T.Codec.audit_to_string interactive_events);
+  Alcotest.check quantity_testable "only the first order fills" (quantity "1")
+    (T.Account.position_quantity
+       (T.Engine.Interactive.account interactive)
+       configured.id);
+  Alcotest.check quantity_testable "scripted result matches" (quantity "1")
+    (T.Account.position_quantity
+       (Cancel_next_runner.account scripted)
+       configured.id);
+  Alcotest.(check int)
+    "one fill audit" 1
+    (List.length
+       (List.filter
+          (fun audit ->
+            match audit.T.Audit.event with
+            | T.Audit.Fill_applied _ -> true
+            | _ -> false)
+          interactive_events));
+  let contexts = List.rev !contexts_rev in
+  Alcotest.(check int) "four slice callbacks" 4 (List.length contexts);
+  List.iter
+    (fun (context, _) ->
+      Alcotest.(check string)
+        "callback clock"
+        (T.Codec.ptime_to_string second_slice.received_at)
+        (T.Codec.ptime_to_string (T.Strategy.now context));
+      let latest_bar =
+        T.Strategy.latest_bar context configured.id |> Option.get
+      in
+      Alcotest.check price_testable "current close" (price "107")
+        latest_bar.close_price;
+      let portfolio = T.Strategy.portfolio context in
+      let position =
+        List.find
+          (fun (position : T.Strategy.marked_position) ->
+            T.Id.Instrument.equal position.T.Strategy.instrument_id
+              configured.id)
+          portfolio.positions
+      in
+      Alcotest.check price_testable "current position mark" (price "107")
+        position.mark;
+      let euro =
+        List.find
+          (fun (balance : T.Account.cash_attribution) ->
+            String.equal balance.T.Account.currency "EUR")
+          portfolio.cash_balances
+      in
+      Alcotest.check price_testable "current FX mark" (price "2") euro.fx_rate)
+    contexts;
+  match contexts with
+  | (fill_context, T.Strategy.Fill_received _)
+    :: (order_context, T.Strategy.Order_updated _)
+    :: (_, T.Strategy.Order_updated cancelled_order)
+    :: [ (_, T.Strategy.Market_slice_closed _) ] ->
+      Alcotest.(check int)
+        "second order is working at first fill" 1
+        (List.length (T.Strategy.working_orders fill_context));
+      Alcotest.(check int)
+        "cancellation is visible to the next callback" 0
+        (List.length (T.Strategy.working_orders order_context));
+      Alcotest.(check string)
+        "second order is cancelled" "cancelled"
+        (T.Order.status_to_string cancelled_order.status)
+  | _ -> Alcotest.fail "unexpected callback order"
 
 let interactive_reducer_matches_scripted_strategy () =
   let scripted = runner [ (1L, [ target "7" ]) ] in
@@ -517,6 +692,8 @@ let tests =
     Alcotest.test_case "one valuation per slice" `Quick one_valuation_per_slice;
     Alcotest.test_case "configured execution model is dispatched" `Quick
       configured_execution_model_is_dispatched;
+    Alcotest.test_case "callbacks use current slice and synchronous responses"
+      `Quick callbacks_use_current_slice_and_apply_responses_before_matching;
     Alcotest.test_case "interactive reducer matches scripted strategy" `Quick
       interactive_reducer_matches_scripted_strategy;
   ]

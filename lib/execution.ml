@@ -15,6 +15,14 @@ type match_result = {
 
 type capacity = Unlimited | Limited of Scalar.Quantity.t
 
+type cursor = Cursor of (Oms.t -> (step, string) result)
+
+and step =
+  | Finished of Id.Order.t list
+  | Proposed of proposed_fill * (Scalar.Quantity.t -> (cursor, string) result)
+
+let cursor next = Cursor (fun oms -> next ~oms)
+
 let create ~participation_bps ~fixed_fee ~fee_bps =
   if participation_bps < 0 || participation_bps > 10_000 then
     Error "participation basis points must be between 0 and 10000"
@@ -102,8 +110,7 @@ let compare_execution_order left right =
     in
     if sequence <> 0 then sequence else Id.Order.compare left.id right.id
 
-let fold_slice state ~instruments ~oms (market_slice : Market_slice.t) ~init
-    ~apply =
+let start_slice state ~instruments ~oms (market_slice : Market_slice.t) =
   let ( let* ) result function_ =
     match result with Ok value -> function_ value | Error _ as error -> error
   in
@@ -134,12 +141,25 @@ let fold_slice state ~instruments ~oms (market_slice : Market_slice.t) ~init
         && Ptime.compare order.created_at market_slice.start_at <= 0)
     |> List.sort compare_execution_order
   in
-  let step result order =
-    let* capacities, accumulator, market_orders = result in
-    let market_orders =
-      if Order.is_market order then order.Order.id :: market_orders
-      else market_orders
-    in
+  let market_ioc_orders =
+    List.filter_map
+      (fun order -> if Order.is_market order then Some order.Order.id else None)
+      eligible
+  in
+  let eligible_order_ids = List.map (fun order -> order.Order.id) eligible in
+  let rec make_cursor capacities remaining =
+    Cursor
+      (fun current_oms ->
+        match remaining with
+        | [] -> Ok (Finished market_ioc_orders)
+        | order_id :: remaining -> (
+            match Oms.find current_oms order_id with
+            | None -> Error "eligible order disappeared during matching"
+            | Some order when not (Order.is_active order) ->
+                let (Cursor next) = make_cursor capacities remaining in
+                next current_oms
+            | Some order -> propose capacities remaining current_oms order))
+  and propose capacities remaining current_oms order =
     let instrument_id = order.Order.request.instrument_id in
     match
       ( Market_slice.bar market_slice instrument_id,
@@ -150,13 +170,16 @@ let fold_slice state ~instruments ~oms (market_slice : Market_slice.t) ~init
         Error "eligible order has no configured bar in the market slice"
     | Some bar, Some capacity, Some instrument -> (
         match execution_price order market_slice bar with
-        | None -> Ok (capacities, accumulator, market_orders)
+        | None ->
+            let (Cursor next) = make_cursor capacities remaining in
+            next current_oms
         | Some (price, executed_at) ->
             let quantity =
               available_quantity capacity (Order.remaining_quantity order)
             in
             if Scalar.Quantity.is_zero quantity then
-              Ok (capacities, accumulator, market_orders)
+              let (Cursor next) = make_cursor capacities remaining in
+              next current_oms
             else
               let* notional = Scalar.Money.notional price quantity in
               let* fee =
@@ -166,32 +189,53 @@ let fold_slice state ~instruments ~oms (market_slice : Market_slice.t) ~init
               let proposed =
                 { order_id = order.id; quantity; price; fee; executed_at }
               in
-              let* accumulator, applied_quantity = apply accumulator proposed in
-              if
-                Scalar.Quantity.compare applied_quantity Scalar.Quantity.zero
-                < 0
-              then Error "applied fill quantity must be nonnegative"
-              else if Scalar.Quantity.compare applied_quantity quantity > 0 then
-                Error "applied fill quantity exceeds the execution proposal"
-              else if
-                not
-                  (Scalar.Quantity.is_multiple applied_quantity
-                     ~lot:instrument.Instrument.lot_size)
-              then
-                Error
-                  "applied fill quantity is not aligned to the instrument lot \
-                   size"
-              else
-                let* capacity = consume capacity applied_quantity in
-                let capacities =
-                  Id.Instrument.Map.add instrument_id capacity capacities
-                in
-                Ok (capacities, accumulator, market_orders))
+              let continue applied_quantity =
+                if
+                  Scalar.Quantity.compare applied_quantity Scalar.Quantity.zero
+                  < 0
+                then Error "applied fill quantity must be nonnegative"
+                else if Scalar.Quantity.compare applied_quantity quantity > 0
+                then
+                  Error "applied fill quantity exceeds the execution proposal"
+                else if
+                  not
+                    (Scalar.Quantity.is_multiple applied_quantity
+                       ~lot:instrument.Instrument.lot_size)
+                then
+                  Error
+                    "applied fill quantity is not aligned to the instrument \
+                     lot size"
+                else
+                  let* capacity = consume capacity applied_quantity in
+                  let capacities =
+                    Id.Instrument.Map.add instrument_id capacity capacities
+                  in
+                  Ok (make_cursor capacities remaining)
+              in
+              Ok (Proposed (proposed, continue)))
   in
-  let* _, accumulator, market_ioc_orders =
-    List.fold_left step (Ok (capacities, init, [])) eligible
+  Ok (make_cursor capacities eligible_order_ids)
+
+let finished market_ioc_orders =
+  cursor (fun ~oms:_ -> Ok (Finished market_ioc_orders))
+
+let next (Cursor next) ~oms = next oms
+
+let fold_slice state ~instruments ~oms market_slice ~init ~apply =
+  let ( let* ) result function_ =
+    match result with Ok value -> function_ value | Error _ as error -> error
   in
-  Ok (accumulator, List.rev market_ioc_orders)
+  let* cursor = start_slice state ~instruments ~oms market_slice in
+  let rec fold accumulator cursor =
+    match next cursor ~oms with
+    | Error _ as error -> error
+    | Ok (Finished market_ioc_orders) -> Ok (accumulator, market_ioc_orders)
+    | Ok (Proposed (proposed, continue)) ->
+        let* accumulator, applied_quantity = apply accumulator proposed in
+        let* cursor = continue applied_quantity in
+        fold accumulator cursor
+  in
+  fold init cursor
 
 let match_slice state ~instruments ~oms market_slice =
   let apply fills proposed = Ok (proposed :: fills, proposed.quantity) in

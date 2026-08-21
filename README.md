@@ -100,7 +100,7 @@ Run an external strategy against an empty-schedule scenario:
 
 ```sh
 opam exec -- dune exec trading-engine -- \
-  --input contracts/strategy/v2/fixtures/external.scenario.json \
+  --input contracts/strategy/v3/fixtures/external.scenario.json \
   --journal external.journal.jsonl \
   --strategy-executable ./my-strategy \
   --strategy-arg=config.toml \
@@ -183,10 +183,11 @@ production recovery log.
 - [Scenario JSON Schema](contracts/v3/scenario.schema.json)
 - [Scenario stream record JSON Schema](contracts/v3/scenario-stream.schema.json)
 - [Journal record JSON Schema](contracts/v3/journal.schema.json)
-- [External strategy protocol v2](contracts/strategy/v2/README.md)
+- [External strategy protocol v3](contracts/strategy/v3/README.md)
+- [Historical strategy protocol v2](contracts/strategy/v2/README.md)
 - [Historical strategy protocol v1](contracts/strategy/v1/README.md)
-- [Strategy message JSON Schema](contracts/strategy/v2/message.schema.json)
-- [Strategy transcript JSON Schema](contracts/strategy/v2/transcript.schema.json)
+- [Strategy message JSON Schema](contracts/strategy/v3/message.schema.json)
+- [Strategy transcript JSON Schema](contracts/strategy/v3/transcript.schema.json)
 - [Execution model](docs/execution-model.md)
 - [Persistra integration](docs/persistra.md)
 - [Contributing](CONTRIBUTING.md)

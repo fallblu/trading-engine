@@ -32,22 +32,48 @@ def response(request: dict[str, object]) -> dict[str, object]:
             and isinstance(market_slice, dict)
             and market_slice["slice_sequence"] == "1"
         ):
+            if MODE == "cancel-next":
+                order = {
+                    "type": "submit_order",
+                    "instrument_id": "demo-equity-acme",
+                    "side": "buy",
+                    "quantity": "1",
+                    "order_kind": "market",
+                    "limit_price": None,
+                }
+                payload = {"intents": [order, order]}
+            else:
+                payload = {
+                    "intents": [
+                        {
+                            "type": "target_quantities",
+                            "targets": [
+                                {
+                                    "instrument_id": "demo-equity-acme",
+                                    "quantity": "2",
+                                }
+                            ],
+                        },
+                        {
+                            "type": "emit_metric",
+                            "name": "fixture_signal",
+                            "value": "2",
+                        },
+                    ]
+                }
+        elif MODE == "cancel-next" and event["type"] == "fill_received":
+            context = request_payload["context"]
+            assert isinstance(context, dict)
+            working_orders = context["working_orders"]
+            assert isinstance(working_orders, list) and len(working_orders) == 1
+            remaining_order = working_orders[0]
+            assert isinstance(remaining_order, dict)
             payload = {
                 "intents": [
                     {
-                        "type": "target_quantities",
-                        "targets": [
-                            {
-                                "instrument_id": "demo-equity-acme",
-                                "quantity": "2",
-                            }
-                        ],
-                    },
-                    {
-                        "type": "emit_metric",
-                        "name": "fixture_signal",
-                        "value": "2",
-                    },
+                        "type": "cancel_order",
+                        "order_id": remaining_order["order_id"],
+                    }
                 ]
             }
         else:
@@ -59,7 +85,7 @@ def response(request: dict[str, object]) -> dict[str, object]:
         response_type = "error"
         payload = {"message": "unsupported request"}
     return {
-        "strategy_protocol_version": "2",
+        "strategy_protocol_version": "3",
         "strategy_sequence": sequence,
         "message_type": response_type,
         "payload": payload,

@@ -70,6 +70,14 @@ liquidation and ordinary origin classes, sells precede buys; orders within a sid
 ascending creation sequence and order ID. Each instrument has its own shared capacity, so the
 higher-priority order consumes that instrument's capacity first.
 
+## Callback boundaries
+
+The matcher fixes the eligible-order sequence at the slice boundary and advances it with an
+immutable cursor. After each fill, the engine pauses matching and applies the strategy response
+before examining the next order. The cursor then reads that order from the current OMS, skips it
+if an earlier response made it terminal, and preserves any capacity that was not consumed. Orders
+submitted by a callback are not part of the cursor and remain ineligible until a later slice.
+
 ## Corporate actions and borrow
 
 Corporate actions are ordered by action ID and applied before matching. A split scales the signed

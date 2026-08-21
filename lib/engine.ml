@@ -47,7 +47,7 @@ module Interactive = struct
   }
 
   type pending =
-    | Notify of Id.Event.t list * Strategy.context * Strategy.event
+    | Notify of Id.Event.t list * Strategy.event
     | Act of Id.Event.t list * Strategy.intent
 
   type reduction = {
@@ -163,6 +163,9 @@ module Interactive = struct
   let enqueue reduction items =
     { reduction with pending = reduction.pending @ items }
 
+  let prepend reduction items =
+    { reduction with pending = items @ reduction.pending }
+
   let value state =
     let marks =
       Id.Instrument.Map.bindings state.latest_bars
@@ -182,9 +185,8 @@ module Interactive = struct
       ~working_orders:(Oms.active_orders state.oms)
       ~latest_bars
 
-  let notification reduction ~causation_ids event =
-    let* context = strategy_context reduction.state reduction.now in
-    Ok (Notify (causation_ids, context, event))
+  let notification _reduction ~causation_ids event =
+    Ok (Notify (causation_ids, event))
 
   let order_id state =
     let value =
@@ -769,15 +771,10 @@ module Interactive = struct
           { reduction with pending; processed = reduction.processed + 1 }
         in
         match item with
-        | Notify (causation_ids, context, event) ->
-            Ok
-              (Strategy_requested
-                 {
-                   reduction = with_causes reduction causation_ids;
-                   causation_ids;
-                   context;
-                   event;
-                 })
+        | Notify (causation_ids, event) ->
+            let reduction = with_causes reduction causation_ids in
+            let* context = strategy_context reduction.state reduction.now in
+            Ok (Strategy_requested { reduction; causation_ids; context; event })
         | Act (causation_ids, intent) -> (
             match
               handle_intent (with_causes reduction causation_ids) intent
@@ -1236,7 +1233,10 @@ module Interactive = struct
           (Option.to_list reduction.slice_event_id)
     else Ok reduction
 
-  type phase = Reconcile_targets | Finish_slice
+  type phase =
+    | Match_slice of Market_slice.t * Execution.cursor
+    | Reconcile_targets
+    | Finish_slice
 
   type progress =
     | Awaiting_strategy of {
@@ -1256,6 +1256,30 @@ module Interactive = struct
           (Awaiting_strategy { reduction; phase; causation_ids; context; event })
     | Drained reduction -> (
         match phase with
+        | Match_slice (market_slice, cursor) -> (
+            match Execution.next cursor ~oms:reduction.state.oms with
+            | Error _ as error -> error
+            | Ok (Execution.Proposed (proposed, advance)) ->
+                let* reduction, applied_quantity =
+                  apply_proposed_fill reduction market_slice proposed
+                in
+                let* cursor = advance applied_quantity in
+                continue (Match_slice (market_slice, cursor)) reduction
+            | Ok (Execution.Finished market_ioc_orders) ->
+                let* slice_event_id =
+                  match reduction.slice_event_id with
+                  | Some value -> Ok value
+                  | None -> Error "matching slice has no audit event"
+                in
+                let reduction = with_causes reduction [ slice_event_id ] in
+                let* reduction =
+                  cancel_market_remainders reduction market_ioc_orders
+                in
+                let* pending =
+                  notification reduction ~causation_ids:[ slice_event_id ]
+                    (Strategy.Market_slice_closed market_slice)
+                in
+                continue Reconcile_targets (enqueue reduction [ pending ]))
         | Reconcile_targets ->
             let* reduction = reconcile_targets reduction in
             continue Finish_slice reduction
@@ -1283,7 +1307,7 @@ module Interactive = struct
         let actions =
           List.map (fun intent -> Act (causation_ids, intent)) intents
         in
-        continue phase (enqueue reduction actions)
+        continue phase (prepend reduction actions)
 
   let process_slice state market_slice =
     if state.completed then
@@ -1297,6 +1321,12 @@ module Interactive = struct
               Id.Corporate_action.Set.add action.Corporate_action.id ids)
             state.applied_action_ids market_slice.corporate_actions
         in
+        let latest_bars =
+          List.fold_left
+            (fun bars bar ->
+              Id.Instrument.Map.add bar.Bar.instrument_id bar bars)
+            state.latest_bars market_slice.bars
+        in
         {
           state with
           last_slice_sequence = Some market_slice.slice_sequence;
@@ -1306,6 +1336,7 @@ module Interactive = struct
             List.map
               (fun mark -> (mark.Market_slice.currency, mark.Market_slice.rate))
               market_slice.fx_rates;
+          latest_bars;
           applied_action_ids;
         }
       in
@@ -1337,29 +1368,13 @@ module Interactive = struct
         apply_corporate_actions reduction market_slice.corporate_actions
       in
       let* reduction = apply_borrow_fees reduction market_slice in
-      let* reduction, market_ioc_orders =
-        Execution_model.fold_slice reduction.state.config.execution_model
+      let* cursor =
+        Execution_model.start_slice reduction.state.config.execution_model
           reduction.state.config.execution
           ~instruments:(configured_instruments reduction.state)
-          ~oms:reduction.state.oms market_slice ~init:reduction
-          ~apply:(fun reduction proposed ->
-            apply_proposed_fill reduction market_slice proposed)
+          ~oms:reduction.state.oms market_slice
       in
-      let reduction = with_causes reduction [ slice_event_id ] in
-      let* reduction = cancel_market_remainders reduction market_ioc_orders in
-      let latest_bars =
-        List.fold_left
-          (fun bars bar -> Id.Instrument.Map.add bar.Bar.instrument_id bar bars)
-          reduction.state.latest_bars market_slice.bars
-      in
-      let state = { reduction.state with latest_bars } in
-      let reduction = { reduction with state } in
-      let* pending =
-        notification reduction ~causation_ids:[ slice_event_id ]
-          (Strategy.Market_slice_closed market_slice)
-      in
-      let reduction = enqueue reduction [ pending ] in
-      continue Reconcile_targets reduction
+      continue (Match_slice (market_slice, cursor)) reduction
 
   let order_counts orders =
     List.fold_left

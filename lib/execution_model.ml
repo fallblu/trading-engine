@@ -1,22 +1,19 @@
 module type S = sig
   val name : string
 
-  val fold_slice :
+  val start_slice :
     Execution.t ->
     instruments:Instrument.t list ->
     oms:Oms.t ->
     Market_slice.t ->
-    init:'a ->
-    apply:
-      ('a -> Execution.proposed_fill -> ('a * Scalar.Quantity.t, string) result) ->
-    ('a * Id.Order.t list, string) result
+    (Execution.cursor, string) result
 end
 
 type t = (module S)
 
 module Completed_bar_v1 = struct
   let name = "completed_bar_v1"
-  let fold_slice = Execution.fold_slice
+  let start_slice = Execution.start_slice
 end
 
 let of_module model = model
@@ -31,4 +28,4 @@ let find requested =
   | Some model -> Ok model
   | None -> Error (Printf.sprintf "unsupported execution model %S" requested)
 
-let fold_slice (module Model : S) = Model.fold_slice
+let start_slice (module Model : S) = Model.start_slice
