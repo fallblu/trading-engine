@@ -1,0 +1,35 @@
+#!/bin/sh
+
+set -eu
+
+repository_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+documentation_source="$repository_root/_build/documentation-source"
+documentation_site="$repository_root/site"
+generated_api="$repository_root/_build/default/_doc/_html"
+
+rm -rf -- "$documentation_source" "$documentation_site"
+mkdir -p "$documentation_source"
+
+sed 's#(.github/SUPPORT.md)#(SUPPORT.md)#g' \
+  "$repository_root/README.md" >"$documentation_source/index.md"
+cp "$repository_root/CONTRIBUTING.md" "$documentation_source/CONTRIBUTING.md"
+cp "$repository_root/CHANGELOG.md" "$documentation_source/CHANGELOG.md"
+sed \
+  -e 's#(../README.md)#(index.md)#g' \
+  -e 's#(../docs/#(docs/#g' \
+  "$repository_root/.github/SUPPORT.md" >"$documentation_source/SUPPORT.md"
+cp -R "$repository_root/docs" "$documentation_source/docs"
+cp -R "$repository_root/contracts" "$documentation_source/contracts"
+
+opam exec --switch "$repository_root" -- dune build @doc
+cp -R "$generated_api" "$documentation_source/api"
+
+sed 's#<!-- generated-api-link -->#[Browse the generated `Trading_engine` module index](../api/trading_engine/Trading_engine/index.html).#' \
+  "$repository_root/docs/api-reference.md" \
+  >"$documentation_source/docs/api-reference.md"
+
+"$repository_root/.venv-docs/bin/mkdocs" build \
+  --strict \
+  --config-file "$repository_root/mkdocs.yml"
+"$repository_root/.venv-docs/bin/python" \
+  "$repository_root/scripts/check-documentation.py" site

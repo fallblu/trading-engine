@@ -9,7 +9,7 @@ an append-only audit journal.
 maintainer: "James Mallette <jamesmallmw@gmail.com>"
 authors: ["James Mallette <jamesmallmw@gmail.com>"]
 license: "MIT"
-homepage: "https://github.com/fallblu/trading-engine"
+homepage: "https://fallblu.github.io/trading-engine/"
 bug-reports: "https://github.com/fallblu/trading-engine/issues"
 build: [
   ["dune" "subst"] {dev}

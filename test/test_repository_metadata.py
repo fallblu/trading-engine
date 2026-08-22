@@ -22,7 +22,7 @@ class RepositoryMetadataTest(unittest.TestCase):
             "Deterministic event-driven OCaml execution engine with versioned replay contracts "
             "and causal audit journals",
         )
-        self.assertEqual(profile["homepage"], "https://github.com/fallblu/trading-engine#readme")
+        self.assertEqual(profile["homepage"], "https://fallblu.github.io/trading-engine/")
         self.assertEqual(
             profile["topics"],
             [

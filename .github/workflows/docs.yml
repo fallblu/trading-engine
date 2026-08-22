@@ -1,0 +1,92 @@
+name: Documentation
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/docs.yml
+      - .github/SUPPORT.md
+      - contracts/**
+      - docs/**
+      - dune
+      - dune-project
+      - lib/dune
+      - lib/**/*.mli
+      - requirements/docs.*
+      - scripts/bootstrap-documentation-environment
+      - scripts/build-documentation-site
+      - scripts/check-documentation.py
+      - CHANGELOG.md
+      - CONTRIBUTING.md
+      - Makefile
+      - README.md
+      - mkdocs.yml
+      - trading_engine.opam
+      - trading_engine.opam.locked
+  push:
+    branches:
+      - develop
+    paths:
+      - .github/workflows/docs.yml
+      - .github/SUPPORT.md
+      - contracts/**
+      - docs/**
+      - dune
+      - dune-project
+      - lib/dune
+      - lib/**/*.mli
+      - requirements/docs.*
+      - scripts/bootstrap-documentation-environment
+      - scripts/build-documentation-site
+      - scripts/check-documentation.py
+      - CHANGELOG.md
+      - CONTRIBUTING.md
+      - Makefile
+      - README.md
+      - mkdocs.yml
+      - trading_engine.opam
+      - trading_engine.opam.locked
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: documentation-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: documentation-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ocaml/setup-ocaml@605a7e998e76e035b82c14d618a6e1010732c4ce # v3.7.1
+        with:
+          ocaml-compiler: "5.5.0"
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          python-version: "3.12"
+      - run: make bootstrap
+      - run: make docs-build
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+
+  deploy:
+    name: documentation-deploy
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      - id: deployment
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0

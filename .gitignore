@@ -5,6 +5,8 @@
 __pycache__/
 /_opam/
 /.venv-schema/
+/.venv-docs/
+/site/
 /.direnv/
 /.envrc
 *.install
