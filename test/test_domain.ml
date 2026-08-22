@@ -100,6 +100,104 @@ let market_slice_validation () =
   Alcotest.(check bool)
     "premature availability rejected" true (Result.is_error result)
 
+let market_event_validation () =
+  let instrument_id = instrument_id "event-validation" in
+  let event_at = timestamp "2026-01-03T14:30:00Z" in
+  let available_at = timestamp "2026-01-03T14:30:01Z" in
+  let received_at = timestamp "2026-01-03T14:30:02Z" in
+  let quote ?(ingest_sequence = 1L) ?(bid_price = "99")
+      ?(bid_quantity = quantity "1") ?(ask_price = "101") () =
+    T.Market_event.quote ~instrument_id ~event_at ~available_at ~received_at
+      ~ingest_sequence ~bid_price:(price bid_price) ~bid_quantity
+      ~ask_price:(price ask_price) ~ask_quantity:(quantity "1")
+  in
+  Alcotest.(check bool)
+    "nonpositive ingest rejected" true
+    (Result.is_error (quote ~ingest_sequence:0L ()));
+  Alcotest.(check bool)
+    "crossed quote rejected" true
+    (Result.is_error (quote ~bid_price:"101" ~ask_price:"100" ()));
+  Alcotest.(check bool)
+    "zero displayed quantity rejected" true
+    (Result.is_error (quote ~bid_quantity:T.Scalar.Quantity.zero ()));
+  Alcotest.(check bool)
+    "zero ask quantity rejected" true
+    (Result.is_error
+       (T.Market_event.quote ~instrument_id ~event_at ~available_at ~received_at
+          ~ingest_sequence:1L ~bid_price:(price "99")
+          ~bid_quantity:(quantity "1") ~ask_price:(price "101")
+          ~ask_quantity:T.Scalar.Quantity.zero));
+  Alcotest.(check bool)
+    "receipt before availability rejected" true
+    (Result.is_error
+       (T.Market_event.trade ~instrument_id ~event_at ~available_at
+          ~received_at:event_at ~ingest_sequence:1L ~price:(price "100")
+          ~quantity:(quantity "1") ~aggressor_side:T.Market_event.Sell));
+  Alcotest.(check bool)
+    "zero trade quantity rejected" true
+    (Result.is_error
+       (T.Market_event.trade ~instrument_id ~event_at ~available_at ~received_at
+          ~ingest_sequence:1L ~price:(price "100")
+          ~quantity:T.Scalar.Quantity.zero
+          ~aggressor_side:T.Market_event.Unknown));
+  Alcotest.(check bool)
+    "availability before event rejected" true
+    (Result.is_error
+       (T.Market_event.trade ~instrument_id ~event_at
+          ~available_at:(timestamp "2026-01-03T14:29:59Z")
+          ~received_at ~ingest_sequence:1L ~price:(price "100")
+          ~quantity:(quantity "1") ~aggressor_side:T.Market_event.Buy));
+  let first = quote ~ingest_sequence:2L () |> ok in
+  let second = quote ~ingest_sequence:1L () |> ok in
+  let later_receipt =
+    T.Market_event.quote ~instrument_id ~event_at ~available_at
+      ~received_at:(timestamp "2026-01-03T14:30:03Z")
+      ~ingest_sequence:3L ~bid_price:(price "99") ~bid_quantity:(quantity "1")
+      ~ask_price:(price "101") ~ask_quantity:(quantity "1")
+    |> ok
+  in
+  Alcotest.(check bool)
+    "receipt breaks replay-order tie" true
+    (T.Market_event.compare_replay_order first later_receipt < 0);
+  List.iter
+    (fun (wire, side) ->
+      Alcotest.(check string)
+        (wire ^ " side round trip")
+        wire
+        (T.Market_event.aggressor_side_of_string wire
+        |> ok |> T.Market_event.aggressor_side_to_string);
+      Alcotest.(check string)
+        (wire ^ " constructor rendering")
+        wire
+        (T.Market_event.aggressor_side_to_string side))
+    [
+      ("buy", T.Market_event.Buy);
+      ("sell", T.Market_event.Sell);
+      ("unknown", T.Market_event.Unknown);
+    ];
+  Alcotest.(check bool)
+    "unknown aggressor spelling rejected" true
+    (Result.is_error (T.Market_event.aggressor_side_of_string "ambiguous"));
+  let base = market_slice 2L in
+  Alcotest.(check string)
+    "slice rendering includes market-event count"
+    "slice[2] bars=1 events=0 fx=1 actions=0 lifecycle=0 borrow=0 cash_rates=0 \
+     failures=0"
+    (Format.asprintf "%a" T.Market_slice.pp base);
+  Alcotest.(check bool)
+    "nonmonotonic ingest rejected" true
+    (Result.is_error
+       (T.Market_slice.create_v14 ~slice_sequence:base.slice_sequence
+          ~start_at:base.start_at ~end_at:base.end_at
+          ~available_at:base.available_at ~received_at:base.received_at
+          ~bars:base.bars ~fx_rates:base.fx_rates
+          ~corporate_actions:base.corporate_actions
+          ~borrow_observations:base.borrow_observations
+          ~cash_rate_observations:base.cash_rate_observations
+          ~settlement_failures:base.settlement_failures
+          ~lifecycle_events:base.lifecycle_events
+          ~market_events:[ first; second ]))
+
 let bar_validation_boundaries () =
   let instrument_id = instrument_id "bar-validation" in
   let create ?(open_price = "100") ?(high_price = "110") ?(low_price = "90")
@@ -298,6 +396,7 @@ let tests =
     Alcotest.test_case "portfolio weight rounds toward zero" `Quick
       portfolio_weight_rounds_toward_zero;
     Alcotest.test_case "market slice validation" `Quick market_slice_validation;
+    Alcotest.test_case "market event validation" `Quick market_event_validation;
     Alcotest.test_case "bar validation boundaries" `Quick
       bar_validation_boundaries;
     Alcotest.test_case "corporate action validation boundaries" `Quick

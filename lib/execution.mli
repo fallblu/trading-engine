@@ -100,6 +100,13 @@ val start_slice_adverse_touch :
   Market_slice.t ->
   (cursor, string) result
 
+val start_slice_quote_trade :
+  t ->
+  instruments:Instrument.t list ->
+  oms:Oms.t ->
+  Market_slice.t ->
+  (cursor, string) result
+
 val finished : Id.Order.t list -> cursor
 (** Build a cursor that immediately finishes. This supports execution models
     that intentionally produce no proposals. *)

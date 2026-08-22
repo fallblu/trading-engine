@@ -112,6 +112,7 @@ let capabilities_describe_execution_contracts () =
       "completed_bar_v1";
       "completed_bar_next_open_v1";
       "completed_bar_adverse_touch_v1";
+      "quote_trade_v1";
     ]
     names;
   let model = List.hd models in
@@ -135,7 +136,7 @@ let capabilities_describe_execution_contracts () =
     (strings "configuration_versions");
   Alcotest.(check (list string))
     "scenario contracts"
-    [ "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6"; "5"; "4"; "3" ]
+    [ "14"; "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6"; "5"; "4"; "3" ]
     (strings "scenario_contract_versions");
   Alcotest.(check (list string))
     "required fields"

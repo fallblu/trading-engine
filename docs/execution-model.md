@@ -1,12 +1,12 @@
 # Execution model
 
 The engine selects a compiled execution module by the scenario's stable `execution.model` name.
-Contract v13 advertises `completed_bar_v1`, `completed_bar_next_open_v1`, and
-`completed_bar_adverse_touch_v1`; embedders can inject another module through
+Contract v14 advertises `completed_bar_v1`, `completed_bar_next_open_v1`,
+`completed_bar_adverse_touch_v1`, and `quote_trade_v1`; embedders can inject another module through
 the typed engine configuration without introducing runtime shared-library loading. The selected
 name is repeated in both terminal audit records.
 
-Each compiled model owns a strict configuration contract. The v13 envelope separates selection from
+Each compiled model owns a strict configuration contract. The v14 envelope separates selection from
 model-specific parameters:
 
 ```json
@@ -50,6 +50,14 @@ The conservative models use strict configuration version `"1"`. Both require `sp
 `model: "fixed_half_spread_v1"` and `half_spread_bps`, plus `impact_model` with
 `model: "linear_participation_v1"`, `coefficient_bps`, and `missing_volume_policy`. The latter is
 either `reject` or `zero_impact`; no ambient spread or volume data is inferred.
+
+The quote/trade model also uses configuration version `"1"`, with `participation_bps` and the same
+fee-schedule catalog. It consumes each slice's events in `(available_at, received_at,
+ingest_sequence)` order. Market orders and marketable limits consume only the displayed quote size
+on their side. Passive buys consume only sell-aggressor trades at or below their limit; passive
+sells consume only buy-aggressor trades at or above it. An `unknown` aggressor never supplies a
+passive fill. Each event has independent, lot-rounded capacity, and its `event_at` is the fill's
+economic timestamp. Completed bars remain required solely for synchronized valuation.
 
 ## Eligibility
 

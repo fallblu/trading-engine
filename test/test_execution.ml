@@ -37,6 +37,207 @@ let conservative_step start ?(kind = T.Order.Market) ?(side = T.Order.Buy)
   let cursor = start engine ~instruments:[ instrument () ] ~oms slice |> ok in
   T.Execution.next cursor ~oms |> ok
 
+let market_event_time second =
+  timestamp (Printf.sprintf "2026-01-03T14:30:%02dZ" second)
+
+let quote_event ?(sequence = 1L) ?(second = 1) ?(bid = "99")
+    ?(bid_quantity = "5") ?(ask = "101") ?(ask_quantity = "5") () =
+  let event_at = market_event_time second in
+  T.Market_event.quote
+    ~instrument_id:(instrument_id "test-equity")
+    ~event_at ~available_at:event_at ~received_at:event_at
+    ~ingest_sequence:sequence ~bid_price:(price bid)
+    ~bid_quantity:(quantity bid_quantity) ~ask_price:(price ask)
+    ~ask_quantity:(quantity ask_quantity)
+  |> ok
+
+let trade_event ?(sequence = 2L) ?(second = 2) ?(price_value = "100")
+    ?(quantity_value = "5") ?(aggressor_side = T.Market_event.Unknown) () =
+  let event_at = market_event_time second in
+  T.Market_event.trade
+    ~instrument_id:(instrument_id "test-equity")
+    ~event_at ~available_at:event_at ~received_at:event_at
+    ~ingest_sequence:sequence ~price:(price price_value)
+    ~quantity:(quantity quantity_value) ~aggressor_side
+  |> ok
+
+let quote_trade_slice events =
+  let base = market_slice 2L in
+  T.Market_slice.create_v14 ~slice_sequence:base.slice_sequence
+    ~start_at:base.start_at ~end_at:base.end_at ~available_at:base.available_at
+    ~received_at:base.received_at ~bars:base.bars ~fx_rates:base.fx_rates
+    ~corporate_actions:base.corporate_actions
+    ~borrow_observations:base.borrow_observations
+    ~cash_rate_observations:base.cash_rate_observations
+    ~settlement_failures:base.settlement_failures
+    ~lifecycle_events:base.lifecycle_events ~market_events:events
+  |> ok
+
+let quote_trade_execution ?(participation_bps = 10_000) () =
+  let fees = conservative_execution () |> T.Execution.fee_schedules in
+  T.Execution.create_v2 ~participation_bps ~fee_schedules:fees |> ok
+
+let liquidity_name = function
+  | T.Fee_schedule.Maker -> "maker"
+  | Taker -> "taker"
+
+let quote_trade_step ?(kind = T.Order.Market) ?(side = T.Order.Buy) events =
+  let oms, _ = oms_with_order (request ~kind ~side ()) in
+  let cursor =
+    T.Execution.start_slice_quote_trade (quote_trade_execution ())
+      ~instruments:[ instrument () ]
+      ~oms (quote_trade_slice events)
+    |> ok
+  in
+  T.Execution.next cursor ~oms |> ok
+
+let quote_trade_consumes_displayed_liquidity () =
+  match quote_trade_step [ quote_event ~ask_quantity:"3" () ] with
+  | T.Execution.Proposed (proposal, _) ->
+      Alcotest.check price_testable "buy executes at displayed ask"
+        (price "101") proposal.price;
+      Alcotest.check quantity_testable "displayed size caps fill" (quantity "3")
+        proposal.quantity;
+      Alcotest.(check string)
+        "quote fill is taker" "taker"
+        (liquidity_name proposal.liquidity);
+      Alcotest.(check string)
+        "economic event time" "2026-01-03T14:30:01.000000Z"
+        (T.Codec.ptime_to_string proposal.executed_at)
+  | _ -> Alcotest.fail "marketable quote did not produce a fill"
+
+let quote_trade_passive_fills_require_aggressor_evidence () =
+  let limit = T.Order.Limit (price "100") in
+  let events =
+    [
+      quote_event ();
+      trade_event ~price_value:"99" ();
+      trade_event ~sequence:3L ~second:3 ~price_value:"99"
+        ~aggressor_side:T.Market_event.Sell ();
+    ]
+  in
+  match quote_trade_step ~kind:limit events with
+  | T.Execution.Proposed (proposal, _) ->
+      Alcotest.check price_testable "passive fill uses observed trade"
+        (price "99") proposal.price;
+      Alcotest.(check string)
+        "trade fill is maker" "maker"
+        (liquidity_name proposal.liquidity);
+      Alcotest.(check string)
+        "unknown aggressor was skipped" "2026-01-03T14:30:03.000000Z"
+        (T.Codec.ptime_to_string proposal.executed_at)
+  | _ -> Alcotest.fail "qualified passive trade did not produce a fill"
+
+let quote_trade_sell_paths_use_bid_and_buy_aggressors () =
+  (match quote_trade_step ~side:T.Order.Sell [ quote_event ~bid:"99" () ] with
+  | T.Execution.Proposed (proposal, continue) -> (
+      Alcotest.check price_testable "sell executes at displayed bid"
+        (price "99") proposal.price;
+      let cursor = continue proposal.quantity |> ok in
+      match T.Execution.next cursor ~oms:T.Oms.empty |> ok with
+      | T.Execution.Finished _ -> ()
+      | _ -> Alcotest.fail "consumed quote should finish")
+  | _ -> Alcotest.fail "sell quote did not produce a fill");
+  let passive = T.Order.Limit (price "100") in
+  match
+    quote_trade_step ~kind:passive ~side:T.Order.Sell
+      [ trade_event ~price_value:"101" ~aggressor_side:T.Market_event.Buy () ]
+  with
+  | T.Execution.Proposed (proposal, continue) ->
+      Alcotest.check price_testable "passive sell uses trade price"
+        (price "101") proposal.price;
+      Alcotest.(check string)
+        "passive sell is maker" "maker"
+        (liquidity_name proposal.liquidity);
+      ignore (continue proposal.quantity |> ok)
+  | _ -> Alcotest.fail "buy-aggressor trade did not fill passive sell"
+
+let quote_trade_limits_fok_and_continuations () =
+  let marketable = T.Order.Limit (price "102") in
+  (match
+     quote_trade_step ~kind:marketable [ quote_event ~ask_quantity:"3" () ]
+   with
+  | T.Execution.Proposed (proposal, continue) ->
+      Alcotest.check quantity_testable "marketable limit uses displayed size"
+        (quantity "3") proposal.quantity;
+      Alcotest.(check bool)
+        "over-consumption rejected" true
+        (Result.is_error (continue (quantity "4")));
+      Alcotest.(check bool)
+        "negative application rejected" true
+        (Result.is_error (continue (quantity "-1")))
+  | _ -> Alcotest.fail "marketable limit did not execute");
+  let oms, _ =
+    oms_with_order
+      (request_v8 ~kind:T.Order.Market ~time_in_force:T.Order.Fok ())
+  in
+  let cursor =
+    T.Execution.start_slice_quote_trade (quote_trade_execution ())
+      ~instruments:[ instrument () ]
+      ~oms
+      (quote_trade_slice [ quote_event ~ask_quantity:"3" () ])
+    |> ok
+  in
+  match T.Execution.next cursor ~oms |> ok with
+  | T.Execution.Finished _ -> ()
+  | _ -> Alcotest.fail "FOK order filled partial displayed liquidity"
+
+let quote_trade_stop_and_event_boundaries () =
+  let oms, order =
+    oms_with_order
+      (request_v8
+         ~kind:(T.Order.Stop (price "100"))
+         ~time_in_force:T.Order.Gtc ())
+  in
+  let cursor =
+    T.Execution.start_slice_quote_trade (quote_trade_execution ())
+      ~instruments:[ instrument () ]
+      ~oms
+      (quote_trade_slice [ quote_event ~ask:"101" () ])
+    |> ok
+  in
+  (match T.Execution.next cursor ~oms |> ok with
+  | T.Execution.Triggered (order_id, triggered_at, 2L, _) ->
+      Alcotest.(check string)
+        "triggered order"
+        (T.Id.Order.to_string order.id)
+        (T.Id.Order.to_string order_id);
+      Alcotest.(check string)
+        "quote trigger uses event time" "2026-01-03T14:30:01.000000Z"
+        (T.Codec.ptime_to_string triggered_at)
+  | _ -> Alcotest.fail "stop was not triggered by observable quote");
+  let other_event =
+    let event_at = market_event_time 1 in
+    T.Market_event.quote ~instrument_id:(instrument_id "other") ~event_at
+      ~available_at:event_at ~received_at:event_at ~ingest_sequence:1L
+      ~bid_price:(price "99") ~bid_quantity:(quantity "1")
+      ~ask_price:(price "101") ~ask_quantity:(quantity "1")
+    |> ok
+  in
+  Alcotest.(check bool)
+    "unknown event instrument rejected" true
+    (Result.is_error
+       (T.Execution.start_slice_quote_trade (quote_trade_execution ())
+          ~instruments:[ instrument () ]
+          ~oms
+          (quote_trade_slice [ other_event ])));
+  let old_at = timestamp "2026-01-02T14:30:00Z" in
+  let old_event =
+    T.Market_event.trade
+      ~instrument_id:(instrument_id "test-equity")
+      ~event_at:old_at ~available_at:old_at ~received_at:old_at
+      ~ingest_sequence:1L ~price:(price "100") ~quantity:(quantity "1")
+      ~aggressor_side:T.Market_event.Unknown
+    |> ok
+  in
+  Alcotest.(check bool)
+    "event outside slice rejected" true
+    (Result.is_error
+       (T.Execution.start_slice_quote_trade (quote_trade_execution ())
+          ~instruments:[ instrument () ]
+          ~oms
+          (quote_trade_slice [ old_event ])))
+
 let conservative_limit_models_diverge () =
   let engine = conservative_execution () in
   let limit = T.Order.Limit (price "100") in
@@ -658,6 +859,16 @@ let incomplete_market_slice_returns_error () =
 
 let tests =
   [
+    Alcotest.test_case "quote replay consumes displayed liquidity" `Quick
+      quote_trade_consumes_displayed_liquidity;
+    Alcotest.test_case "passive trade requires aggressor evidence" `Quick
+      quote_trade_passive_fills_require_aggressor_evidence;
+    Alcotest.test_case "quote replay sell paths" `Quick
+      quote_trade_sell_paths_use_bid_and_buy_aggressors;
+    Alcotest.test_case "quote replay limits, FOK, and continuations" `Quick
+      quote_trade_limits_fok_and_continuations;
+    Alcotest.test_case "quote replay stops and boundaries" `Quick
+      quote_trade_stop_and_event_boundaries;
     Alcotest.test_case "conservative limit models diverge" `Quick
       conservative_limit_models_diverge;
     Alcotest.test_case "conservative costs are attributed" `Quick

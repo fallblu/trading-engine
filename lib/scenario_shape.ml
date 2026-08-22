@@ -70,7 +70,9 @@ let common ~root ~contract_version fields =
   let* run_id = field ~root fields "run_id" in
   let* base_currency = field ~root fields "base_currency" in
   let initial_field =
-    if List.mem contract_version [ "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6" ]
+    if
+      List.mem contract_version
+        [ "14"; "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6" ]
     then "initial_portfolio"
     else "initial_cash"
   in
@@ -79,19 +81,19 @@ let common ~root ~contract_version fields =
   let venue_calendars =
     if
       List.mem contract_version
-        [ "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6"; "5" ]
+        [ "14"; "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6"; "5" ]
     then List.assoc_opt "venue_calendars" fields
     else None
   in
   let* risk = field ~root fields "risk" in
   let* execution = field ~root fields "execution" in
   let financing =
-    if List.mem contract_version [ "13"; "12"; "11"; "10" ] then
+    if List.mem contract_version [ "14"; "13"; "12"; "11"; "10" ] then
       List.assoc_opt "financing" fields
     else None
   in
   let settlement =
-    if List.mem contract_version [ "13"; "12"; "11" ] then
+    if List.mem contract_version [ "14"; "13"; "12"; "11" ] then
       List.assoc_opt "settlement" fields
     else None
   in
@@ -124,12 +126,14 @@ let batch json =
   let calendar_fields =
     if
       List.mem contract_version
-        [ "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6"; "5" ]
+        [ "14"; "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6"; "5" ]
     then [ "venue_calendars" ]
     else []
   in
   let initial_field =
-    if List.mem contract_version [ "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6" ]
+    if
+      List.mem contract_version
+        [ "14"; "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6" ]
     then "initial_portfolio"
     else "initial_cash"
   in
@@ -150,11 +154,12 @@ let batch json =
            "slices";
          ]
         @ calendar_fields
-        @ (if List.mem contract_version [ "13"; "12"; "11"; "10" ] then
+        @ (if List.mem contract_version [ "14"; "13"; "12"; "11"; "10" ] then
              [ "financing" ]
            else [])
         @
-        if List.mem contract_version [ "13"; "12"; "11" ] then [ "settlement" ]
+        if List.mem contract_version [ "14"; "13"; "12"; "11" ] then
+          [ "settlement" ]
         else [])
       json
   in
@@ -169,12 +174,14 @@ let stream_header ~contract_version json =
   let calendar_fields =
     if
       List.mem contract_version
-        [ "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6"; "5" ]
+        [ "14"; "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6"; "5" ]
     then [ "venue_calendars" ]
     else []
   in
   let initial_field =
-    if List.mem contract_version [ "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6" ]
+    if
+      List.mem contract_version
+        [ "14"; "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6" ]
     then "initial_portfolio"
     else "initial_cash"
   in
@@ -192,11 +199,12 @@ let stream_header ~contract_version json =
            "max_internal_events";
          ]
         @ calendar_fields
-        @ (if List.mem contract_version [ "13"; "12"; "11"; "10" ] then
+        @ (if List.mem contract_version [ "14"; "13"; "12"; "11"; "10" ] then
              [ "financing" ]
            else [])
         @
-        if List.mem contract_version [ "13"; "12"; "11" ] then [ "settlement" ]
+        if List.mem contract_version [ "14"; "13"; "12"; "11" ] then
+          [ "settlement" ]
         else [])
       json
   in

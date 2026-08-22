@@ -7,6 +7,7 @@ type t = {
   available_at : Ptime.t;
   received_at : Ptime.t;
   bars : Bar.t list;
+  market_events : Market_event.t list;
   fx_rates : fx_mark list;
   corporate_actions : Corporate_action.t list;
   lifecycle_events : Instrument_lifecycle.event list;
@@ -31,9 +32,10 @@ let fx_mark ~currency ~rate =
 let compare_bar left right =
   Id.Instrument.compare left.Bar.instrument_id right.Bar.instrument_id
 
-let create_v12 ~slice_sequence ~start_at ~end_at ~available_at ~received_at
+let create_v14 ~slice_sequence ~start_at ~end_at ~available_at ~received_at
     ~bars ~fx_rates ~corporate_actions ~borrow_observations
-    ~cash_rate_observations ~settlement_failures ~lifecycle_events =
+    ~cash_rate_observations ~settlement_failures ~lifecycle_events
+    ~market_events =
   if Int64.compare slice_sequence 0L <= 0 then
     Error "market slice sequence must be positive"
   else if Ptime.compare start_at end_at >= 0 then
@@ -123,6 +125,15 @@ let create_v12 ~slice_sequence ~start_at ~end_at ~available_at ~received_at
              (String.equal left.Settlement.instruction_id right.instruction_id))
           && unique_failure remaining
     in
+    let rec ordered_events = function
+      | [] | [ _ ] -> true
+      | left :: (right :: _ as remaining) ->
+          Market_event.compare_replay_order left right < 0
+          && Int64.compare left.Market_event.ingest_sequence
+               right.Market_event.ingest_sequence
+             < 0
+          && ordered_events remaining
+    in
     if not (unique bars) then
       Error "market slice must contain one bar per instrument"
     else if fx_rates = [] then Error "market slice must contain FX rates"
@@ -138,6 +149,10 @@ let create_v12 ~slice_sequence ~start_at ~end_at ~available_at ~received_at
       Error "market slice cash rate currencies must be unique"
     else if not (unique_failure settlement_failures) then
       Error "market slice settlement failure instruction IDs must be unique"
+    else if not (ordered_events market_events) then
+      Error
+        "market events must be strictly ordered by availability, receipt, and \
+         ingest sequence"
     else
       Ok
         {
@@ -147,6 +162,7 @@ let create_v12 ~slice_sequence ~start_at ~end_at ~available_at ~received_at
           available_at;
           received_at;
           bars;
+          market_events;
           fx_rates;
           corporate_actions;
           lifecycle_events;
@@ -154,6 +170,13 @@ let create_v12 ~slice_sequence ~start_at ~end_at ~available_at ~received_at
           cash_rate_observations;
           settlement_failures;
         }
+
+let create_v12 ~slice_sequence ~start_at ~end_at ~available_at ~received_at
+    ~bars ~fx_rates ~corporate_actions ~borrow_observations
+    ~cash_rate_observations ~settlement_failures ~lifecycle_events =
+  create_v14 ~slice_sequence ~start_at ~end_at ~available_at ~received_at ~bars
+    ~fx_rates ~corporate_actions ~borrow_observations ~cash_rate_observations
+    ~settlement_failures ~lifecycle_events ~market_events:[]
 
 let create_v13 = create_v12
 
@@ -193,9 +216,10 @@ let compare_replay_order left right =
 
 let pp formatter state =
   Format.fprintf formatter
-    "slice[%Ld] bars=%d fx=%d actions=%d lifecycle=%d borrow=%d cash_rates=%d \
-     failures=%d"
+    "slice[%Ld] bars=%d events=%d fx=%d actions=%d lifecycle=%d borrow=%d \
+     cash_rates=%d failures=%d"
     state.slice_sequence (List.length state.bars)
+    (List.length state.market_events)
     (List.length state.fx_rates)
     (List.length state.corporate_actions)
     (List.length state.lifecycle_events)
