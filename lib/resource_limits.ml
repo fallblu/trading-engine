@@ -22,10 +22,4 @@ let to_yojson () =
       ("catalog_instruments", `Int catalog_instruments);
       ("intents_per_batch", `Int intents_per_batch);
       ("artifact_record_bytes", `Int artifact_record_bytes);
-      ("metric_name_bytes", `Int metric_name_bytes);
-      ("metric_string_value_bytes", `Int metric_string_value_bytes);
-      ("metric_unit_bytes", `Int metric_unit_bytes);
-      ("metric_dimensions", `Int metric_dimensions);
-      ("metric_dimension_key_bytes", `Int metric_dimension_key_bytes);
-      ("metric_dimension_value_bytes", `Int metric_dimension_value_bytes);
     ]
