@@ -23,6 +23,7 @@ nav:
       - Scenario and journal: docs/scenario.md
       - Diagnostics: docs/diagnostics.md
       - Persistra integration: docs/persistra.md
+      - Security policy: SECURITY.md
   - Contracts:
       - Conformance corpus: contracts/conformance/README.md
       - Scenario and journal:
@@ -43,6 +44,7 @@ nav:
       - Protocol fuzzing: docs/fuzzing.md
       - Documentation platform: docs/documentation-platform.md
       - Release artifacts: docs/release-artifacts.md
+      - Security maintenance: docs/security-maintenance.md
   - Contributing: CONTRIBUTING.md
   - Support: SUPPORT.md
   - Changelog: CHANGELOG.md

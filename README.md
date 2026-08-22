@@ -209,6 +209,8 @@ do not provide reducer snapshots or restart recovery.
 ## Architecture and contracts
 
 - [Support and issue guidance](.github/SUPPORT.md)
+- [Security policy](.github/SECURITY.md)
+- [Security maintenance](docs/security-maintenance.md)
 - [Contributing](CONTRIBUTING.md)
 - [Architecture](docs/architecture.md)
 - [Diagnostic contract](docs/diagnostics.md)

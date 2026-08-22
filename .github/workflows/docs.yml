@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - .github/workflows/docs.yml
+      - .github/SECURITY.md
       - .github/SUPPORT.md
       - contracts/**
       - docs/**
@@ -27,6 +28,7 @@ on:
       - develop
     paths:
       - .github/workflows/docs.yml
+      - .github/SECURITY.md
       - .github/SUPPORT.md
       - contracts/**
       - docs/**
