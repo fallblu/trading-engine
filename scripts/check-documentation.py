@@ -39,6 +39,7 @@ REQUIRED_NAVIGATION = (
     "docs/reducer-property-testing.md",
     "docs/fuzzing.md",
     "docs/documentation-platform.md",
+    "docs/release-artifacts.md",
     "CONTRIBUTING.md",
     "SUPPORT.md",
     "CHANGELOG.md",

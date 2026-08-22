@@ -1,0 +1,129 @@
+name: Release candidate
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/release-candidate.yml
+      - bin/**
+      - contracts/**
+      - docs/**
+      - lib/**
+      - requirements/**
+      - scripts/bootstrap-development-environment
+      - scripts/bootstrap-documentation-environment
+      - scripts/build-documentation-site
+      - scripts/build-release-artifacts
+      - scripts/check-release-artifacts
+      - scripts/release_artifacts.py
+      - CHANGELOG.md
+      - LICENSE
+      - Makefile
+      - README.md
+      - dune
+      - dune-project
+      - mkdocs.yml
+      - trading_engine.opam
+      - trading_engine.opam.locked
+  push:
+    branches:
+      - develop
+    paths:
+      - .github/workflows/release-candidate.yml
+      - bin/**
+      - contracts/**
+      - docs/**
+      - lib/**
+      - requirements/**
+      - scripts/bootstrap-development-environment
+      - scripts/bootstrap-documentation-environment
+      - scripts/build-documentation-site
+      - scripts/build-release-artifacts
+      - scripts/check-release-artifacts
+      - scripts/release_artifacts.py
+      - CHANGELOG.md
+      - LICENSE
+      - Makefile
+      - README.md
+      - dune
+      - dune-project
+      - mkdocs.yml
+      - trading_engine.opam
+      - trading_engine.opam.locked
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Existing exact tag version without the v prefix
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-candidate-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  candidate:
+    name: release-candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      RELEASE_VERSION: ${{ inputs.version || '' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate manual tag boundary
+        if: github.event_name == 'workflow_dispatch'
+        run: test "$GITHUB_REF" = "refs/tags/v$RELEASE_VERSION"
+      - uses: ocaml/setup-ocaml@605a7e998e76e035b82c14d618a6e1010732c4ce # v3.7.1
+        with:
+          ocaml-compiler: "5.5.0"
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          cache-dependency-glob: requirements/*.lock
+          python-version: "3.12"
+      - run: make bootstrap
+      - run: make release-check VERSION="$RELEASE_VERSION"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-candidate-${{ github.sha }}
+          path: release
+          if-no-files-found: error
+          retention-days: 14
+
+  attest:
+    name: release-attestations
+    if: github.event_name == 'workflow_dispatch'
+    needs: candidate
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      artifact-metadata: write
+      attestations: write
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-candidate-${{ github.sha }}
+          path: release
+      - id: provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-checksums: release/SUBJECTS.sha256
+      - id: sbom
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-checksums: release/SUBJECTS.sha256
+          sbom-path: release/sbom.spdx.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-attestations-${{ github.sha }}
+          path: |
+            ${{ steps.provenance.outputs.bundle-path }}
+            ${{ steps.sbom.outputs.bundle-path }}
+          if-no-files-found: error
+          retention-days: 14
