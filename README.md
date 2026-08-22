@@ -57,7 +57,7 @@ scenario slices and scheduled or external intents
 - Complete bidirectional strategy transcripts with coordinated no-replace journal publication
 - Scenario SHA-256 binding in `run_started` and `run_completed`
 - Exclusive partial artifact creation with optional file and directory synchronization
-- Unit, schema-conformance, scenario, golden-contract, and property tests
+- Unit, schema-conformance, scenario, golden-contract, reducer model-property, and protocol-fuzz tests
 
 ## Quick start
 
@@ -218,6 +218,7 @@ do not provide reducer snapshots or restart recovery.
 - [Strategy transcript JSON Schema](contracts/strategy/v3/transcript.schema.json)
 - [Execution model](docs/execution-model.md)
 - [Performance](docs/performance.md)
+- [Reducer property testing](docs/reducer-property-testing.md)
 - [Protocol fuzzing](docs/fuzzing.md)
 - [Persistra integration](docs/persistra.md)
 - [Contributing](CONTRIBUTING.md)
