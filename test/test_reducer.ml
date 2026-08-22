@@ -536,6 +536,32 @@ let configured_execution_model_is_dispatched () =
         "selected model is audited" No_fill_execution.name actual
   | _ -> Alcotest.fail "expected run start"
 
+let execution_model_configuration_must_match () =
+  let completed = T.Execution_model.find "completed_bar_v1" |> ok in
+  let next_open = T.Execution_model.find "completed_bar_next_open_v1" |> ok in
+  let conservative =
+    T.Execution.create_conservative ~participation_bps:10_000 ~fee_schedules:[]
+      ~half_spread_bps:0 ~impact_coefficient_bps:0
+      ~missing_volume_policy:T.Execution.Reject_missing_volume
+    |> ok
+  in
+  let configure contract_version execution_model execution =
+    T.Engine.config ~contract_version ~risk:(risk ()) ~execution_model
+      ~execution ~max_internal_events:1000
+  in
+  Alcotest.(check bool)
+    "conservative model requires pricing configuration" true
+    (Result.is_error (configure "13" next_open (execution ())));
+  Alcotest.(check bool)
+    "legacy model rejects conservative pricing" true
+    (Result.is_error (configure "13" completed conservative));
+  Alcotest.(check bool)
+    "conservative model is v13-only" true
+    (Result.is_error (configure "12" next_open conservative));
+  Alcotest.(check bool)
+    "matching conservative configuration accepted" true
+    (Result.is_ok (configure "13" next_open conservative))
+
 module Cancel_next_strategy = struct
   type state = { submitted : bool; cancelled : bool }
 
@@ -829,6 +855,8 @@ let tests =
     Alcotest.test_case "one valuation per slice" `Quick one_valuation_per_slice;
     Alcotest.test_case "configured execution model is dispatched" `Quick
       configured_execution_model_is_dispatched;
+    Alcotest.test_case "execution model configuration matches" `Quick
+      execution_model_configuration_must_match;
     Alcotest.test_case "callbacks use current slice and synchronous responses"
       `Quick callbacks_use_current_slice_and_apply_responses_before_matching;
     Alcotest.test_case "interactive reducer matches scripted strategy" `Quick

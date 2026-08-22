@@ -11,6 +11,258 @@ let match_orders ?(configured = instrument ()) ?(engine = execution ()) ~oms
   T.Execution.match_slice engine ~instruments:[ configured ] ~oms market_slice
   |> ok
 
+let conservative_execution ?(half_spread_bps = 0) ?(impact_coefficient_bps = 0)
+    ?(missing_volume_policy = T.Execution.Reject_missing_volume) () =
+  let component =
+    T.Fee_schedule.create_component ~name:"broker" ~currency:"USD"
+      ~basis:(T.Fee_schedule.Fixed (money "0.1"))
+      ~rounding:T.Fee_schedule.Up ~applicability:T.Fee_schedule.Any
+    |> ok
+  in
+  let schedule =
+    T.Fee_schedule.create ~schedule_id:"test-fees-v1"
+      ~instrument_id:(instrument_id "test-equity")
+      ~settlement_currency:"USD" ~minimum:None ~maximum:None
+      ~components:[ component ]
+    |> ok
+  in
+  T.Execution.create_conservative ~participation_bps:10_000
+    ~fee_schedules:[ schedule ] ~half_spread_bps ~impact_coefficient_bps
+    ~missing_volume_policy
+  |> ok
+
+let conservative_step start ?(kind = T.Order.Market) ?(side = T.Order.Buy)
+    ?(slice = market_slice 2L) engine =
+  let oms, _ = oms_with_order (request ~kind ~side ()) in
+  let cursor = start engine ~instruments:[ instrument () ] ~oms slice |> ok in
+  T.Execution.next cursor ~oms |> ok
+
+let conservative_limit_models_diverge () =
+  let engine = conservative_execution () in
+  let limit = T.Order.Limit (price "100") in
+  let touch =
+    market_slice
+      ~bars:[ bar ~open_price:"105" ~high_price:"110" ~low_price:"100" 2L ]
+      2L
+  in
+  (match
+     conservative_step T.Execution.start_slice_next_open ~kind:limit
+       ~slice:touch engine
+   with
+  | T.Execution.Finished _ -> ()
+  | _ -> Alcotest.fail "next-open model filled an intrabar touch");
+  (match
+     conservative_step T.Execution.start_slice_adverse_touch ~kind:limit
+       ~slice:touch engine
+   with
+  | T.Execution.Finished _ -> ()
+  | _ -> Alcotest.fail "adverse-touch model filled without trade-through");
+  let traded_through =
+    market_slice
+      ~bars:[ bar ~open_price:"105" ~high_price:"110" ~low_price:"99.99" 2L ]
+      2L
+  in
+  match
+    conservative_step T.Execution.start_slice_adverse_touch ~kind:limit
+      ~slice:traded_through engine
+  with
+  | T.Execution.Proposed (proposal, _) ->
+      Alcotest.check price_testable "one-tick adverse reference" (price "99.99")
+        proposal.price
+  | _ -> Alcotest.fail "adverse trade-through did not fill"
+
+let conservative_costs_are_tick_aligned_and_attributed () =
+  let engine =
+    conservative_execution ~half_spread_bps:10 ~impact_coefficient_bps:100 ()
+  in
+  match
+    conservative_step T.Execution.start_slice_next_open
+      ~slice:
+        (market_slice
+           ~bars:[ bar ~open_price:"100" ~volume:(Some "100") 2L ]
+           2L)
+      engine
+  with
+  | T.Execution.Proposed (proposal, _) ->
+      Alcotest.check price_testable "spread and impact final price"
+        (price "100.2") proposal.price;
+      let attribution = Option.get proposal.price_attribution in
+      Alcotest.check price_testable "reference" (price "100")
+        attribution.reference_price;
+      Alcotest.check money_testable "spread" (money "0.1")
+        attribution.spread_adjustment;
+      Alcotest.check money_testable "impact" (money "0.1")
+        attribution.impact_adjustment;
+      Alcotest.check price_testable "attributed final" proposal.price
+        attribution.final_price
+  | _ -> Alcotest.fail "expected conservative market fill"
+
+let conservative_missing_volume_policy_is_explicit () =
+  let missing = market_slice ~bars:[ bar ~volume:None 2L ] 2L in
+  let rejecting = conservative_execution ~impact_coefficient_bps:100 () in
+  let oms, _ = oms_with_order (request ()) in
+  let cursor =
+    T.Execution.start_slice_next_open rejecting
+      ~instruments:[ instrument () ]
+      ~oms missing
+    |> ok
+  in
+  Alcotest.(check bool)
+    "missing volume rejected" true
+    (Result.is_error (T.Execution.next cursor ~oms));
+  let zero =
+    conservative_execution ~half_spread_bps:10 ~impact_coefficient_bps:100
+      ~missing_volume_policy:T.Execution.Zero_impact ()
+  in
+  match
+    conservative_step T.Execution.start_slice_next_open ~slice:missing zero
+  with
+  | T.Execution.Proposed (proposal, _) ->
+      Alcotest.check price_testable "zero-impact fallback keeps spread"
+        (price "100.1") proposal.price
+  | _ -> Alcotest.fail "zero-impact fallback did not fill"
+
+let conservative_configuration_is_bounded () =
+  let valid = conservative_execution () in
+  let schedules = T.Execution.fee_schedules valid in
+  let create half_spread_bps impact_coefficient_bps =
+    T.Execution.create_conservative ~participation_bps:10_000
+      ~fee_schedules:schedules ~half_spread_bps ~impact_coefficient_bps
+      ~missing_volume_policy:T.Execution.Reject_missing_volume
+  in
+  List.iter
+    (fun (spread, impact) ->
+      Alcotest.(check bool)
+        "out-of-range cost rejected" true
+        (Result.is_error (create spread impact)))
+    [ (-1, 0); (10_001, 0); (0, -1); (0, 10_001) ];
+  Alcotest.(check bool)
+    "v2 participation bound enforced" true
+    (Result.is_error
+       (T.Execution.create_v2 ~participation_bps:(-1) ~fee_schedules:schedules));
+  let schedule = List.hd schedules in
+  Alcotest.(check bool)
+    "duplicate fee schedules rejected" true
+    (Result.is_error
+       (T.Execution.create_v2 ~participation_bps:10_000
+          ~fee_schedules:[ schedule; schedule ]));
+  Alcotest.(check bool)
+    "missing instrument fee schedule rejected" true
+    (Result.is_error
+       (T.Execution.calculate_fee valid
+          ~instrument:(instrument ~id:"other-equity" ~symbol:"OTHER" ())
+          ~notional:(money "100") ~quantity:(quantity "1")
+          ~liquidity:T.Fee_schedule.Taker
+          ~fx_rates:[ ("USD", price "1") ]))
+
+let conservative_sell_costs_and_limit_protection () =
+  let engine =
+    conservative_execution ~half_spread_bps:10 ~impact_coefficient_bps:100 ()
+  in
+  (match
+     conservative_step T.Execution.start_slice_next_open ~side:T.Order.Sell
+       ~slice:
+         (market_slice
+            ~bars:[ bar ~open_price:"100" ~volume:(Some "100") 2L ]
+            2L)
+       engine
+   with
+  | T.Execution.Proposed (proposal, _) ->
+      Alcotest.check price_testable "sell costs reduce execution price"
+        (price "99.8") proposal.price;
+      let attribution = Option.get proposal.price_attribution in
+      Alcotest.check money_testable "sell spread attribution" (money "0.1")
+        attribution.spread_adjustment;
+      Alcotest.check money_testable "sell impact attribution" (money "0.1")
+        attribution.impact_adjustment
+  | _ -> Alcotest.fail "expected conservative sell fill");
+  let buy_limit = T.Order.Limit (price "100") in
+  match
+    conservative_step T.Execution.start_slice_next_open ~kind:buy_limit
+      ~slice:
+        (market_slice
+           ~bars:[ bar ~open_price:"100" ~volume:(Some "100") 2L ]
+           2L)
+      engine
+  with
+  | T.Execution.Finished _ -> (
+      let buy_with_room = T.Order.Limit (price "101") in
+      (match
+         conservative_step T.Execution.start_slice_next_open ~kind:buy_with_room
+           ~slice:
+             (market_slice
+                ~bars:[ bar ~open_price:"100" ~volume:(Some "100") 2L ]
+                2L)
+           engine
+       with
+      | T.Execution.Proposed (proposal, _) ->
+          Alcotest.check price_testable "cost-adjusted buy respects limit"
+            (price "100.2") proposal.price
+      | _ -> Alcotest.fail "buy with limit room did not fill");
+      let sell_limit = T.Order.Limit (price "100") in
+      (match
+         conservative_step T.Execution.start_slice_next_open ~kind:sell_limit
+           ~side:T.Order.Sell
+           ~slice:
+             (market_slice
+                ~bars:[ bar ~open_price:"100" ~volume:(Some "100") 2L ]
+                2L)
+           engine
+       with
+      | T.Execution.Finished _ -> ()
+      | _ -> Alcotest.fail "cost-adjusted fill violated sell limit");
+      let sell_with_room = T.Order.Limit (price "99") in
+      match
+        conservative_step T.Execution.start_slice_next_open ~kind:sell_with_room
+          ~side:T.Order.Sell
+          ~slice:
+            (market_slice
+               ~bars:[ bar ~open_price:"100" ~volume:(Some "100") 2L ]
+               2L)
+          engine
+      with
+      | T.Execution.Proposed (proposal, _) ->
+          Alcotest.check price_testable "cost-adjusted sell respects limit"
+            (price "99.8") proposal.price
+      | _ -> Alcotest.fail "sell with limit room did not fill")
+  | _ -> Alcotest.fail "cost-adjusted fill violated buy limit"
+
+let conservative_adverse_sell_requires_trade_through () =
+  let engine = conservative_execution () in
+  let limit = T.Order.Limit (price "100") in
+  let touch =
+    market_slice
+      ~bars:
+        [
+          bar ~open_price:"95" ~high_price:"100" ~low_price:"90"
+            ~close_price:"95" 2L;
+        ]
+      2L
+  in
+  (match
+     conservative_step T.Execution.start_slice_adverse_touch ~kind:limit
+       ~side:T.Order.Sell ~slice:touch engine
+   with
+  | T.Execution.Finished _ -> ()
+  | _ -> Alcotest.fail "sell filled without one-tick trade-through");
+  let traded_through =
+    market_slice
+      ~bars:
+        [
+          bar ~open_price:"95" ~high_price:"100.01" ~low_price:"90"
+            ~close_price:"95" 2L;
+        ]
+      2L
+  in
+  match
+    conservative_step T.Execution.start_slice_adverse_touch ~kind:limit
+      ~side:T.Order.Sell ~slice:traded_through engine
+  with
+  | T.Execution.Proposed (proposal, _) ->
+      Alcotest.check price_testable "sell adverse reference" (price "100.01")
+        proposal.price
+  | _ -> Alcotest.fail "sell trade-through did not fill"
+
 let single_order_match ?(side = T.Order.Buy) ?(kind = T.Order.Market)
     ?(quantity_value = "10") ?(slice = market_slice 2L) () =
   let request = request ~side ~kind ~quantity_value () in
@@ -406,6 +658,18 @@ let incomplete_market_slice_returns_error () =
 
 let tests =
   [
+    Alcotest.test_case "conservative limit models diverge" `Quick
+      conservative_limit_models_diverge;
+    Alcotest.test_case "conservative costs are attributed" `Quick
+      conservative_costs_are_tick_aligned_and_attributed;
+    Alcotest.test_case "conservative missing-volume policy" `Quick
+      conservative_missing_volume_policy_is_explicit;
+    Alcotest.test_case "conservative configuration bounds" `Quick
+      conservative_configuration_is_bounded;
+    Alcotest.test_case "conservative sell costs and limits" `Quick
+      conservative_sell_costs_and_limit_protection;
+    Alcotest.test_case "conservative adverse sell" `Quick
+      conservative_adverse_sell_requires_trade_through;
     Alcotest.test_case "order waits for later slice" `Quick
       order_waits_for_later_slice;
     Alcotest.test_case "order waits for causal slice time" `Quick

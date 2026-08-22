@@ -4,8 +4,8 @@ A replay scenario uses either one strict JSON object or a strict JSON Lines stre
 weights, quantities, money, and sequences are canonical JSON strings. Counts and basis points are
 JSON integers. Unknown, missing, duplicate, noncanonical, and non-finite values fail parsing.
 
-Use [the v12 demo](../contracts/v12/fixtures/demo.scenario.json) as the canonical complete example.
-The [scenario JSON Schema](../contracts/v12/scenario.schema.json) provides structural validation.
+Use [the v13 demo](../contracts/v13/fixtures/demo.scenario.json) as the canonical complete example.
+The [scenario JSON Schema](../contracts/v13/scenario.schema.json) provides structural validation.
 The engine parser also enforces cross-field and cross-record invariants. Diagnostics identify the
 failed field or array item. Stream diagnostics additionally retain the record line and sequence.
 
@@ -32,8 +32,8 @@ The batch object and stream header share one domain-construction path and the sa
 checks. Stream items reuse the batch slice and intent validators directly; no synthetic batch
 scenario is constructed.
 
-The [stream record JSON Schema](../contracts/v12/scenario-stream.schema.json) validates each line,
-and [the v12 stream fixture](../contracts/v12/fixtures/demo.scenario.jsonl) is the canonical example.
+The [stream record JSON Schema](../contracts/v13/scenario-stream.schema.json) validates each line,
+and [the v13 stream fixture](../contracts/v13/fixtures/demo.scenario.jsonl) is the canonical example.
 The engine validates the entire stream before creating a journal. It then replays one record at a
 time without retaining prior slices, scheduled batches, or audit events. Reducer state still
 retains current account, order, target, and latest-bar state required by execution semantics.
@@ -42,7 +42,7 @@ retains current account, order, target, and latest-bar state required by executi
 
 | Field | Meaning |
 |---|---|
-| `contract_version` | Required string identifying this file contract; v12 is `"12"` |
+| `contract_version` | Required string identifying this file contract; v13 is `"13"` |
 | `metadata` | Required arbitrary JSON object preserved for provenance and ignored by execution |
 | `run_id` | Stable identity used in generated IDs |
 | `base_currency` | Reporting currency used for aggregate risk and valuation |
@@ -129,6 +129,18 @@ The engine advertises each model's scenario and configuration versions, required
 order types, data requirements, and limits through `--capabilities.execution_model_contracts`. The
 v8 and earlier contracts retain completed-bar configuration version `"1"`; v3 and v4 preserve
 their flat execution object unchanged.
+
+Contract v13 also accepts `completed_bar_next_open_v1` and
+`completed_bar_adverse_touch_v1`, each with strict configuration version `"1"`. They retain
+`participation_bps` and `fee_schedules`, and additionally require:
+
+- `spread_model`: `fixed_half_spread_v1` with `half_spread_bps` from 0 through 10,000.
+- `impact_model`: `linear_participation_v1` with `coefficient_bps` from 0 through 10,000 and
+  `missing_volume_policy` set to `reject` or `zero_impact`.
+
+The next-open model does not infer intrabar limit fills. The adverse-touch model requires a
+one-tick trade-through. Both round price costs away from the reference to the instrument tick and
+journal reference, spread, impact, and final executable prices separately.
 
 ## Schedule and intents
 
@@ -222,7 +234,7 @@ has zero available quantity. The latest observation remains active until replace
 missing-data handling, `reject_order` or `clip_fill` locate behavior, and
 `reject_new_shorts` or `close_out` recall behavior.
 
-The v12 `settlement` object selects `total_cash` or `settled_cash` buying power and
+The v13 `settlement` object selects `total_cash` or `settled_cash` buying power and
 `total_positions` or `settled_positions` availability. Its immutable calendars contain ordered
 canonical business dates, and each instrument has exactly one calendar and a lag from zero through
 30 business days. A fill updates economic accounting immediately and creates a deterministic
@@ -255,7 +267,7 @@ than the next slice `start_at`.
 
 ## Audit journal
 
-The [journal JSON Schema](../contracts/v12/journal.schema.json) validates each JSON Lines record.
+The [journal JSON Schema](../contracts/v13/journal.schema.json) validates each JSON Lines record.
 Every record contains `contract_version`, `engine_sequence`, deterministic `event_id`, ordered
 `causation_ids`, `run_id`, `recorded_at`, `event_type`, and an event-specific `payload`. Causal
 references are unique prior event IDs from the same run. The version is repeated on every record

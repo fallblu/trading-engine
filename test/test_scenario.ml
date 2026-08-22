@@ -2,12 +2,12 @@ open Test_support
 module T = Trading_engine
 
 let demo_document () =
-  In_channel.with_open_bin "../contracts/v12/fixtures/demo.scenario.json"
+  In_channel.with_open_bin "../contracts/v13/fixtures/demo.scenario.json"
     In_channel.input_all
 
 let demo () = T.Scenario.of_string (demo_document ()) |> ok
 let demo_hash () = T.Sha256.digest_string (demo_document ())
-let stream_path = "../contracts/v12/fixtures/demo.scenario.jsonl"
+let stream_path = "../contracts/v13/fixtures/demo.scenario.jsonl"
 
 let stream_document () =
   In_channel.with_open_bin stream_path In_channel.input_all
@@ -75,7 +75,7 @@ let write_large_stream path slice_count =
               ~effective_at:start_at ~credit_rate_bps:0 ~debit_rate_bps:0
             |> ok
           in
-          T.Market_slice.create_v12 ~slice_sequence:(Int64.of_int index)
+          T.Market_slice.create_v13 ~slice_sequence:(Int64.of_int index)
             ~start_at
             ~end_at:(add_seconds base (offset + 1))
             ~available_at:(add_seconds base (offset + 2))
@@ -95,7 +95,7 @@ let write_large_stream path slice_count =
         let payload =
           `Assoc
             [
-              ("market_slice", T.Codec.market_slice_to_yojson_v12 market_slice);
+              ("market_slice", T.Codec.market_slice_to_yojson_v13 market_slice);
               ("intents", `List []);
             ]
         in
@@ -116,7 +116,7 @@ let demo_contract_parses () =
   Alcotest.(check int) "one instrument" 1 (List.length scenario.instruments);
   Alcotest.(check int) "four slices" 4 (List.length scenario.slices);
   Alcotest.(check string)
-    "execution model" "completed_bar_v1"
+    "execution model" "completed_bar_adverse_touch_v1"
     (T.Execution_model.name scenario.execution_model);
   match scenario.metadata with
   | `Assoc fields ->
@@ -140,9 +140,9 @@ let schema_artifacts_parse () =
           (List.mem_assoc "$defs" fields)
     | _ -> Alcotest.fail (path ^ " must contain a JSON object")
   in
-  check_schema "../contracts/v12/scenario.schema.json";
-  check_schema "../contracts/v12/scenario-stream.schema.json";
-  check_schema "../contracts/v12/journal.schema.json"
+  check_schema "../contracts/v13/scenario.schema.json";
+  check_schema "../contracts/v13/scenario-stream.schema.json";
+  check_schema "../contracts/v13/journal.schema.json"
 
 let timestamp_precision_is_bounded () =
   List.iter
@@ -203,7 +203,7 @@ let v12_distributions_and_lifecycle_parse () =
     |> ok
   in
   let market_slice =
-    T.Market_slice.create_v12 ~slice_sequence:1L
+    T.Market_slice.create_v13 ~slice_sequence:1L
       ~start_at:(timestamp "2026-01-02T14:30:00Z")
       ~end_at:(timestamp "2026-01-02T20:55:00Z")
       ~available_at:(timestamp "2026-01-02T21:00:00Z")
@@ -341,7 +341,7 @@ let v12_distributions_and_lifecycle_parse () =
                 | _ -> Alcotest.fail "demo slice must be an object"
               in
               `List
-                (T.Codec.market_slice_to_yojson_v12 market_slice
+                (T.Codec.market_slice_to_yojson_v13 market_slice
                 :: List.map add_child_bar rest)
           | _ -> Alcotest.fail "demo slices must be nonempty"
         in
@@ -431,8 +431,8 @@ let contract_version_is_required_and_supported () =
   let unsupported_diagnostic = T.Scenario.of_yojson unsupported |> error in
   Alcotest.(check string)
     "unsupported version diagnosed"
-    "unsupported scenario contract_version \"2\" (expected one of 12, 11, 10, \
-     9, 8, 7, 6, 5, 4, 3)"
+    "unsupported scenario contract_version \"2\" (expected one of 13, 12, 11, \
+     10, 9, 8, 7, 6, 5, 4, 3)"
     (T.Diagnostic.to_human unsupported_diagnostic);
   Alcotest.(check string)
     "unsupported version code" "scenario.unsupported_contract"
@@ -582,7 +582,7 @@ let dense_schedule_document slice_count =
             ~effective_at:start_at ~credit_rate_bps:100 ~debit_rate_bps:200
           |> ok
         in
-        T.Market_slice.create_v12 ~slice_sequence:(Int64.of_int index) ~start_at
+        T.Market_slice.create_v13 ~slice_sequence:(Int64.of_int index) ~start_at
           ~end_at:(add_seconds base (time_offset + 1))
           ~available_at:(add_seconds base (time_offset + 2))
           ~received_at:(add_seconds base (time_offset + 3))
@@ -596,7 +596,7 @@ let dense_schedule_document slice_count =
           ~corporate_actions:[] ~borrow_observations:[ borrow_observation ]
           ~cash_rate_observations:[ cash_rate_observation ]
           ~settlement_failures:[] ~lifecycle_events:[]
-        |> ok |> T.Codec.market_slice_to_yojson_v12)
+        |> ok |> T.Codec.market_slice_to_yojson_v13)
   in
   let schedule =
     List.init slice_count (fun offset ->
@@ -1012,7 +1012,7 @@ let execution_model_is_required_and_supported () =
   Alcotest.(check string)
     "unsupported model/version diagnosed"
     "unsupported execution configuration version \"99\" for model \
-     \"completed_bar_v1\""
+     \"completed_bar_adverse_touch_v1\""
     (T.Scenario.of_yojson unsupported_version |> diagnostic_message);
   let extra_configuration =
     change_configuration (function
@@ -1021,7 +1021,54 @@ let execution_model_is_required_and_supported () =
   in
   Alcotest.(check bool)
     "model configuration is strict" true
-    (Result.is_error (T.Scenario.of_yojson extra_configuration))
+    (Result.is_error (T.Scenario.of_yojson extra_configuration));
+  let unsupported_spread =
+    change_configuration
+      (map_field "spread_model"
+         (change_field "model" (`String "future_spread")))
+  in
+  Alcotest.(check string)
+    "spread model is explicit" "unsupported spread model"
+    (T.Scenario.of_yojson unsupported_spread |> diagnostic_message);
+  let unsupported_impact =
+    change_configuration
+      (map_field "impact_model"
+         (change_field "model" (`String "future_impact")))
+  in
+  Alcotest.(check string)
+    "impact model is explicit" "unsupported impact model"
+    (T.Scenario.of_yojson unsupported_impact |> diagnostic_message);
+  let invalid_missing_volume =
+    change_configuration
+      (map_field "impact_model"
+         (change_field "missing_volume_policy" (`String "estimate")))
+  in
+  Alcotest.(check string)
+    "missing-volume policy is explicit"
+    "missing_volume_policy must be reject or zero_impact"
+    (T.Scenario.of_yojson invalid_missing_volume |> diagnostic_message);
+  let zero_impact =
+    change_configuration
+      (map_field "impact_model"
+         (change_field "missing_volume_policy" (`String "zero_impact")))
+  in
+  Alcotest.(check bool)
+    "zero-impact policy parses" true
+    (Result.is_ok (T.Scenario.of_yojson zero_impact));
+  let invalid_spread_bps =
+    change_configuration
+      (map_field "spread_model" (change_field "half_spread_bps" (`Int 10_001)))
+  in
+  Alcotest.(check bool)
+    "spread bound enforced" true
+    (Result.is_error (T.Scenario.of_yojson invalid_spread_bps));
+  let invalid_impact_bps =
+    change_configuration
+      (map_field "impact_model" (change_field "coefficient_bps" (`Int 10_001)))
+  in
+  Alcotest.(check bool)
+    "impact bound enforced" true
+    (Result.is_error (T.Scenario.of_yojson invalid_impact_bps))
 
 let deterministic_replay () =
   let scenario = demo () in
@@ -1084,13 +1131,17 @@ let audit_ids_are_deterministic_and_causal () =
     [ "demo-event-000000000004"; "demo-event-000000000006" ]
     (cause_strings (event 8L));
   Alcotest.(check (list string))
-    "fill cites order creation and executable slice"
+    "price selection cites order creation and executable slice"
     [ "demo-event-000000000008"; "demo-event-000000000010" ]
     (cause_strings (event 12L));
   Alcotest.(check (list string))
+    "fill cites price selection"
+    [ "demo-event-000000000012" ]
+    (cause_strings (event 13L));
+  Alcotest.(check (list string))
     "completion cites terminal valuation"
-    [ "demo-event-000000000025" ]
-    (cause_strings (event 26L));
+    [ "demo-event-000000000028" ]
+    (cause_strings (event 29L));
   match (event 8L).event with
   | T.Audit.Order_accepted order ->
       Alcotest.(check string)
@@ -1109,14 +1160,15 @@ let replay_ends_with_completion_summary () =
   (match first.event with
   | T.Audit.Run_started { scenario_sha256 = actual; execution_model } ->
       Alcotest.(check string) "start hash" hash actual;
-      Alcotest.(check string) "start model" "completed_bar_v1" execution_model
+      Alcotest.(check string)
+        "start model" "completed_bar_adverse_touch_v1" execution_model
   | _ -> Alcotest.fail "expected run start");
   match completion.event with
   | T.Audit.Run_completed
       { scenario_sha256 = actual; execution_model; valuation; _ } ->
       Alcotest.(check string) "completion hash" hash actual;
       Alcotest.(check string)
-        "completion model" "completed_bar_v1" execution_model;
+        "completion model" "completed_bar_adverse_touch_v1" execution_model;
       Alcotest.check money_testable "summary equity" result.valuation.equity
         valuation.account.equity
   | _ -> Alcotest.fail "expected run completion payload"
@@ -1128,7 +1180,7 @@ let replay_matches_golden_file () =
     |> fun value -> value ^ "\n"
   in
   let expected =
-    In_channel.with_open_bin "../contracts/v12/fixtures/demo.journal.jsonl"
+    In_channel.with_open_bin "../contracts/v13/fixtures/demo.journal.jsonl"
       In_channel.input_all
   in
   Alcotest.(check string) "stable audit contract" expected actual
@@ -1156,7 +1208,7 @@ let v3_replay_matches_frozen_golden_file () =
 let fill_clipping_fixture_reconciles () =
   let document =
     In_channel.with_open_bin
-      "../contracts/v12/fixtures/fill-clipped.scenario.json"
+      "../contracts/v13/fixtures/fill-clipped.scenario.json"
       In_channel.input_all
   in
   let scenario = T.Scenario.of_string document |> ok in
@@ -1170,7 +1222,7 @@ let fill_clipping_fixture_reconciles () =
   in
   let expected =
     In_channel.with_open_bin
-      "../contracts/v12/fixtures/fill-clipped.journal.jsonl"
+      "../contracts/v13/fixtures/fill-clipped.journal.jsonl"
       In_channel.input_all
   in
   Alcotest.(check string) "fill clipping audit reconciliation" expected actual
@@ -1270,8 +1322,8 @@ let streamed_replay_matches_batch_semantics () =
       Alcotest.(check int64) "four streamed slices" 4L result.slice_count;
       Alcotest.(check int64) "two schedule batches" 2L result.schedule_count;
       Alcotest.(check int) "one instrument" 1 result.instrument_count;
-      Alcotest.(check int64) "thirty-one audits" 31L result.audit_count;
-      Alcotest.check money_testable "same equity" (money "10111.946958")
+      Alcotest.(check int64) "twenty-nine audits" 29L result.audit_count;
+      Alcotest.check money_testable "same equity" (money "10111.979929")
         result.valuation.equity;
       Alcotest.(check string)
         "stream and batch journals agree" expected

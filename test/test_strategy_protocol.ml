@@ -45,7 +45,7 @@ let initialize_message_is_complete () =
     T.Strategy_protocol.initialize_message ~sequence:1L (initialization ())
   in
   Alcotest.(check string)
-    "protocol version" "10"
+    "protocol version" "11"
     (match field "strategy_protocol_version" message with
     | `String value -> value
     | _ -> Alcotest.fail "expected version string");
@@ -104,6 +104,49 @@ let initialize_message_includes_calendars () =
         | `String value -> value
         | _ -> Alcotest.fail "expected calendar ID")
   | _ -> Alcotest.fail "expected one serialized venue calendar"
+
+let conservative_initialize_message_encodes_cost_models () =
+  let check model_name policy expected_policy =
+    let base = initialization () in
+    let execution =
+      T.Execution.create_conservative ~participation_bps:7500
+        ~fee_schedules:(T.Execution.fee_schedules base.execution)
+        ~half_spread_bps:7 ~impact_coefficient_bps:23
+        ~missing_volume_policy:policy
+      |> ok
+    in
+    let execution_model = T.Execution_model.find model_name |> ok in
+    let message =
+      T.Strategy_protocol.initialize_message ~sequence:1L
+        { base with execution_model; execution }
+    in
+    let encoded = field "payload" message |> field "execution" in
+    Alcotest.(check string)
+      "conservative model name" model_name
+      (match field "model" encoded with
+      | `String value -> value
+      | _ -> Alcotest.fail "expected execution model");
+    let configuration = field "configuration" encoded in
+    Alcotest.(check int)
+      "half spread" 7
+      (match field "spread_model" configuration |> field "half_spread_bps" with
+      | `Int value -> value
+      | _ -> Alcotest.fail "expected half spread");
+    Alcotest.(check int)
+      "impact coefficient" 23
+      (match field "impact_model" configuration |> field "coefficient_bps" with
+      | `Int value -> value
+      | _ -> Alcotest.fail "expected impact coefficient");
+    Alcotest.(check string)
+      "missing volume policy" expected_policy
+      (match
+         field "impact_model" configuration |> field "missing_volume_policy"
+       with
+      | `String value -> value
+      | _ -> Alcotest.fail "expected missing-volume policy")
+  in
+  check "completed_bar_next_open_v1" T.Execution.Reject_missing_volume "reject";
+  check "completed_bar_adverse_touch_v1" T.Execution.Zero_impact "zero_impact"
 
 let legacy_initialize_message_remains_frozen () =
   let initialization =
@@ -222,7 +265,7 @@ let nonpositive_equity_omits_weights () =
 let response message_type payload =
   `Assoc
     [
-      ("strategy_protocol_version", `String "10");
+      ("strategy_protocol_version", `String "11");
       ("strategy_sequence", `String "3");
       ("message_type", `String message_type);
       ("payload", payload);
@@ -494,6 +537,8 @@ let tests =
       initialize_message_is_complete;
     Alcotest.test_case "initialize message includes calendars" `Quick
       initialize_message_includes_calendars;
+    Alcotest.test_case "conservative initialization encodes costs" `Quick
+      conservative_initialize_message_encodes_cost_models;
     Alcotest.test_case "legacy initialize message remains frozen" `Quick
       legacy_initialize_message_remains_frozen;
     Alcotest.test_case "event context is complete" `Quick
