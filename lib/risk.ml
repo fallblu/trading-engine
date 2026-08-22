@@ -783,9 +783,15 @@ let check_alignment instrument request =
   else
     match request.kind with
     | Order.Market -> Ok ()
-    | Order.Limit price ->
+    | Order.Limit price | Order.Stop price ->
         if Scalar.Price.is_multiple price ~tick:instrument.tick_size then Ok ()
-        else Error "limit price is not aligned to the instrument tick size"
+        else Error "order price is not aligned to the instrument tick size"
+    | Order.Stop_limit { trigger_price; limit_price } ->
+        if
+          Scalar.Price.is_multiple trigger_price ~tick:instrument.tick_size
+          && Scalar.Price.is_multiple limit_price ~tick:instrument.tick_size
+        then Ok ()
+        else Error "order price is not aligned to the instrument tick size"
 
 type reservations = { buys : Scalar.Quantity.t; sells : Scalar.Quantity.t }
 

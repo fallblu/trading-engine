@@ -5,6 +5,7 @@ let () =
       ("domain", Test_domain.tests);
       ("accounting", Test_accounting.tests);
       ("execution", Test_execution.tests);
+      ("order-lifetimes", Test_order_lifetimes.tests);
       ("reducer", Test_reducer.tests);
       ("reducer-properties", Test_reducer_properties.tests);
       ("checkpoint4", Test_checkpoint4.tests);

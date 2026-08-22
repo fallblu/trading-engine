@@ -32,6 +32,14 @@ val reject :
 
 val cancel : t -> Id.Order.t -> (t * Order.t, string) result
 
+val trigger :
+  t ->
+  Id.Order.t ->
+  updated_event_id:Id.Event.t ->
+  triggered_at:Ptime.t ->
+  triggered_slice_sequence:int64 ->
+  (t * Order.t, string) result
+
 val adjust_for_split :
   t ->
   instrument_id:Id.Instrument.t ->

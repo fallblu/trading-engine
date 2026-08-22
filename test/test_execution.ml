@@ -348,7 +348,8 @@ let cursor_reads_current_oms_and_preserves_capacity () =
         Alcotest.check order_id_testable "first proposal" first.id
           proposed.order_id;
         advance proposed.quantity |> ok
-    | T.Execution.Finished _ -> Alcotest.fail "expected first proposal"
+    | T.Execution.Finished _ | T.Execution.Triggered _ ->
+        Alcotest.fail "expected first proposal"
   in
   let oms, _ = T.Oms.cancel oms second.id |> ok in
   let cursor =
@@ -359,11 +360,13 @@ let cursor_reads_current_oms_and_preserves_capacity () =
         Alcotest.check quantity_testable "unused capacity reaches third order"
           (quantity "1") proposed.quantity;
         advance proposed.quantity |> ok
-    | T.Execution.Finished _ -> Alcotest.fail "expected third-order proposal"
+    | T.Execution.Finished _ | T.Execution.Triggered _ ->
+        Alcotest.fail "expected third-order proposal"
   in
   match T.Execution.next cursor ~oms |> ok with
   | T.Execution.Finished _ -> ()
-  | T.Execution.Proposed _ -> Alcotest.fail "expected completed cursor"
+  | T.Execution.Proposed _ | T.Execution.Triggered _ ->
+      Alcotest.fail "expected completed cursor"
 
 let fills_respect_lot_size () =
   let configured = instrument ~lot_size:"10" () in

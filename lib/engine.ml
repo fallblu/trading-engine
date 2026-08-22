@@ -1,13 +1,14 @@
 type config = {
   contract_version : string;
   risk : Risk.t;
+  venue_calendars : Venue_calendar.t list;
   execution_model : Execution_model.t;
   execution : Execution.t;
   max_internal_events : int;
 }
 
-let config ~contract_version ~risk ~execution_model ~execution
-    ~max_internal_events =
+let make_config ~venue_calendars ~contract_version ~risk ~execution_model
+    ~execution ~max_internal_events =
   if not (Contract.is_supported contract_version) then
     Error "engine contract version is unsupported"
   else if max_internal_events <= 0 then
@@ -21,10 +22,21 @@ let config ~contract_version ~risk ~execution_model ~execution
       {
         contract_version;
         risk;
+        venue_calendars;
         execution_model;
         execution;
         max_internal_events;
       }
+
+let config ~contract_version ~risk ~execution_model ~execution
+    ~max_internal_events =
+  make_config ~venue_calendars:[] ~contract_version ~risk ~execution_model
+    ~execution ~max_internal_events
+
+let config_v8 ~contract_version ~risk ~venue_calendars ~execution_model
+    ~execution ~max_internal_events =
+  make_config ~venue_calendars ~contract_version ~risk ~execution_model
+    ~execution ~max_internal_events
 
 let valid_sha256 value =
   String.length value = 64
@@ -335,6 +347,30 @@ module Interactive = struct
                 ~engine_sequence:order_sequence
             in
             match
+              let* () =
+                match request.Order.time_in_force with
+                | Order.Day { venue_id; calendar_id } -> (
+                    match
+                      List.find_opt
+                        (fun calendar ->
+                          Id.Venue_calendar.equal calendar.Venue_calendar.id
+                            calendar_id)
+                        reduction.state.config.venue_calendars
+                    with
+                    | None -> Error "DAY order refers to an unknown calendar"
+                    | Some calendar ->
+                        if not (Id.Venue.equal calendar.venue_id venue_id) then
+                          Error "DAY order venue differs from its calendar"
+                        else if
+                          not
+                            (Id.Instrument.Set.mem request.instrument_id
+                               calendar.instrument_ids)
+                        then
+                          Error
+                            "DAY order calendar does not cover its instrument"
+                        else Ok ())
+                | Order.Gtc | Order.Ioc | Order.Fok | Order.Gtd _ -> Ok ()
+              in
               let marks =
                 Id.Instrument.Map.bindings reduction.state.latest_marks
               in
@@ -427,6 +463,33 @@ module Interactive = struct
     in
     cancel reduction order_ids
 
+  let trigger_order reduction order_id ~triggered_at ~triggered_slice_sequence =
+    let* sequence = next_sequence reduction.state.engine_sequence in
+    let updated_event_id =
+      Audit.event_id ~run_id:reduction.state.run_id ~engine_sequence:sequence
+    in
+    let* oms, order =
+      Oms.trigger reduction.state.oms order_id ~updated_event_id ~triggered_at
+        ~triggered_slice_sequence
+    in
+    let reduction =
+      { reduction with state = { reduction.state with oms } }
+      |> fun reduction ->
+      with_causes reduction
+        (order.Order.created_event_id :: reduction.causation_ids)
+    in
+    let* reduction, emitted_id =
+      emit_with_id reduction (Audit.Order_triggered order)
+    in
+    if not (Id.Event.equal emitted_id updated_event_id) then
+      Error "order trigger event ID prediction diverged"
+    else
+      let* pending =
+        notification reduction ~causation_ids:[ emitted_id ]
+          (Strategy.Order_updated order)
+      in
+      Ok (enqueue reduction [ pending ])
+
   let configured_instruments state =
     Risk.instruments state.config.risk
     |> List.sort (fun left right ->
@@ -514,12 +577,23 @@ module Interactive = struct
           else
             match order.request.kind with
             | Order.Market -> Ok ()
-            | Order.Limit price ->
+            | Order.Limit price | Order.Stop price ->
                 if Scalar.Price.is_multiple price ~tick:instrument.tick_size
                 then Ok ()
                 else
                   Error
-                    "split-adjusted limit price is not aligned to the \
+                    "split-adjusted order price is not aligned to the \
+                     instrument tick"
+            | Order.Stop_limit { trigger_price; limit_price } ->
+                if
+                  Scalar.Price.is_multiple trigger_price
+                    ~tick:instrument.tick_size
+                  && Scalar.Price.is_multiple limit_price
+                       ~tick:instrument.tick_size
+                then Ok ()
+                else
+                  Error
+                    "split-adjusted order price is not aligned to the \
                      instrument tick")
         (Ok ()) adjusted
     in
@@ -1133,6 +1207,15 @@ module Interactive = struct
         let* permitted_quantity, fee, limit =
           permitted_fill reduction.state market_slice order proposed instrument
         in
+        let permitted_quantity =
+          if
+            Order.is_fok order
+            && Scalar.Quantity.compare permitted_quantity
+                 (Order.remaining_quantity order)
+               < 0
+          then Scalar.Quantity.zero
+          else permitted_quantity
+        in
         let* reduction =
           match limit with
           | None -> Ok reduction
@@ -1168,19 +1251,28 @@ module Interactive = struct
           apply_fill reduction market_slice proposed permitted_quantity fee
           |> Result.map (fun reduction -> (reduction, permitted_quantity))
 
-  let cancel_market_remainders reduction order_ids =
+  let cancel_immediate_remainders reduction order_ids =
     let causation_ids = reduction.causation_ids in
     let rec cancel reduction = function
       | [] -> Ok (with_causes reduction causation_ids)
       | order_id :: remaining -> (
           match Oms.find reduction.state.oms order_id with
-          | None -> Error "market IOC order disappeared during matching"
+          | None -> Error "immediate order disappeared during matching"
           | Some order -> (
+              let reason =
+                if
+                  (not
+                     (String.equal reduction.state.config.contract_version "8"))
+                  && Order.is_market order
+                then Audit.Market_ioc
+                else if Order.is_fok order then Audit.Fill_or_kill
+                else Audit.Immediate_or_cancel
+              in
               let result =
                 if Order.is_active order then
                   cancel_order
                     (with_causes reduction causation_ids)
-                    ~reason:Audit.Market_ioc order_id
+                    ~reason order_id
                 else Ok reduction
               in
               match result with
@@ -1188,6 +1280,45 @@ module Interactive = struct
               | Ok reduction -> cancel reduction remaining))
     in
     cancel reduction order_ids
+
+  let cancel_expired_gtd reduction (market_slice : Market_slice.t) =
+    Oms.active_orders reduction.state.oms
+    |> List.filter_map (fun order ->
+        match order.Order.request.time_in_force with
+        | Order.Gtd expires_at
+          when Ptime.compare expires_at market_slice.end_at <= 0 ->
+            Some order.id
+        | Order.Gtc | Order.Ioc | Order.Fok | Order.Day _ | Order.Gtd _ -> None)
+    |> cancel_orders reduction ~reason:Audit.Gtd_expired
+
+  let day_session_closed state (market_slice : Market_slice.t) order =
+    match order.Order.request.time_in_force with
+    | Order.Day { calendar_id; _ } -> (
+        match
+          List.find_opt
+            (fun calendar ->
+              Id.Venue_calendar.equal calendar.Venue_calendar.id calendar_id)
+            state.config.venue_calendars
+        with
+        | None -> false
+        | Some calendar ->
+            List.exists
+              (fun (session : Venue_calendar.session) ->
+                match List.rev session.phases with
+                | [] -> false
+                | phase :: _ ->
+                    Ptime.compare phase.closes_at order.Order.created_at > 0
+                    && Ptime.compare phase.closes_at market_slice.end_at <= 0)
+              calendar.sessions)
+    | Order.Gtc | Order.Ioc | Order.Fok | Order.Gtd _ -> false
+
+  let cancel_expired_day reduction market_slice =
+    Oms.active_orders reduction.state.oms
+    |> List.filter_map (fun order ->
+        if day_session_closed reduction.state market_slice order then
+          Some order.Order.id
+        else None)
+    |> cancel_orders reduction ~reason:Audit.Day_expired
 
   let audit_valuation state =
     let* account = value state in
@@ -1447,6 +1578,7 @@ module Interactive = struct
 
   module Actions_phase = struct
     let run market_slice reduction =
+      let* reduction = cancel_expired_gtd reduction market_slice in
       apply_corporate_actions reduction
         market_slice.Market_slice.corporate_actions
   end
@@ -1498,6 +1630,14 @@ module Interactive = struct
     let run market_slice cursor reduction =
       match Execution.next cursor ~oms:reduction.state.oms with
       | Error _ as error -> error
+      | Ok
+          (Execution.Triggered
+             (order_id, triggered_at, triggered_slice_sequence, cursor)) ->
+          let* reduction =
+            trigger_order reduction order_id ~triggered_at
+              ~triggered_slice_sequence
+          in
+          Ok (Continue (reduction, cursor))
       | Ok (Execution.Proposed (proposed, advance)) ->
           let* reduction, applied_quantity =
             apply_proposed_fill reduction market_slice proposed
@@ -1512,8 +1652,9 @@ module Interactive = struct
           in
           let reduction = with_causes reduction [ slice_event_id ] in
           let* reduction =
-            cancel_market_remainders reduction market_ioc_orders
+            cancel_immediate_remainders reduction market_ioc_orders
           in
+          let* reduction = cancel_expired_day reduction market_slice in
           let* pending =
             notification reduction ~causation_ids:[ slice_event_id ]
               (Strategy.Market_slice_closed market_slice)

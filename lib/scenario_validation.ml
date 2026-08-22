@@ -48,7 +48,7 @@ let validate_venue_calendars ~root catalog venue_calendars =
 let header ~root ~contract_version ~base_currency ~initial_cash ~instruments
     ~venue_calendars ~max_internal_events =
   let* () =
-    if List.mem contract_version [ "7"; "6" ] then Ok ()
+    if List.mem contract_version [ "8"; "7"; "6" ] then Ok ()
     else
       Account.create ~base_currency ~initial_cash
       |> Result.map (fun _ -> ())
@@ -66,7 +66,7 @@ let header ~root ~contract_version ~base_currency ~initial_cash ~instruments
       fail ~json_path:(child root "instruments") "instrument IDs must be unique"
     else
       let* () =
-        if List.mem contract_version [ "7"; "6"; "5" ] then
+        if List.mem contract_version [ "8"; "7"; "6"; "5" ] then
           validate_venue_calendars ~root catalog venue_calendars
         else Ok ()
       in
@@ -84,7 +84,7 @@ let header ~root ~contract_version ~base_currency ~initial_cash ~instruments
         fail
           ~json_path:
             (child root
-               (if List.mem contract_version [ "7"; "6" ] then
+               (if List.mem contract_version [ "8"; "7"; "6" ] then
                   "initial_portfolio.cash"
                 else "initial_cash"))
           "initial cash must contain every scenario currency exactly once"
@@ -270,12 +270,22 @@ let validate_portfolio_target ~json_path risk catalog = function
             else
               match request.kind with
               | Order.Market -> Ok ()
-              | Order.Limit price ->
+              | Order.Limit price | Order.Stop price ->
                   if Scalar.Price.is_multiple price ~tick:instrument.tick_size
                   then Ok ()
                   else
                     fail ~json_path
-                      "limit price is not aligned to the instrument tick size"))
+                      "order price is not aligned to the instrument tick size"
+              | Order.Stop_limit { trigger_price; limit_price } ->
+                  if
+                    Scalar.Price.is_multiple trigger_price
+                      ~tick:instrument.tick_size
+                    && Scalar.Price.is_multiple limit_price
+                         ~tick:instrument.tick_size
+                  then Ok ()
+                  else
+                    fail ~json_path
+                      "order price is not aligned to the instrument tick size"))
   | Strategy.Cancel_order _ | Strategy.Emit_metric _ -> Ok ()
 
 let validate_slices_at ~paths ~base_currency ~currencies ~instruments slices =

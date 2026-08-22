@@ -4,6 +4,10 @@ type cancellation_reason =
   | Strategy_requested
   | Target_replaced
   | Market_ioc
+  | Immediate_or_cancel
+  | Fill_or_kill
+  | Day_expired
+  | Gtd_expired
   | Margin_call
 
 type target_basis = Weights | Quantities
@@ -35,6 +39,7 @@ type event =
     }
   | Order_accepted of Order.t
   | Order_rejected of Order.t
+  | Order_triggered of Order.t
   | Order_cancelled of { order : Order.t; reason : cancellation_reason }
   | Split_applied of {
       action : Corporate_action.t;

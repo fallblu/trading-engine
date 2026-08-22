@@ -58,6 +58,18 @@ let cancel state order_id =
       | Error _ as error -> error
       | Ok cancelled -> Ok (insert state cancelled, cancelled))
 
+let trigger state order_id ~updated_event_id ~triggered_at
+    ~triggered_slice_sequence =
+  match find state order_id with
+  | None -> Error "cannot trigger an unknown order"
+  | Some order -> (
+      match
+        Order.trigger order ~updated_event_id ~triggered_at
+          ~triggered_slice_sequence
+      with
+      | Error _ as error -> error
+      | Ok triggered -> Ok (insert state triggered, triggered))
+
 let adjust_for_split state ~instrument_id ~updated_event_ids ~numerator
     ~denominator =
   let active = active_for_instrument state instrument_id in

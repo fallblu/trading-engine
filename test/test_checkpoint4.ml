@@ -159,7 +159,8 @@ let split_adjusts_working_order () =
   (match order.request.kind with
   | T.Order.Limit limit ->
       Alcotest.check price_testable "limit price halves" (price "25") limit
-  | T.Order.Market -> Alcotest.fail "expected adjusted limit order");
+  | T.Order.Market | T.Order.Stop _ | T.Order.Stop_limit _ ->
+      Alcotest.fail "expected adjusted limit order");
   Alcotest.(check (list string))
     "causal adjustment events"
     [ "market_slice_received"; "split_applied"; "order_adjusted"; "valuation" ]

@@ -2,6 +2,10 @@ type cancellation_reason =
   | Strategy_requested
   | Target_replaced
   | Market_ioc
+  | Immediate_or_cancel
+  | Fill_or_kill
+  | Day_expired
+  | Gtd_expired
   | Margin_call
 
 type target_basis = Weights | Quantities
@@ -33,6 +37,7 @@ type event =
     }
   | Order_accepted of Order.t
   | Order_rejected of Order.t
+  | Order_triggered of Order.t
   | Order_cancelled of { order : Order.t; reason : cancellation_reason }
   | Split_applied of {
       action : Corporate_action.t;
@@ -113,6 +118,10 @@ let cancellation_reason_to_string = function
   | Strategy_requested -> "strategy_requested"
   | Target_replaced -> "target_replaced"
   | Market_ioc -> "market_ioc"
+  | Immediate_or_cancel -> "immediate_or_cancel"
+  | Fill_or_kill -> "fill_or_kill"
+  | Day_expired -> "day_expired"
+  | Gtd_expired -> "gtd_expired"
   | Margin_call -> "margin_call"
 
 let target_basis_to_string = function
@@ -126,6 +135,7 @@ let event_name = function
   | Target_portfolio_requested _ -> "target_portfolio_requested"
   | Order_accepted _ -> "order_accepted"
   | Order_rejected _ -> "order_rejected"
+  | Order_triggered _ -> "order_triggered"
   | Order_cancelled _ -> "order_cancelled"
   | Split_applied _ -> "split_applied"
   | Cash_dividend_applied _ -> "cash_dividend_applied"

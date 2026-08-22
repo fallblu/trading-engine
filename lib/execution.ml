@@ -10,6 +10,7 @@ type proposed_fill = {
 
 type match_result = {
   fills : proposed_fill list;
+  triggers : (Id.Order.t * Ptime.t * int64) list;
   market_ioc_orders : Id.Order.t list;
 }
 
@@ -19,6 +20,7 @@ type cursor = Cursor of (Oms.t -> (step, string) result)
 
 and step =
   | Finished of Id.Order.t list
+  | Triggered of Id.Order.t * Ptime.t * int64 * cursor
   | Proposed of proposed_fill * (Scalar.Quantity.t -> (cursor, string) result)
 
 let cursor next = Cursor (fun oms -> next ~oms)
@@ -37,9 +39,11 @@ let fixed_fee state = state.fixed_fee
 let fee_bps state = state.fee_bps
 
 let execution_price order market_slice bar =
-  match order.Order.request.kind with
-  | Order.Market -> Some (bar.Bar.open_price, market_slice.Market_slice.start_at)
-  | Order.Limit limit -> (
+  match Order.effective_kind order with
+  | None -> None
+  | Some Order.Market ->
+      Some (bar.Bar.open_price, market_slice.Market_slice.start_at)
+  | Some (Order.Limit limit) -> (
       match order.request.side with
       | Order.Buy ->
           if Scalar.Price.compare bar.open_price limit <= 0 then
@@ -53,6 +57,25 @@ let execution_price order market_slice bar =
           else if Scalar.Price.compare bar.high_price limit >= 0 then
             Some (limit, market_slice.end_at)
           else None)
+  | Some (Order.Stop _ | Order.Stop_limit _) -> None
+
+let stop_trigger order market_slice bar =
+  match (order.Order.request.kind, order.request.side) with
+  | Order.Stop trigger_price, Order.Buy
+  | Order.Stop_limit { trigger_price; _ }, Order.Buy ->
+      if Scalar.Price.compare bar.Bar.open_price trigger_price >= 0 then
+        Some market_slice.Market_slice.start_at
+      else if Scalar.Price.compare bar.high_price trigger_price >= 0 then
+        Some market_slice.end_at
+      else None
+  | Order.Stop trigger_price, Order.Sell
+  | Order.Stop_limit { trigger_price; _ }, Order.Sell ->
+      if Scalar.Price.compare bar.Bar.open_price trigger_price <= 0 then
+        Some market_slice.Market_slice.start_at
+      else if Scalar.Price.compare bar.low_price trigger_price <= 0 then
+        Some market_slice.end_at
+      else None
+  | (Order.Market | Order.Limit _), _ -> None
 
 let available_quantity capacity remaining =
   match capacity with
@@ -138,12 +161,21 @@ let start_slice state ~instruments ~oms (market_slice : Market_slice.t) =
         Int64.compare order.Order.eligible_after_slice_sequence
           market_slice.slice_sequence
         < 0
-        && Ptime.compare order.created_at market_slice.start_at <= 0)
+        && Ptime.compare order.created_at market_slice.start_at <= 0
+        &&
+        match order.trigger_state with
+        | Some (Order.Triggered { triggered_slice_sequence; _ }) ->
+            Int64.compare triggered_slice_sequence market_slice.slice_sequence
+            < 0
+        | Some Order.Dormant | None -> true)
     |> List.sort compare_execution_order
   in
   let market_ioc_orders =
     List.filter_map
-      (fun order -> if Order.is_market order then Some order.Order.id else None)
+      (fun order ->
+        if Order.is_ioc order && not (Order.is_dormant_stop order) then
+          Some order.Order.id
+        else None)
       eligible
   in
   let eligible_order_ids = List.map (fun order -> order.Order.id) eligible in
@@ -169,50 +201,70 @@ let start_slice state ~instruments ~oms (market_slice : Market_slice.t) =
     | None, _, _ | _, None, _ | _, _, None ->
         Error "eligible order has no configured bar in the market slice"
     | Some bar, Some capacity, Some instrument -> (
-        match execution_price order market_slice bar with
-        | None ->
-            let (Cursor next) = make_cursor capacities remaining in
-            next current_oms
-        | Some (price, executed_at) ->
-            let quantity =
-              available_quantity capacity (Order.remaining_quantity order)
-            in
-            if Scalar.Quantity.is_zero quantity then
+        if Order.is_dormant_stop order then
+          match stop_trigger order market_slice bar with
+          | None ->
               let (Cursor next) = make_cursor capacities remaining in
               next current_oms
-            else
-              let* notional = Scalar.Money.notional price quantity in
-              let* fee =
-                Scalar.Money.fee ~fixed:state.fixed_fee ~bps:state.fee_bps
-                  ~notional
+          | Some triggered_at ->
+              Ok
+                (Triggered
+                   ( order.id,
+                     triggered_at,
+                     market_slice.slice_sequence,
+                     make_cursor capacities remaining ))
+        else
+          match execution_price order market_slice bar with
+          | None ->
+              let (Cursor next) = make_cursor capacities remaining in
+              next current_oms
+          | Some (price, executed_at) ->
+              let quantity =
+                available_quantity capacity (Order.remaining_quantity order)
               in
-              let proposed =
-                { order_id = order.id; quantity; price; fee; executed_at }
-              in
-              let continue applied_quantity =
-                if
-                  Scalar.Quantity.compare applied_quantity Scalar.Quantity.zero
-                  < 0
-                then Error "applied fill quantity must be nonnegative"
-                else if Scalar.Quantity.compare applied_quantity quantity > 0
-                then
-                  Error "applied fill quantity exceeds the execution proposal"
-                else if
-                  not
-                    (Scalar.Quantity.is_multiple applied_quantity
-                       ~lot:instrument.Instrument.lot_size)
-                then
-                  Error
-                    "applied fill quantity is not aligned to the instrument \
-                     lot size"
-                else
-                  let* capacity = consume capacity applied_quantity in
-                  let capacities =
-                    Id.Instrument.Map.add instrument_id capacity capacities
-                  in
-                  Ok (make_cursor capacities remaining)
-              in
-              Ok (Proposed (proposed, continue)))
+              if
+                Scalar.Quantity.is_zero quantity
+                || Order.is_fok order
+                   && Scalar.Quantity.compare quantity
+                        (Order.remaining_quantity order)
+                      < 0
+              then
+                let (Cursor next) = make_cursor capacities remaining in
+                next current_oms
+              else
+                let* notional = Scalar.Money.notional price quantity in
+                let* fee =
+                  Scalar.Money.fee ~fixed:state.fixed_fee ~bps:state.fee_bps
+                    ~notional
+                in
+                let proposed =
+                  { order_id = order.id; quantity; price; fee; executed_at }
+                in
+                let continue applied_quantity =
+                  if
+                    Scalar.Quantity.compare applied_quantity
+                      Scalar.Quantity.zero
+                    < 0
+                  then Error "applied fill quantity must be nonnegative"
+                  else if Scalar.Quantity.compare applied_quantity quantity > 0
+                  then
+                    Error "applied fill quantity exceeds the execution proposal"
+                  else if
+                    not
+                      (Scalar.Quantity.is_multiple applied_quantity
+                         ~lot:instrument.Instrument.lot_size)
+                  then
+                    Error
+                      "applied fill quantity is not aligned to the instrument \
+                       lot size"
+                  else
+                    let* capacity = consume capacity applied_quantity in
+                    let capacities =
+                      Id.Instrument.Map.add instrument_id capacity capacities
+                    in
+                    Ok (make_cursor capacities remaining)
+                in
+                Ok (Proposed (proposed, continue)))
   in
   Ok (make_cursor capacities eligible_order_ids)
 
@@ -230,6 +282,8 @@ let fold_slice state ~instruments ~oms market_slice ~init ~apply =
     match next cursor ~oms with
     | Error _ as error -> error
     | Ok (Finished market_ioc_orders) -> Ok (accumulator, market_ioc_orders)
+    | Ok (Triggered _) ->
+        Error "fold_slice cannot persist a triggered conditional order"
     | Ok (Proposed (proposed, continue)) ->
         let* accumulator, applied_quantity = apply accumulator proposed in
         let* cursor = continue applied_quantity in
@@ -238,8 +292,26 @@ let fold_slice state ~instruments ~oms market_slice ~init ~apply =
   fold init cursor
 
 let match_slice state ~instruments ~oms market_slice =
-  let apply fills proposed = Ok (proposed :: fills, proposed.quantity) in
-  match fold_slice state ~instruments ~oms market_slice ~init:[] ~apply with
-  | Error _ as error -> error
-  | Ok (fills, market_ioc_orders) ->
-      Ok { fills = List.rev fills; market_ioc_orders }
+  let ( let* ) result function_ =
+    match result with Ok value -> function_ value | Error _ as error -> error
+  in
+  let* cursor = start_slice state ~instruments ~oms market_slice in
+  let rec collect fills triggers cursor =
+    match next cursor ~oms with
+    | Error _ as error -> error
+    | Ok (Finished market_ioc_orders) ->
+        Ok
+          {
+            fills = List.rev fills;
+            triggers = List.rev triggers;
+            market_ioc_orders;
+          }
+    | Ok (Triggered (order_id, triggered_at, slice_sequence, cursor)) ->
+        collect fills
+          ((order_id, triggered_at, slice_sequence) :: triggers)
+          cursor
+    | Ok (Proposed (proposed, continue)) ->
+        let* cursor = continue proposed.quantity in
+        collect (proposed :: fills) triggers cursor
+  in
+  collect [] [] cursor
