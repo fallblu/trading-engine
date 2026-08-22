@@ -623,7 +623,38 @@ let execution_model_is_required_and_supported () =
   in
   Alcotest.(check string)
     "unsupported model diagnosed" "unsupported execution model \"future_model\""
-    (T.Scenario.of_yojson unsupported |> diagnostic_message)
+    (T.Scenario.of_yojson unsupported |> diagnostic_message);
+  let change_configuration change =
+    change_execution (map_field "configuration" change)
+  in
+  let missing_version =
+    change_configuration (function
+      | `Assoc fields ->
+          `Assoc
+            (List.filter
+               (fun (name, _) -> not (String.equal name "version"))
+               fields)
+      | _ -> Alcotest.fail "configuration must be an object")
+  in
+  Alcotest.(check bool)
+    "configuration version required" true
+    (Result.is_error (T.Scenario.of_yojson missing_version));
+  let unsupported_version =
+    change_configuration (change_field "version" (`String "2"))
+  in
+  Alcotest.(check string)
+    "unsupported model/version diagnosed"
+    "unsupported execution configuration version \"2\" for model \
+     \"completed_bar_v1\""
+    (T.Scenario.of_yojson unsupported_version |> diagnostic_message);
+  let extra_configuration =
+    change_configuration (function
+      | `Assoc fields -> `Assoc (("future_parameter", `Int 1) :: fields)
+      | _ -> Alcotest.fail "configuration must be an object")
+  in
+  Alcotest.(check bool)
+    "model configuration is strict" true
+    (Result.is_error (T.Scenario.of_yojson extra_configuration))
 
 let deterministic_replay () =
   let scenario = demo () in

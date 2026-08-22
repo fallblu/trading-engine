@@ -80,9 +80,12 @@
   },
   "execution": {
     "model": "completed_bar_v1",
-    "participation_bps": 5000,
-    "fixed_fee": "0.25",
-    "fee_bps": 10
+    "configuration": {
+      "version": "1",
+      "participation_bps": 5000,
+      "fixed_fee": "0.25",
+      "fee_bps": 10
+    }
   },
   "max_internal_events": 1000,
   "schedule": [
