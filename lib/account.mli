@@ -1,6 +1,24 @@
 (** Exact multi-currency cash, signed-position, cost-basis, and P&L accounting.
 *)
 
+type execution_fee_component = private {
+  name : string;
+  kind : string;
+  currency : string;
+  amount : Scalar.Money.t;
+  quote_amount : Scalar.Money.t;
+}
+
+type execution_fee_component_attribution = private {
+  name : string;
+  kind : string;
+  currency : string;
+  amount : Scalar.Money.t;
+  quote_currency : string;
+  quote_amount : Scalar.Money.t;
+  base_amount : Scalar.Money.t;
+}
+
 type position = private {
   quantity : Scalar.Quantity.t;
   cost_basis : Scalar.Money.t;
@@ -8,6 +26,7 @@ type position = private {
   dividend_pnl : Scalar.Money.t;
   execution_fees : Scalar.Money.t;
   borrow_fees : Scalar.Money.t;
+  execution_fee_components : execution_fee_component list;
 }
 
 type cash_attribution = private {
@@ -39,6 +58,7 @@ type position_attribution = private {
   base_borrow_fees : Scalar.Money.t;
   total_fees : Scalar.Money.t;
   base_total_fees : Scalar.Money.t;
+  execution_fee_components : execution_fee_component_attribution list;
 }
 
 type t
@@ -60,6 +80,7 @@ type valuation = private {
   total_fees : Scalar.Money.t;
   cash_balances : cash_attribution list;
   positions : position_attribution list;
+  execution_fee_components : execution_fee_component_attribution list;
 }
 
 val create :

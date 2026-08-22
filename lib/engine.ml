@@ -985,8 +985,12 @@ module Interactive = struct
     in
     if List.length ids <> List.length actual || actual <> expected then
       Error "market slice must contain each configured instrument exactly once"
-    else if actual_currencies <> expected_currencies then
-      Error "market slice must contain each configured currency FX rate"
+    else if
+      not
+        (List.for_all
+           (fun currency -> List.mem currency actual_currencies)
+           expected_currencies)
+    then Error "market slice must contain each configured currency FX rate"
     else if
       not
         (Option.exists
@@ -1012,12 +1016,23 @@ module Interactive = struct
                   Error "market slice receipt time must not move backward"
               | _ -> Ok ()))
 
-  let fill_fee execution price quantity =
+  let fill_fee execution instrument market_slice liquidity price quantity =
     let* notional = Scalar.Money.notional price quantity in
-    Scalar.Money.fee
-      ~fixed:(Execution.fixed_fee execution)
-      ~bps:(Execution.fee_bps execution)
-      ~notional
+    Execution.calculate_fee execution ~instrument ~notional ~quantity ~liquidity
+      ~fx_rates:
+        (List.map
+           (fun mark -> (mark.Market_slice.currency, mark.rate))
+           market_slice.Market_slice.fx_rates)
+
+  let create_execution_fill execution ~id ~order_id ~instrument_id
+      ~quote_currency ~side ~quantity ~price ~fee ~fee_components ~executed_at
+      ~slice_sequence =
+    if Execution.fee_schedules execution = [] then
+      Fill.create ~id ~order_id ~instrument_id ~quote_currency ~side ~quantity
+        ~price ~fee ~executed_at ~slice_sequence
+    else
+      Fill.create_v9 ~id ~order_id ~instrument_id ~quote_currency ~side
+        ~quantity ~price ~fee ~fee_components ~executed_at ~slice_sequence
 
   let slice_open_marks market_slice =
     List.map
@@ -1036,14 +1051,15 @@ module Interactive = struct
     in
     let candidate quantity =
       let prepared =
-        let* fee =
-          fill_fee state.config.execution proposed.Execution.price quantity
+        let* fee_components, fee =
+          fill_fee state.config.execution instrument market_slice
+            proposed.Execution.liquidity proposed.price quantity
         in
         let* fill =
-          Fill.create ~id:(fill_id state) ~order_id:order.Order.id
-            ~instrument_id:instrument.id
+          create_execution_fill state.config.execution ~id:(fill_id state)
+            ~order_id:order.Order.id ~instrument_id:instrument.id
             ~quote_currency:instrument.quote_currency ~side:order.request.side
-            ~quantity ~price:proposed.price ~fee
+            ~quantity ~price:proposed.price ~fee ~fee_components
             ~executed_at:proposed.executed_at
             ~slice_sequence:market_slice.Market_slice.slice_sequence
         in
@@ -1053,11 +1069,11 @@ module Interactive = struct
           Account.value account ~instruments ~marks
             ~fx_rates:state.latest_fx_rates
         in
-        Ok (fee, account, after_position, after)
+        Ok (fee_components, fee, account, after_position, after)
       in
       match prepared with
       | Error message -> Error (`Invalid message)
-      | Ok (fee, account, after_position, after) -> (
+      | Ok (fee_components, fee, account, after_position, after) -> (
           let checked =
             let* () =
               Risk.check_post_fill_for state.config.risk
@@ -1069,7 +1085,7 @@ module Interactive = struct
               ~filled_quantity:quantity ~after
           in
           match checked with
-          | Ok () -> Ok fee
+          | Ok () -> Ok (fee_components, fee)
           | Error (Risk.Limit limit) -> Error (`Limit limit)
           | Error (Risk.Invalid message) -> Error (`Invalid message))
     in
@@ -1117,14 +1133,14 @@ module Interactive = struct
         | Ok _ -> Error "fill clipping search produced a nonmaximal quantity"
     in
     if Scalar.Quantity.is_zero quantity then
-      Ok (quantity, Scalar.Money.zero, limit)
+      Ok (quantity, [], Scalar.Money.zero, limit)
     else
       match candidate quantity with
-      | Ok fee -> Ok (quantity, fee, limit)
+      | Ok (fee_components, fee) -> Ok (quantity, fee_components, fee, limit)
       | Error (`Invalid message) -> Error message
       | Error (`Limit _) -> Error "permitted fill violates its limiting policy"
 
-  let apply_fill reduction market_slice proposed quantity fee =
+  let apply_fill reduction market_slice proposed quantity fee_components fee =
     match Oms.find reduction.state.oms proposed.Execution.order_id with
     | None -> Error "execution proposal refers to an unknown order"
     | Some order -> (
@@ -1140,11 +1156,12 @@ module Interactive = struct
             | Ok state -> (
                 let reduction = { reduction with state } in
                 match
-                  Fill.create ~id ~order_id:order.id
+                  create_execution_fill reduction.state.config.execution ~id
+                    ~order_id:order.id
                     ~instrument_id:order.request.instrument_id
                     ~quote_currency:instrument.Instrument.quote_currency
                     ~side:order.request.side ~quantity ~price:proposed.price
-                    ~fee ~executed_at:proposed.executed_at
+                    ~fee ~fee_components ~executed_at:proposed.executed_at
                     ~slice_sequence:market_slice.Market_slice.slice_sequence
                 with
                 | Error _ as error -> error
@@ -1204,7 +1221,7 @@ module Interactive = struct
           | Some value -> Ok value
           | None -> Error "execution order refers to an unknown instrument"
         in
-        let* permitted_quantity, fee, limit =
+        let* permitted_quantity, fee_components, fee, limit =
           permitted_fill reduction.state market_slice order proposed instrument
         in
         let permitted_quantity =
@@ -1248,7 +1265,8 @@ module Interactive = struct
         if Scalar.Quantity.is_zero permitted_quantity then
           Ok (reduction, permitted_quantity)
         else
-          apply_fill reduction market_slice proposed permitted_quantity fee
+          apply_fill reduction market_slice proposed permitted_quantity
+            fee_components fee
           |> Result.map (fun reduction -> (reduction, permitted_quantity))
 
   let cancel_immediate_remainders reduction order_ids =

@@ -7,6 +7,7 @@
   test_accounting
   test_execution
   test_order_lifetimes
+  test_fee_schedules
   test_reducer
   test_reducer_properties
   test_checkpoint4
@@ -34,6 +35,14 @@
   ../contracts/v8/journal.schema.json
   ../contracts/v8/scenario-stream.schema.json
   ../contracts/v8/scenario.schema.json
+  ../contracts/v9/fixtures/demo.journal.jsonl
+  ../contracts/v9/fixtures/demo.scenario.json
+  ../contracts/v9/fixtures/demo.scenario.jsonl
+  ../contracts/v9/fixtures/fill-clipped.journal.jsonl
+  ../contracts/v9/fixtures/fill-clipped.scenario.json
+  ../contracts/v9/journal.schema.json
+  ../contracts/v9/scenario-stream.schema.json
+  ../contracts/v9/scenario.schema.json
   ../contracts/v6/fixtures/demo.scenario.json
   ../contracts/v6/fixtures/demo.scenario.jsonl
   ../contracts/v5/fixtures/demo.scenario.json
@@ -45,6 +54,7 @@
   ../contracts/conformance/cases.json
   ../contracts/strategy/v5/fixtures/external.strategy.jsonl
   ../contracts/strategy/v6/fixtures/external.strategy.jsonl
+  ../contracts/strategy/v7/fixtures/external.strategy.jsonl
   ../contracts/strategy/v4/fixtures/external.strategy.jsonl
   fake_strategy.py)
  (libraries
@@ -66,6 +76,48 @@
 (rule
  (alias runtest)
  (deps
+  validate_schemas.py
+  ../contracts/v9/fixtures/demo.journal.jsonl
+  ../contracts/v9/fixtures/demo.scenario.json
+  ../contracts/v9/fixtures/demo.scenario.jsonl
+  ../contracts/v9/journal.schema.json
+  ../contracts/v9/scenario-stream.schema.json
+  ../contracts/v9/scenario.schema.json)
+ (action
+  (run
+   python3
+   %{dep:validate_schemas.py}
+   %{dep:../contracts/v9/scenario.schema.json}
+   %{dep:../contracts/v9/scenario-stream.schema.json}
+   %{dep:../contracts/v9/journal.schema.json}
+   %{dep:../contracts/v9/fixtures/demo.scenario.json}
+   %{dep:../contracts/v9/fixtures/demo.scenario.jsonl}
+   %{dep:../contracts/v9/fixtures/demo.journal.jsonl})))
+
+(rule
+ (alias runtest)
+ (deps
+  validate_schemas.py
+  ../contracts/v9/fixtures/fill-clipped.journal.jsonl
+  ../contracts/v9/fixtures/fill-clipped.scenario.json
+  ../contracts/v9/fixtures/demo.scenario.jsonl
+  ../contracts/v9/journal.schema.json
+  ../contracts/v9/scenario-stream.schema.json
+  ../contracts/v9/scenario.schema.json)
+ (action
+  (run
+   python3
+   %{dep:validate_schemas.py}
+   %{dep:../contracts/v9/scenario.schema.json}
+   %{dep:../contracts/v9/scenario-stream.schema.json}
+   %{dep:../contracts/v9/journal.schema.json}
+   %{dep:../contracts/v9/fixtures/fill-clipped.scenario.json}
+   %{dep:../contracts/v9/fixtures/demo.scenario.jsonl}
+   %{dep:../contracts/v9/fixtures/fill-clipped.journal.jsonl})))
+
+(rule
+ (alias runtest)
+ (deps
   fuzz_protocol.exe
   (source_tree ../contracts))
  (action
@@ -80,6 +132,27 @@
   ../contracts/strategy/v6/fixtures/external.strategy.jsonl
   ../contracts/v8/fixtures/demo.scenario.json
   ../contracts/v8/fixtures/demo.scenario.jsonl))
+
+(rule
+ (alias runtest)
+ (deps
+  validate_strategy_schema.py
+  ../contracts/v9/scenario.schema.json
+  ../contracts/v9/journal.schema.json
+  ../contracts/diagnostic/v1/diagnostic.schema.json
+  ../contracts/strategy/v7/message.schema.json
+  ../contracts/strategy/v7/transcript.schema.json
+  ../contracts/strategy/v7/fixtures/external.strategy.jsonl)
+ (action
+  (run
+   python3
+   %{dep:validate_strategy_schema.py}
+   %{dep:../contracts/v9/scenario.schema.json}
+   %{dep:../contracts/v9/journal.schema.json}
+   %{dep:../contracts/diagnostic/v1/diagnostic.schema.json}
+   %{dep:../contracts/strategy/v7/message.schema.json}
+   %{dep:../contracts/strategy/v7/transcript.schema.json}
+   %{dep:../contracts/strategy/v7/fixtures/external.strategy.jsonl})))
 
 (rule
  (alias runtest)
@@ -274,6 +347,6 @@
  (deps
   test_benchmark_replay.py
   ../bench/benchmark_replay.py
-  ../contracts/v8/fixtures/demo.scenario.json)
+  ../contracts/v9/fixtures/demo.scenario.json)
  (action
   (run python3 %{dep:test_benchmark_replay.py})))

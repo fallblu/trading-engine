@@ -2,12 +2,12 @@ open Test_support
 module T = Trading_engine
 
 let demo_document () =
-  In_channel.with_open_bin "../contracts/v8/fixtures/demo.scenario.json"
+  In_channel.with_open_bin "../contracts/v9/fixtures/demo.scenario.json"
     In_channel.input_all
 
 let demo () = T.Scenario.of_string (demo_document ()) |> ok
 let demo_hash () = T.Sha256.digest_string (demo_document ())
-let stream_path = "../contracts/v8/fixtures/demo.scenario.jsonl"
+let stream_path = "../contracts/v9/fixtures/demo.scenario.jsonl"
 
 let stream_document () =
   In_channel.with_open_bin stream_path In_channel.input_all
@@ -125,9 +125,9 @@ let schema_artifacts_parse () =
           (List.mem_assoc "$defs" fields)
     | _ -> Alcotest.fail (path ^ " must contain a JSON object")
   in
-  check_schema "../contracts/v8/scenario.schema.json";
-  check_schema "../contracts/v8/scenario-stream.schema.json";
-  check_schema "../contracts/v8/journal.schema.json"
+  check_schema "../contracts/v9/scenario.schema.json";
+  check_schema "../contracts/v9/scenario-stream.schema.json";
+  check_schema "../contracts/v9/journal.schema.json"
 
 let timestamp_precision_is_bounded () =
   List.iter
@@ -189,8 +189,8 @@ let contract_version_is_required_and_supported () =
   let unsupported_diagnostic = T.Scenario.of_yojson unsupported |> error in
   Alcotest.(check string)
     "unsupported version diagnosed"
-    "unsupported scenario contract_version \"2\" (expected one of 8, 7, 6, 5, \
-     4, 3)"
+    "unsupported scenario contract_version \"2\" (expected one of 9, 8, 7, 6, \
+     5, 4, 3)"
     (T.Diagnostic.to_human unsupported_diagnostic);
   Alcotest.(check string)
     "unsupported version code" "scenario.unsupported_contract"
@@ -751,11 +751,11 @@ let execution_model_is_required_and_supported () =
     "configuration version required" true
     (Result.is_error (T.Scenario.of_yojson missing_version));
   let unsupported_version =
-    change_configuration (change_field "version" (`String "2"))
+    change_configuration (change_field "version" (`String "99"))
   in
   Alcotest.(check string)
     "unsupported model/version diagnosed"
-    "unsupported execution configuration version \"2\" for model \
+    "unsupported execution configuration version \"99\" for model \
      \"completed_bar_v1\""
     (T.Scenario.of_yojson unsupported_version |> diagnostic_message);
   let extra_configuration =
@@ -872,7 +872,7 @@ let replay_matches_golden_file () =
     |> fun value -> value ^ "\n"
   in
   let expected =
-    In_channel.with_open_bin "../contracts/v8/fixtures/demo.journal.jsonl"
+    In_channel.with_open_bin "../contracts/v9/fixtures/demo.journal.jsonl"
       In_channel.input_all
   in
   Alcotest.(check string) "stable audit contract" expected actual
@@ -900,7 +900,7 @@ let v3_replay_matches_frozen_golden_file () =
 let fill_clipping_fixture_reconciles () =
   let document =
     In_channel.with_open_bin
-      "../contracts/v8/fixtures/fill-clipped.scenario.json" In_channel.input_all
+      "../contracts/v9/fixtures/fill-clipped.scenario.json" In_channel.input_all
   in
   let scenario = T.Scenario.of_string document |> ok in
   let result =
@@ -913,7 +913,7 @@ let fill_clipping_fixture_reconciles () =
   in
   let expected =
     In_channel.with_open_bin
-      "../contracts/v8/fixtures/fill-clipped.journal.jsonl" In_channel.input_all
+      "../contracts/v9/fixtures/fill-clipped.journal.jsonl" In_channel.input_all
   in
   Alcotest.(check string) "fill clipping audit reconciliation" expected actual
 
@@ -1013,7 +1013,7 @@ let streamed_replay_matches_batch_semantics () =
       Alcotest.(check int64) "two schedule batches" 2L result.schedule_count;
       Alcotest.(check int) "one instrument" 1 result.instrument_count;
       Alcotest.(check int64) "twenty-two audits" 22L result.audit_count;
-      Alcotest.check money_testable "same equity" (money "10111.65392")
+      Alcotest.check money_testable "same equity" (money "10111.661495")
         result.valuation.equity;
       Alcotest.(check string)
         "stream and batch journals agree" expected

@@ -3,6 +3,18 @@ module T = Trading_engine
 
 let initialization () =
   let instrument = instrument () in
+  let component =
+    T.Fee_schedule.create_component ~name:"broker" ~currency:"USD"
+      ~basis:(T.Fee_schedule.Fixed (money "0.25"))
+      ~rounding:T.Fee_schedule.Up ~applicability:T.Fee_schedule.Any
+    |> ok
+  in
+  let fee_schedule =
+    T.Fee_schedule.create ~schedule_id:"test-fees-v1"
+      ~instrument_id:instrument.id ~settlement_currency:"USD" ~minimum:None
+      ~maximum:None ~components:[ component ]
+    |> ok
+  in
   T.Strategy_protocol.
     {
       scenario_contract_version = T.Contract.version;
@@ -16,7 +28,10 @@ let initialization () =
       venue_calendars = [];
       risk = risk ~instruments:[ instrument ] ();
       execution_model = T.Execution_model.find "completed_bar_v1" |> ok;
-      execution = execution ();
+      execution =
+        T.Execution.create_v2 ~participation_bps:10_000
+          ~fee_schedules:[ fee_schedule ]
+        |> ok;
     }
 
 let field name = function
@@ -28,7 +43,7 @@ let initialize_message_is_complete () =
     T.Strategy_protocol.initialize_message ~sequence:1L (initialization ())
   in
   Alcotest.(check string)
-    "protocol version" "6"
+    "protocol version" "7"
     (match field "strategy_protocol_version" message with
     | `String value -> value
     | _ -> Alcotest.fail "expected version string");
@@ -205,7 +220,7 @@ let nonpositive_equity_omits_weights () =
 let response message_type payload =
   `Assoc
     [
-      ("strategy_protocol_version", `String "6");
+      ("strategy_protocol_version", `String "7");
       ("strategy_sequence", `String "3");
       ("message_type", `String message_type);
       ("payload", payload);
@@ -263,8 +278,8 @@ let responses_are_strict_and_typed () =
   let duplicate =
     `Assoc
       [
-        ("strategy_protocol_version", `String "6");
-        ("strategy_protocol_version", `String "6");
+        ("strategy_protocol_version", `String "7");
+        ("strategy_protocol_version", `String "7");
         ("strategy_sequence", `String "3");
         ("message_type", `String "stopped");
         ("payload", `Assoc []);
@@ -291,7 +306,7 @@ let responses_are_strict_and_typed () =
   let unknown_field =
     `Assoc
       [
-        ("strategy_protocol_version", `String "6");
+        ("strategy_protocol_version", `String "7");
         ("strategy_sequence", `String "3");
         ("message_type", `String "stopped");
         ("payload", `Assoc []);

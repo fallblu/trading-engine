@@ -8,12 +8,13 @@ type t = {
   price : Scalar.Price.t;
   notional : Scalar.Money.t;
   fee : Scalar.Money.t;
+  fee_components : Fee_schedule.calculated_component list;
   executed_at : Ptime.t;
   slice_sequence : int64;
 }
 
-let create ~id ~order_id ~instrument_id ~quote_currency ~side ~quantity ~price
-    ~fee ~executed_at ~slice_sequence =
+let create_internal ~allow_rebate ~fee_components ~id ~order_id ~instrument_id
+    ~quote_currency ~side ~quantity ~price ~fee ~executed_at ~slice_sequence =
   if not (Scalar.Quantity.is_positive quantity) then
     Error "fill quantity must be positive"
   else if String.length quote_currency = 0 then
@@ -26,8 +27,8 @@ let create ~id ~order_id ~instrument_id ~quote_currency ~side ~quantity ~price
            code >= 0x21 && code <> 0x7f)
          quote_currency)
   then Error "fill quote currency must not contain whitespace"
-  else if Scalar.Money.compare fee Scalar.Money.zero < 0 then
-    Error "fill fee must be nonnegative"
+  else if (not allow_rebate) && Scalar.Money.compare fee Scalar.Money.zero < 0
+  then Error "fill fee must be nonnegative"
   else if Int64.compare slice_sequence 0L <= 0 then
     Error "fill slice sequence must be positive"
   else
@@ -36,20 +37,48 @@ let create ~id ~order_id ~instrument_id ~quote_currency ~side ~quantity ~price
     | Ok notional when Scalar.Money.equal notional Scalar.Money.zero ->
         Error "fill notional must be at least one money micro-unit"
     | Ok notional ->
-        Ok
-          {
-            id;
-            order_id;
-            instrument_id;
-            quote_currency;
-            side;
-            quantity;
-            price;
-            notional;
-            fee;
-            executed_at;
-            slice_sequence;
-          }
+        let component_total =
+          List.fold_left
+            (fun result component ->
+              Result.bind result (fun total ->
+                  Scalar.Money.add total component.Fee_schedule.quote_amount))
+            (Ok Scalar.Money.zero) fee_components
+        in
+        let component_total_valid =
+          match component_total with
+          | Ok total -> Scalar.Money.equal total fee
+          | Error _ -> false
+        in
+        if fee_components <> [] && not component_total_valid then
+          Error "fill fee components must sum to the fill fee"
+        else
+          Ok
+            {
+              id;
+              order_id;
+              instrument_id;
+              quote_currency;
+              side;
+              quantity;
+              price;
+              notional;
+              fee;
+              fee_components;
+              executed_at;
+              slice_sequence;
+            }
+
+let create ~id ~order_id ~instrument_id ~quote_currency ~side ~quantity ~price
+    ~fee ~executed_at ~slice_sequence =
+  create_internal ~allow_rebate:false ~fee_components:[] ~id ~order_id
+    ~instrument_id ~quote_currency ~side ~quantity ~price ~fee ~executed_at
+    ~slice_sequence
+
+let create_v9 ~id ~order_id ~instrument_id ~quote_currency ~side ~quantity
+    ~price ~fee ~fee_components ~executed_at ~slice_sequence =
+  create_internal ~allow_rebate:true ~fee_components ~id ~order_id
+    ~instrument_id ~quote_currency ~side ~quantity ~price ~fee ~executed_at
+    ~slice_sequence
 
 let equal left right =
   Id.Fill.equal left.id right.id
@@ -61,6 +90,7 @@ let equal left right =
   && Scalar.Price.equal left.price right.price
   && Scalar.Money.equal left.notional right.notional
   && Scalar.Money.equal left.fee right.fee
+  && left.fee_components = right.fee_components
   && Ptime.equal left.executed_at right.executed_at
   && Int64.equal left.slice_sequence right.slice_sequence
 
