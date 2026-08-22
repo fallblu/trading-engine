@@ -40,3 +40,16 @@ coherent, and working. Use subject-only conventional commit messages such as
 `feat: implement deterministic order matching`.
 
 Do not add secrets, provider credentials, or customer account data to fixtures or journals.
+
+## Intake and planning metadata
+
+Use the structured bug, feature, contract-change, or cross-repository issue form. Pull requests
+retain the `Summary` and `Test plan` sections from the repository template.
+
+Component, contract-version, and dependency labels describe stable scope. Priority and effort
+labels are assigned only during explicit triage; they do not promise a release, date, or roadmap
+position. Do not encode delivery commitments in labels. The reviewed label definitions and desired
+repository metadata live under `.github/` and must agree with the GitHub settings.
+
+For reciprocal Persistra compatibility guarantees and the pin-advancement procedure, read
+[Persistra integration](docs/persistra.md#compatibility-guarantees).

@@ -1,0 +1,33 @@
+[
+  {"category": "component", "name": "component: accounting", "color": "1d76db", "description": "Cash, positions, valuation, fees, and reconciliation"},
+  {"category": "component", "name": "component: artifacts", "color": "1d76db", "description": "Journals, transcripts, manifests, and durable publication"},
+  {"category": "component", "name": "component: ci", "color": "1d76db", "description": "Continuous integration, builds, and development tooling"},
+  {"category": "component", "name": "component: cli", "color": "1d76db", "description": "Command-line input, output, diagnostics, and process behavior"},
+  {"category": "component", "name": "component: contracts", "color": "1d76db", "description": "Versioned scenarios, journals, schemas, and conformance"},
+  {"category": "component", "name": "component: execution", "color": "1d76db", "description": "Order management, matching, fills, and execution models"},
+  {"category": "component", "name": "component: reducer", "color": "1d76db", "description": "Pure state transitions, phases, and deterministic sequencing"},
+  {"category": "component", "name": "component: repository", "color": "1d76db", "description": "Repository policy, documentation, and community health"},
+  {"category": "component", "name": "component: risk", "color": "1d76db", "description": "Pre-trade limits, margin, borrow, and liquidation"},
+  {"category": "component", "name": "component: strategy", "color": "1d76db", "description": "Built-in and external strategy lifecycle and protocol"},
+
+  {"category": "priority", "name": "priority: critical", "color": "b60205", "description": "Immediate correctness, security, or data-integrity impact"},
+  {"category": "priority", "name": "priority: high", "color": "d93f0b", "description": "Important work selected ahead of normal backlog items"},
+  {"category": "priority", "name": "priority: medium", "color": "fbca04", "description": "Normal backlog priority after explicit triage"},
+  {"category": "priority", "name": "priority: low", "color": "0e8a16", "description": "Useful work with no current urgency"},
+
+  {"category": "effort", "name": "effort: small", "color": "c2e0c6", "description": "Focused change with a narrow verification surface"},
+  {"category": "effort", "name": "effort: medium", "color": "fef2c0", "description": "Multi-file change with moderate design or testing work"},
+  {"category": "effort", "name": "effort: large", "color": "f9d0c4", "description": "Broad change that should be split into reviewed increments"},
+
+  {"category": "contract", "name": "contract: scenario-v1", "color": "5319e7", "description": "Frozen scenario and journal contract version 1"},
+  {"category": "contract", "name": "contract: scenario-v2", "color": "5319e7", "description": "Frozen scenario and journal contract version 2"},
+  {"category": "contract", "name": "contract: scenario-v3", "color": "5319e7", "description": "Transitional scenario and journal contract version 3"},
+  {"category": "contract", "name": "contract: scenario-v4", "color": "5319e7", "description": "Current scenario and journal contract version 4"},
+  {"category": "contract", "name": "contract: strategy-v1", "color": "7057ff", "description": "Historical external strategy protocol version 1"},
+  {"category": "contract", "name": "contract: strategy-v2", "color": "7057ff", "description": "Historical external strategy protocol version 2"},
+  {"category": "contract", "name": "contract: strategy-v3", "color": "7057ff", "description": "Current external strategy protocol version 3"},
+
+  {"category": "dependency", "name": "dependency: persistra", "color": "006b75", "description": "Requires coordinated behavior or validation in Persistra"},
+  {"category": "dependency", "name": "dependency: upstream", "color": "006b75", "description": "Depends on an external project or toolchain"},
+  {"category": "dependency", "name": "dependency: blocked", "color": "b60205", "description": "Cannot proceed until a named dependency is resolved"}
+]

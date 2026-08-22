@@ -1,0 +1,59 @@
+name: Cross-repository compatibility
+description: Report or propose coordinated behavior between Trading Engine and Persistra.
+title: "chore: coordinate compatibility "
+labels: ["enhancement", "dependency: persistra"]
+assignees: []
+body:
+  - type: input
+    id: engine-revision
+    attributes:
+      label: Trading Engine revision
+      placeholder: Full commit SHA
+    validations:
+      required: true
+  - type: input
+    id: persistra-revision
+    attributes:
+      label: Persistra revision
+      placeholder: Full commit SHA
+    validations:
+      required: true
+  - type: input
+    id: contracts
+    attributes:
+      label: Contract versions
+      placeholder: scenario v3, journal v3, strategy v3
+    validations:
+      required: true
+  - type: dropdown
+    id: owner
+    attributes:
+      label: Owning boundary
+      options:
+        - Trading Engine consumer/runtime behavior
+        - Persistra producer/host behavior
+        - Versioned contract shared by both repositories
+        - Not yet known
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Compatibility behavior
+      description: Describe the expected handoff and the observed failure or proposed change.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction and evidence
+      description: Include exact commands, sanitized fixtures, diagnostics, and CI links.
+    validations:
+      required: true
+  - type: textarea
+    id: coordination
+    attributes:
+      label: Coordinated update
+      description: Identify which pin, tests, contracts, and documentation each repository changes.
+    validations:
+      required: true
