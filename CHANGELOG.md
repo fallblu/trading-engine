@@ -5,6 +5,8 @@
 - Add structured issue and pull-request intake, reviewed planning-label and repository metadata,
   explicit compatibility guarantees, a pinned required Persistra baseline, and a manual
   nonrequired latest-head signal.
+- Verify exact canonical journal bytes across locked, dependency-bound, and operating-system CI
+  cells, with safe concurrency cancellation and documented required versus informational gates.
 
 ## 1.0.0 — 2026-08-21
 

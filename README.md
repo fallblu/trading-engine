@@ -225,6 +225,7 @@ do not provide reducer snapshots or restart recovery.
 - [Strategy transcript JSON Schema](contracts/strategy/v3/transcript.schema.json)
 - [Execution model](docs/execution-model.md)
 - [OCaml coverage](docs/coverage.md)
+- [Continuous integration and portability matrix](docs/continuous-integration.md)
 - [Performance](docs/performance.md)
 - [Reducer property testing](docs/reducer-property-testing.md)
 - [Protocol fuzzing](docs/fuzzing.md)

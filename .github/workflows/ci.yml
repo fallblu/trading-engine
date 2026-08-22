@@ -14,6 +14,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.ref_type == 'branch' && !github.ref_protected) }}
+
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -30,6 +34,46 @@ jobs:
           python-version: "3.12"
       - run: make bootstrap
       - run: make check
+
+  environment-matrix:
+    name: environment (${{ matrix.name }})
+    continue-on-error: ${{ matrix.informational }}
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - name: lowest-ubuntu
+            runner: ubuntu-latest
+            dependency-band: lowest
+            target: dependency-band-check
+            informational: false
+          - name: highest-ubuntu
+            runner: ubuntu-latest
+            dependency-band: highest
+            target: dependency-band-check
+            informational: false
+          - name: highest-macos
+            runner: macos-15
+            dependency-band: highest
+            target: determinism-check
+            informational: true
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ocaml/setup-ocaml@605a7e998e76e035b82c14d618a6e1010732c4ce # v3.7.1
+        with:
+          ocaml-compiler: "5.5.0"
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          python-version: "3.12"
+      - name: Install ${{ matrix.dependency-band }} dependency band
+        run: ./scripts/bootstrap-development-environment "${{ matrix.dependency-band }}"
+      - name: Run ${{ matrix.target }}
+        run: make "${{ matrix.target }}"
 
   ocaml-coverage:
     runs-on: ubuntu-latest
