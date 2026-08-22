@@ -32,10 +32,6 @@ type stream_item = {
   action_ids : Id.Corporate_action.Set.t;
 }
 
-module Int64_set = Set.Make (Int64)
-module Int64_map = Map.Make (Int64)
-module String_set = Set.Make (String)
-
 let ( let* ) result function_ =
   match result with Ok value -> function_ value | Error _ as error -> error
 
@@ -152,6 +148,22 @@ let map_list parse values =
     Ok (value :: values)
   in
   List.fold_left step (Ok []) values |> Result.map List.rev
+
+let at json_path result =
+  Result.map_error
+    (fun message -> Scenario_shape.error ~json_path message)
+    result
+
+let map_list_at root parse values =
+  let step result (index, value) =
+    let* values = result in
+    let* value = parse value |> at (Printf.sprintf "%s[%d]" root index) in
+    Ok (value :: values)
+  in
+  values
+  |> List.mapi (fun index value -> (index, value))
+  |> List.fold_left step (Ok [])
+  |> Result.map List.rev
 
 let parse_id parse ~name json =
   let* value = string ~name json in
@@ -571,393 +583,137 @@ let parse_slice json =
   Market_slice.create ~slice_sequence ~start_at ~end_at ~available_at
     ~received_at ~bars ~fx_rates ~corporate_actions
 
-let changes_orders = function
-  | Strategy.Target_weights _ | Strategy.Target_quantities _
-  | Strategy.Submit_order _ | Strategy.Cancel_order _ ->
-      true
-  | Strategy.Emit_metric _ -> false
+let child root field = root ^ "." ^ field
 
-let validate_portfolio_target risk catalog = function
-  | Strategy.Target_weights targets ->
-      let ids =
-        List.map
-          (fun (target : Strategy.weight_target) -> target.instrument_id)
-          targets
-      in
-      let unique = List.sort_uniq Id.Instrument.compare ids in
-      if List.length unique <> List.length ids then
-        Error "target_weights must contain each instrument exactly once"
-      else if
-        not (Id.Instrument.Set.equal catalog (Id.Instrument.Set.of_list ids))
-      then Error "target_weights must cover every configured instrument"
-      else
-        let gross =
-          List.fold_left
-            (fun result (target : Strategy.weight_target) ->
-              let* total = result in
-              let* absolute = Scalar.Weight.absolute target.Strategy.weight in
-              Scalar.Weight.add total absolute)
-            (Ok Scalar.Weight.zero) targets
-        in
-        let* gross = gross in
-        if
-          Int64.compare
-            (Scalar.Weight.to_micros gross)
-            (Scalar.Ratio.to_micros (Risk.max_leverage risk))
-          > 0
-        then Error "target gross weight exceeds maximum leverage"
-        else Ok ()
-  | Strategy.Target_quantities targets ->
-      let ids =
-        List.map
-          (fun (target : Strategy.quantity_target) -> target.instrument_id)
-          targets
-      in
-      let unique = List.sort_uniq Id.Instrument.compare ids in
-      if List.length unique <> List.length ids then
-        Error "target_quantities must contain each instrument exactly once"
-      else if
-        not (Id.Instrument.Set.equal catalog (Id.Instrument.Set.of_list ids))
-      then Error "target_quantities must cover every configured instrument"
-      else
-        List.fold_left
-          (fun result (target : Strategy.quantity_target) ->
-            let* () = result in
-            match Risk.instrument risk target.Strategy.instrument_id with
-            | None -> Error "target quantity refers to an unknown instrument"
-            | Some instrument ->
-                if
-                  not
-                    (Scalar.Quantity.is_multiple target.quantity
-                       ~lot:instrument.Instrument.lot_size)
-                then
-                  Error "target quantity is not aligned to its instrument lot"
-                else Risk.check_position risk target.quantity)
-          (Ok ()) targets
-  | Strategy.Submit_order request -> (
-      if not (Id.Instrument.Set.mem request.Order.instrument_id catalog) then
-        Error "order refers to an unknown instrument"
-      else if
-        Scalar.Quantity.compare request.quantity (Risk.max_order_quantity risk)
-        > 0
-      then Error "order exceeds the maximum order quantity"
-      else
-        match Risk.instrument risk request.instrument_id with
-        | None -> Error "order refers to an unknown instrument"
-        | Some instrument -> (
-            if
-              not
-                (Scalar.Quantity.is_multiple request.quantity
-                   ~lot:instrument.Instrument.lot_size)
-            then
-              Error "order quantity is not aligned to the instrument lot size"
-            else
-              match request.kind with
-              | Order.Market -> Ok ()
-              | Order.Limit price ->
-                  if Scalar.Price.is_multiple price ~tick:instrument.tick_size
-                  then Ok ()
-                  else
-                    Error
-                      "limit price is not aligned to the instrument tick size"))
-  | Strategy.Cancel_order _ | Strategy.Emit_metric _ -> Ok ()
-
-let validate_slices ~base_currency ~currencies ~instruments slices =
-  let catalog =
-    List.map (fun instrument -> instrument.Instrument.id) instruments
-    |> Id.Instrument.Set.of_list
-  in
-  let instrument_map =
-    List.fold_left
-      (fun map instrument ->
-        Id.Instrument.Map.add instrument.Instrument.id instrument map)
-      Id.Instrument.Map.empty instruments
-  in
-  let expected_currencies = String_set.of_list currencies in
-  let one = Scalar.Price.of_decimal_string "1" |> Result.get_ok in
-  let rec validate previous_sequence previous_end previous_received action_ids =
-    function
-    | [] -> Ok ()
-    | market_slice :: remaining ->
-        let ids =
-          List.map
-            (fun bar -> bar.Bar.instrument_id)
-            market_slice.Market_slice.bars
-          |> Id.Instrument.Set.of_list
-        in
-        let fx_currencies =
-          List.map
-            (fun mark -> mark.Market_slice.currency)
-            market_slice.Market_slice.fx_rates
-          |> String_set.of_list
-        in
-        let actions_valid =
-          List.for_all
-            (fun action ->
-              Id.Instrument.Set.mem action.Corporate_action.instrument_id
-                catalog)
-            market_slice.corporate_actions
-        in
-        let duplicate_action =
-          List.find_opt
-            (fun action ->
-              Id.Corporate_action.Set.mem action.Corporate_action.id action_ids)
-            market_slice.corporate_actions
-        in
-        let bars_aligned =
-          List.for_all
-            (fun bar ->
-              match
-                Id.Instrument.Map.find_opt bar.Bar.instrument_id instrument_map
-              with
-              | None -> false
-              | Some instrument ->
-                  List.for_all
-                    (fun price ->
-                      Scalar.Price.is_multiple price ~tick:instrument.tick_size)
-                    [
-                      bar.open_price;
-                      bar.high_price;
-                      bar.low_price;
-                      bar.close_price;
-                    ]
-                  && Option.for_all
-                       (fun volume ->
-                         Scalar.Quantity.is_multiple volume
-                           ~lot:instrument.lot_size)
-                       bar.volume)
-            market_slice.bars
-        in
-        if not (Id.Instrument.Set.equal catalog ids) then
-          Error "each market slice must contain every configured instrument"
-        else if not (String_set.equal expected_currencies fx_currencies) then
-          Error "each market slice must contain every scenario currency FX rate"
-        else if
-          not
-            (Option.exists
-               (fun rate -> Scalar.Price.equal rate one)
-               (Market_slice.fx_rate market_slice base_currency))
-        then Error "the base-currency FX rate must equal one"
-        else if not actions_valid then
-          Error "corporate action refers to an unknown instrument"
-        else if Option.is_some duplicate_action then
-          Error "corporate action IDs must be unique across the scenario"
-        else if not bars_aligned then
-          Error
-            "market prices and volumes must align with instrument increments"
-        else if
-          Option.exists
-            (fun sequence ->
-              Int64.compare market_slice.slice_sequence sequence <= 0)
-            previous_sequence
-        then Error "market slice sequence must increase"
-        else if
-          Option.exists
-            (fun end_at -> Ptime.compare market_slice.start_at end_at < 0)
-            previous_end
-        then Error "market slice start must not precede previous end"
-        else if
-          Option.exists
-            (fun received_at ->
-              Ptime.compare market_slice.received_at received_at < 0)
-            previous_received
-        then Error "market slice receipt time must not move backward"
-        else
-          let action_ids =
-            List.fold_left
-              (fun ids action ->
-                Id.Corporate_action.Set.add action.Corporate_action.id ids)
-              action_ids market_slice.corporate_actions
-          in
-          validate (Some market_slice.slice_sequence) (Some market_slice.end_at)
-            (Some market_slice.received_at) action_ids remaining
-  in
-  validate None None None Id.Corporate_action.Set.empty slices
-
-let validate_schedule risk catalog schedule slices =
-  let rec index_slices index = function
-    | [] -> index
-    | [ anchor ] ->
-        Int64_map.add anchor.Market_slice.slice_sequence (anchor, None) index
-    | anchor :: (next :: _ as remaining) ->
-        let index =
-          Int64_map.add anchor.Market_slice.slice_sequence (anchor, Some next)
-            index
-        in
-        index_slices index remaining
-  in
-  let slice_index = index_slices Int64_map.empty slices in
-  let validate_item sequence intents =
-    if Int64.compare sequence 0L <= 0 then
-      Error "scheduled slice sequence must be positive"
-    else
-      match Int64_map.find_opt sequence slice_index with
-      | None ->
-          Error
-            (Printf.sprintf
-               "scheduled intents refer to missing market slice sequence %Ld"
-               sequence)
-      | Some (anchor, next) -> (
-          let* () =
-            List.fold_left
-              (fun result intent ->
-                let* () = result in
-                validate_portfolio_target risk catalog intent)
-              (Ok ()) intents
-          in
-          match next with
-          | Some next
-            when List.exists changes_orders intents
-                 && Ptime.compare anchor.received_at next.start_at > 0 ->
-              Error
-                (Printf.sprintf
-                   "scheduled order intent after slice %Ld is received after \
-                    the next executable market slice starts"
-                   sequence)
-          | None | Some _ -> Ok ())
-  in
-  let rec validate previous = function
-    | [] -> Ok ()
-    | (sequence, intents) :: remaining ->
-        if
-          Option.exists
-            (fun prior -> Int64.compare sequence prior <= 0)
-            previous
-        then Error "schedule sequences must increase"
-        else
-          let* () = validate_item sequence intents in
-          validate (Some sequence) remaining
-  in
-  validate None schedule
-
-let of_yojson_result json =
-  let* fields =
-    object_fields ~name:"scenario"
-      ~expected:
-        [
-          "contract_version";
-          "metadata";
-          "run_id";
-          "base_currency";
-          "initial_cash";
-          "instruments";
-          "risk";
-          "execution";
-          "max_internal_events";
-          "schedule";
-          "slices";
-        ]
-      json
-  in
-  let* contract_json = field fields "contract_version" in
-  let* contract_version = string ~name:"contract_version" contract_json in
+let construct_header ~root ~contract_path ~contract_version
+    (shape : Scenario_shape.common) =
   if not (Contract.is_supported contract_version) then
     Error
-      (Printf.sprintf
-         "unsupported scenario contract_version %S (expected one of %s)"
-         contract_version
-         (String.concat ", " Contract.supported_versions))
+      (Scenario_shape.error ~json_path:contract_path
+         (Printf.sprintf
+            "unsupported scenario contract_version %S (expected one of %s)"
+            contract_version
+            (String.concat ", " Contract.supported_versions)))
   else
-    let* metadata = field fields "metadata" in
     let* () =
-      match metadata with
-      | `Assoc _ -> validate_metadata metadata
-      | _ -> Error "metadata must be a JSON object"
+      match shape.metadata with
+      | `Assoc _ ->
+          validate_metadata shape.metadata |> at (child root "metadata")
+      | _ ->
+          Error
+            (Scenario_shape.error ~json_path:(child root "metadata")
+               "metadata must be a JSON object")
     in
-    let* run_json = field fields "run_id" in
-    let* run_id = parse_id Id.Run.of_string ~name:"run_id" run_json in
-    let* currency_json = field fields "base_currency" in
-    let* base_currency = string ~name:"base_currency" currency_json in
-    let* cash_json = field fields "initial_cash" in
-    let* cash_json = list ~name:"initial_cash" cash_json in
-    let* initial_cash = map_list parse_cash_balance cash_json in
-    let* () =
-      Account.create ~base_currency ~initial_cash |> Result.map (fun _ -> ())
+    let metadata = shape.metadata in
+    let* run_id =
+      parse_id Id.Run.of_string ~name:"run_id" shape.run_id
+      |> at (child root "run_id")
     in
-    let* instruments_json = field fields "instruments" in
-    let* instruments_json = list ~name:"instruments" instruments_json in
-    if List.length instruments_json > Resource_limits.catalog_instruments then
-      Error
-        (Printf.sprintf "catalog instrument count is %d; limit is %d"
-           (List.length instruments_json)
-           Resource_limits.catalog_instruments)
-    else
-      let* instruments = map_list parse_instrument instruments_json in
-      if instruments = [] then
-        Error "scenario must define at least one instrument"
-      else
-        let currencies =
-          base_currency
-          :: List.map
-               (fun instrument -> instrument.Instrument.quote_currency)
-               instruments
-          |> List.sort_uniq String.compare
-        in
-        let cash_currencies =
-          List.map fst initial_cash |> List.sort_uniq String.compare
-        in
-        if cash_currencies <> currencies then
-          Error "initial_cash must contain every scenario currency exactly once"
-        else
-          let catalog =
-            List.map (fun instrument -> instrument.Instrument.id) instruments
-            |> Id.Instrument.Set.of_list
-          in
-          let* risk_json = field fields "risk" in
-          let* risk = parse_risk base_currency instruments risk_json in
-          let* execution_json = field fields "execution" in
-          let* execution_model, execution = parse_execution execution_json in
-          let* maximum_json = field fields "max_internal_events" in
-          let* max_internal_events =
-            integer ~name:"max_internal_events" maximum_json
-          in
-          if max_internal_events <= 0 then
-            Error "max_internal_events must be positive"
-          else if max_internal_events > Resource_limits.internal_events then
-            Error
-              (Printf.sprintf "internal event count is %d; limit is %d"
-                 max_internal_events Resource_limits.internal_events)
-          else
-            let* schedule_json = field fields "schedule" in
-            let* schedule_json = list ~name:"schedule" schedule_json in
-            let* schedule = map_list parse_schedule_item schedule_json in
-            let* slices_json = field fields "slices" in
-            let* slices_json = list ~name:"slices" slices_json in
-            let* slices = map_list parse_slice slices_json in
-            let* () =
-              validate_slices ~base_currency ~currencies ~instruments slices
-            in
-            let* () = validate_schedule risk catalog schedule slices in
-            Ok
-              {
-                contract_version;
-                metadata;
-                run_id;
-                base_currency;
-                initial_cash;
-                instruments;
-                risk;
-                execution_model;
-                execution;
-                max_internal_events;
-                schedule;
-                slices;
-              }
+    let* base_currency =
+      string ~name:"base_currency" shape.base_currency
+      |> at (child root "base_currency")
+    in
+    let* initial_cash_json =
+      list ~name:"initial_cash" shape.initial_cash
+      |> at (child root "initial_cash")
+    in
+    let* initial_cash =
+      map_list_at
+        (child root "initial_cash")
+        parse_cash_balance initial_cash_json
+    in
+    let* instruments_json =
+      list ~name:"instruments" shape.instruments
+      |> at (child root "instruments")
+    in
+    let* instruments =
+      map_list_at (child root "instruments") parse_instrument instruments_json
+    in
+    let* max_internal_events =
+      integer ~name:"max_internal_events" shape.max_internal_events
+      |> at (child root "max_internal_events")
+    in
+    let* currencies, catalog =
+      Scenario_validation.header ~root ~base_currency ~initial_cash ~instruments
+        ~max_internal_events
+    in
+    let* risk =
+      parse_risk base_currency instruments shape.risk |> at (child root "risk")
+    in
+    let* execution_model, execution =
+      parse_execution shape.execution |> at (child root "execution")
+    in
+    let header : stream_header =
+      {
+        contract_version;
+        metadata;
+        run_id;
+        base_currency;
+        initial_cash;
+        instruments;
+        risk;
+        execution_model;
+        execution;
+        max_internal_events;
+      }
+    in
+    Ok (header, currencies, catalog)
+
+let construct_batch (shape : Scenario_shape.batch) =
+  let root = "$" in
+  let contract_path = "$.contract_version" in
+  let* contract_version =
+    string ~name:"contract_version" shape.contract_version |> at contract_path
+  in
+  let* header, currencies, catalog =
+    construct_header ~root ~contract_path ~contract_version shape.common
+  in
+  let* schedule_json =
+    list ~name:"schedule" shape.schedule |> at "$.schedule"
+  in
+  let* schedule = map_list_at "$.schedule" parse_schedule_item schedule_json in
+  let* slices_json = list ~name:"slices" shape.slices |> at "$.slices" in
+  let* slices = map_list_at "$.slices" parse_slice slices_json in
+  let* () =
+    Scenario_validation.batch ~root ~base_currency:header.base_currency
+      ~currencies ~instruments:header.instruments ~risk:header.risk ~catalog
+      ~schedule ~slices
+  in
+  Ok
+    {
+      contract_version = header.contract_version;
+      metadata = header.metadata;
+      run_id = header.run_id;
+      base_currency = header.base_currency;
+      initial_cash = header.initial_cash;
+      instruments = header.instruments;
+      risk = header.risk;
+      execution_model = header.execution_model;
+      execution = header.execution;
+      max_internal_events = header.max_internal_events;
+      schedule;
+      slices;
+    }
+
+let diagnostic code (error : Scenario_shape.error) =
+  Diagnostic.make ~code ~phase:Diagnostic.Validation ~json_path:error.json_path
+    error.message
 
 let of_yojson json =
-  let code, json_path =
+  let code =
     match json with
     | `Assoc fields -> (
         match List.assoc_opt "contract_version" fields with
         | Some (`String supplied) when not (Contract.is_supported supplied) ->
-            (Diagnostic.Scenario_unsupported_contract, "$.contract_version")
-        | _ -> (Diagnostic.Scenario_invalid, "$"))
-    | _ -> (Diagnostic.Scenario_invalid, "$")
+            Diagnostic.Scenario_unsupported_contract
+        | _ -> Diagnostic.Scenario_invalid)
+    | _ -> Diagnostic.Scenario_invalid
   in
   let* () = check_batch_limits json in
-  of_yojson_result json
-  |> Result.map_error (fun message ->
-      Diagnostic.make ~code ~phase:Diagnostic.Validation ~json_path message)
+  let* shape =
+    Scenario_shape.batch json |> Result.map_error (diagnostic code)
+  in
+  construct_batch shape |> Result.map_error (diagnostic code)
 
 let of_string document =
   try Yojson.Safe.from_string document |> of_yojson
@@ -976,123 +732,51 @@ let read_file path =
          ~message:("could not read scenario: " ^ message)
          exception_)
 
-let stream_header_of_yojson_result ~contract_version json =
-  let* fields =
-    object_fields ~name:"scenario stream header payload"
-      ~expected:
-        [
-          "metadata";
-          "run_id";
-          "base_currency";
-          "initial_cash";
-          "instruments";
-          "risk";
-          "execution";
-          "max_internal_events";
-        ]
-      json
-  in
-  let scenario_json =
-    `Assoc
-      ((("contract_version", `String contract_version) :: fields)
-      @ [ ("schedule", `List []); ("slices", `List []) ])
-  in
-  let* scenario = of_yojson_result scenario_json in
-  Ok
-    {
-      contract_version = scenario.contract_version;
-      metadata = scenario.metadata;
-      run_id = scenario.run_id;
-      base_currency = scenario.base_currency;
-      initial_cash = scenario.initial_cash;
-      instruments = scenario.instruments;
-      risk = scenario.risk;
-      execution_model = scenario.execution_model;
-      execution = scenario.execution;
-      max_internal_events = scenario.max_internal_events;
-    }
-
-let stream_item_of_yojson_result header ~previous json =
-  let* fields =
-    object_fields ~name:"scenario stream slice payload"
-      ~expected:[ "market_slice"; "intents" ]
-      json
-  in
-  let* slice_json = field fields "market_slice" in
-  let* market_slice = parse_slice slice_json in
-  let* intents_json = field fields "intents" in
-  let* intents_json = list ~name:"intents" intents_json in
-  let* intents = map_list parse_intent intents_json in
-  let catalog =
-    List.map (fun instrument -> instrument.Instrument.id) header.instruments
-    |> Id.Instrument.Set.of_list
-  in
-  let slices =
-    match previous with
-    | None -> [ market_slice ]
-    | Some item -> [ item.market_slice; market_slice ]
-  in
-  let prior_action_ids =
-    match previous with
-    | None -> Id.Corporate_action.Set.empty
-    | Some item -> item.action_ids
-  in
-  let* action_ids =
-    List.fold_left
-      (fun result action ->
-        let* ids = result in
-        if Id.Corporate_action.Set.mem action.Corporate_action.id ids then
-          Error "corporate action IDs must be unique across the scenario stream"
-        else Ok (Id.Corporate_action.Set.add action.id ids))
-      (Ok prior_action_ids) market_slice.corporate_actions
-  in
-  let currencies =
-    header.base_currency
-    :: List.map
-         (fun instrument -> instrument.Instrument.quote_currency)
-         header.instruments
-    |> List.sort_uniq String.compare
-  in
-  let* () =
-    validate_slices ~base_currency:header.base_currency ~currencies
-      ~instruments:header.instruments slices
-  in
-  let* () =
-    List.fold_left
-      (fun result intent ->
-        let* () = result in
-        validate_portfolio_target header.risk catalog intent)
-      (Ok ()) intents
-  in
-  let* () =
-    match previous with
-    | Some item
-      when List.exists changes_orders item.intents
-           && Ptime.compare item.market_slice.received_at market_slice.start_at
-              > 0 ->
-        Error
-          (Printf.sprintf
-             "scheduled order intent after slice %Ld is received after the \
-              next executable market slice starts"
-             item.market_slice.slice_sequence)
-    | None | Some _ -> Ok ()
-  in
-  Ok { market_slice; intents; action_ids }
-
 let stream_header_of_yojson ~contract_version json =
-  let code, json_path =
+  let code =
     if Contract.is_supported contract_version then
-      (Diagnostic.Scenario_stream_invalid, "$.payload")
-    else (Diagnostic.Scenario_unsupported_contract, "$.contract_version")
+      Diagnostic.Scenario_stream_invalid
+    else Diagnostic.Scenario_unsupported_contract
   in
   let* () = check_stream_header_limits json in
-  stream_header_of_yojson_result ~contract_version json
-  |> Result.map_error (fun message ->
-      Diagnostic.make ~code ~phase:Diagnostic.Validation ~json_path message)
+  let* shape =
+    Scenario_shape.stream_header json |> Result.map_error (diagnostic code)
+  in
+  construct_header ~root:"$.payload" ~contract_path:"$.contract_version"
+    ~contract_version shape
+  |> Result.map (fun (header, _, _) -> header)
+  |> Result.map_error (diagnostic code)
 
 let stream_item_of_yojson header ~previous json =
   let* () = check_stream_item_limits json in
-  stream_item_of_yojson_result header ~previous json
-  |> Result.map_error (fun message ->
-      Diagnostic.make ~code:Diagnostic.Scenario_stream_invalid
-        ~phase:Diagnostic.Validation ~json_path:"$.payload" message)
+  let code = Diagnostic.Scenario_stream_invalid in
+  let* shape =
+    Scenario_shape.stream_item json |> Result.map_error (diagnostic code)
+  in
+  let* market_slice =
+    parse_slice shape.market_slice
+    |> at "$.payload.market_slice"
+    |> Result.map_error (diagnostic code)
+  in
+  let* intents_json =
+    list ~name:"intents" shape.intents
+    |> at "$.payload.intents"
+    |> Result.map_error (diagnostic code)
+  in
+  let* intents =
+    map_list_at "$.payload.intents" parse_intent intents_json
+    |> Result.map_error (diagnostic code)
+  in
+  let previous_slice, previous_intents, prior_action_ids =
+    match previous with
+    | None -> (None, [], Id.Corporate_action.Set.empty)
+    | Some item -> (Some item.market_slice, item.intents, item.action_ids)
+  in
+  let* action_ids =
+    Scenario_validation.stream_item ~root:"$.payload"
+      ~base_currency:header.base_currency ~instruments:header.instruments
+      ~risk:header.risk ~previous_slice ~previous_intents ~prior_action_ids
+      ~market_slice ~intents
+    |> Result.map_error (diagnostic code)
+  in
+  Ok { market_slice; intents; action_ids }

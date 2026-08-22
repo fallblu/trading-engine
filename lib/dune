@@ -1,6 +1,7 @@
 (library
  (name trading_engine)
  (public_name trading_engine)
+ (private_modules scenario_shape scenario_validation)
  (foreign_stubs
   (language c)
   (names process_tree_stubs))
