@@ -45,6 +45,10 @@ documentation tools in `.venv-docs`, stages versioned contracts without modifyin
 the public OCaml interfaces, and validates the complete output. See the
 [documentation platform](docs/documentation-platform.md) for publication and link-checking policy.
 
+Run `make release-check` only from a clean tracked revision to reproduce the complete candidate
+artifact set twice and verify its install. This never tags or publishes. See
+[release artifacts and provenance](docs/release-artifacts.md) for the human approval boundary.
+
 The gate formats a copy check, builds every target, and runs all tests. Keep commits small,
 coherent, and working. Use subject-only conventional commit messages such as
 `feat: implement deterministic order matching`.

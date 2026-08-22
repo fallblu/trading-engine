@@ -1,0 +1,38 @@
+#!/bin/sh
+
+set -eu
+
+repository_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+version=${VERSION:-}
+target=linux-x86_64
+revision=$(git -C "$repository_root" rev-parse HEAD)
+epoch=$(git -C "$repository_root" show -s --format=%ct HEAD)
+workspace=$(mktemp -d /tmp/trading-engine-release-check.XXXXXX)
+trap 'rm -rf -- "$workspace"' EXIT HUP INT TERM
+
+export SOURCE_DATE_EPOCH=$epoch
+
+opam lint "$repository_root/trading_engine.opam"
+rm -rf -- "$repository_root/_build"
+"$repository_root/scripts/build-release-artifacts" "$workspace/first" "$version"
+rm -rf -- "$repository_root/_build"
+"$repository_root/scripts/build-release-artifacts" "$workspace/second" "$version"
+
+diff -r --no-dereference "$workspace/first" "$workspace/second"
+
+if [ -z "$version" ]; then
+  version=$(sed -n 's/^(version \([^)]*\))$/\1/p' "$repository_root/dune-project")
+fi
+python3 "$repository_root/scripts/release_artifacts.py" verify \
+  --root "$repository_root" \
+  --output "$workspace/first" \
+  --version "$version" \
+  --target "$target" \
+  --revision "$revision" \
+  --epoch "$epoch"
+
+release_output="$repository_root/release"
+rm -rf -- "$release_output"
+mkdir -p "$release_output"
+cp -R "$workspace/first/." "$release_output/"
+printf '%s\n' "Release artifacts reproduced exactly and installation passed."

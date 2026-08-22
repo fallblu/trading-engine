@@ -1,0 +1,112 @@
+#!/bin/sh
+
+set -eu
+
+repository_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+output=${1:-"$repository_root/release"}
+requested_version=${2:-}
+
+fail() {
+  printf '%s\n' "error: $1" >&2
+  exit 1
+}
+
+case "$output" in
+  "$repository_root/release" | /tmp/trading-engine-release-check.*/first | /tmp/trading-engine-release-check.*/second) ;;
+  *) fail "release output must be the repository release directory or checker workspace" ;;
+esac
+
+command -v git >/dev/null 2>&1 || fail "git is required"
+command -v gzip >/dev/null 2>&1 || fail "gzip is required"
+command -v tar >/dev/null 2>&1 || fail "tar is required"
+tar --version | grep -Fq "GNU tar" || fail "GNU tar is required"
+
+case "$(uname -s)-$(uname -m)" in
+  Linux-x86_64) target=linux-x86_64 ;;
+  *) fail "the checked release target is Linux x86_64" ;;
+esac
+
+version=$(sed -n 's/^(version \([^)]*\))$/\1/p' "$repository_root/dune-project")
+[ -n "$version" ] || fail "dune-project version is missing"
+if [ -n "$requested_version" ] && [ "$requested_version" != "$version" ]; then
+  fail "requested version $requested_version differs from dune-project $version"
+fi
+case "$version" in
+  *[!0-9A-Za-z.+~-]* | "") fail "version contains unsupported characters" ;;
+esac
+
+if [ "${RELEASE_ALLOW_DIRTY:-0}" != 1 ]; then
+  git -C "$repository_root" diff --quiet || fail "tracked worktree changes are not releasable"
+  git -C "$repository_root" diff --cached --quiet || fail "staged changes are not releasable"
+fi
+
+revision=$(git -C "$repository_root" rev-parse HEAD)
+epoch=${SOURCE_DATE_EPOCH:-$(git -C "$repository_root" show -s --format=%ct HEAD)}
+case "$epoch" in
+  *[!0-9]* | "") fail "SOURCE_DATE_EPOCH must be a nonnegative integer" ;;
+esac
+export SOURCE_DATE_EPOCH=$epoch
+
+package="trading-engine-$version"
+workspace=$(mktemp -d /tmp/trading-engine-release.XXXXXX)
+trap 'rm -rf -- "$workspace"' EXIT HUP INT TERM
+
+rm -rf -- "$output"
+mkdir -p "$output"
+
+make -C "$repository_root" docs-build
+opam exec --switch "$repository_root" -- dune build --root "$repository_root" @install
+
+install_root="$repository_root/_build/release-install"
+rm -rf -- "$install_root"
+opam exec --switch "$repository_root" -- dune install \
+  --root "$repository_root" \
+  --prefix "$install_root/$package"
+
+contracts_root="$workspace/contracts/$package"
+documentation_root="$workspace/documentation/$package"
+mkdir -p "$contracts_root" "$documentation_root"
+cp -R "$repository_root/contracts" "$contracts_root/contracts"
+cp -R "$repository_root/site/." "$documentation_root/"
+
+normalize_tree() {
+  find "$1" -exec touch -h -d "@$epoch" {} +
+}
+
+create_archive() {
+  archive_root=$1
+  archive_name=$2
+  normalize_tree "$archive_root"
+  tar \
+    --sort=name \
+    --format=pax \
+    --mtime="@$epoch" \
+    --owner=0 \
+    --group=0 \
+    --numeric-owner \
+    --pax-option=delete=atime,delete=ctime \
+    -C "$archive_root" \
+    -cf - \
+    "$package" | gzip -n -9 >"$output/$archive_name"
+}
+
+create_archive "$install_root" "$package-$target.tar.gz"
+create_archive "$workspace/contracts" "$package-contracts.tar.gz"
+create_archive "$workspace/documentation" "$package-documentation.tar.gz"
+
+git -C "$repository_root" archive \
+  --format=tar \
+  --prefix="$package/" \
+  HEAD | gzip -n -9 >"$output/$package-source.tar.gz"
+cp "$repository_root/trading_engine.opam" "$output/$package.opam"
+
+python3 "$repository_root/scripts/release_artifacts.py" generate \
+  --root "$repository_root" \
+  --output "$output" \
+  --version "$version" \
+  --target "$target" \
+  --revision "$revision" \
+  --epoch "$epoch"
+
+printf '%s\n' "Release candidate: $version ($target, $revision)"
+find "$output" -maxdepth 1 -type f -printf '%f\n' | sort

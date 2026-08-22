@@ -42,6 +42,7 @@ nav:
       - Reducer property testing: docs/reducer-property-testing.md
       - Protocol fuzzing: docs/fuzzing.md
       - Documentation platform: docs/documentation-platform.md
+      - Release artifacts: docs/release-artifacts.md
   - Contributing: CONTRIBUTING.md
   - Support: SUPPORT.md
   - Changelog: CHANGELOG.md
