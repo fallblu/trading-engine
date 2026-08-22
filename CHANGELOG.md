@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Establish a security baseline with private reporting guidance, grouped dependency proposals,
+  dependency review, and CodeQL analysis for workflows and Python tooling.
 - Add structured issue and pull-request intake, reviewed planning-label and repository metadata,
   explicit compatibility guarantees, a pinned required Persistra baseline, and a manual
   nonrequired latest-head signal.

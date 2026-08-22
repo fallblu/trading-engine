@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - .github/workflows/release-candidate.yml
+      - .github/SECURITY.md
       - bin/**
       - contracts/**
       - docs/**
@@ -29,6 +30,7 @@ on:
       - develop
     paths:
       - .github/workflows/release-candidate.yml
+      - .github/SECURITY.md
       - bin/**
       - contracts/**
       - docs/**
