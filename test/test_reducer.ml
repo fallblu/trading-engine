@@ -796,7 +796,9 @@ let explicit_phase_order_is_stable () =
     |> ok
   in
   let metric =
-    T.Strategy.Emit_metric { name = "phase.boundary"; value = "reached" }
+    T.Metric.create ~name:"phase.boundary" ~value:(T.Metric.String "reached") ()
+    |> ok
+    |> fun metric -> T.Strategy.Emit_metric metric
   in
   let state = runner [ (1L, [ target "2" ]); (2L, [ metric; target "0" ]) ] in
   let state, _ = Runner.process_slice state (market_slice 1L) |> ok in

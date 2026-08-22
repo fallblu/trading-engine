@@ -47,7 +47,7 @@ type intent =
   | Target_quantities of quantity_target list
   | Submit_order of Order.request
   | Cancel_order of Id.Order.t
-  | Emit_metric of { name : string; value : string }
+  | Emit_metric of Metric.t
 
 val context :
   now:Ptime.t ->

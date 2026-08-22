@@ -103,7 +103,8 @@ let group_kind_to_string = function
 let nullable render = Option.fold ~none:`Null ~some:render
 
 let modern_protocol protocol_version =
-  List.mem protocol_version [ "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6"; "5" ]
+  List.mem protocol_version
+    [ "14"; "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6"; "5" ]
 
 let financing_to_yojson policy =
   `Assoc
@@ -253,7 +254,7 @@ let execution_to_yojson ~protocol_version model execution =
       ]
   in
   if
-    List.mem protocol_version [ "13"; "12"; "11" ]
+    List.mem protocol_version [ "14"; "13"; "12"; "11" ]
     && List.mem
          (Execution_model.name model)
          [ "completed_bar_next_open_v1"; "completed_bar_adverse_touch_v1" ]
@@ -291,7 +292,7 @@ let execution_to_yojson ~protocol_version model execution =
             ] );
       ]
   else if
-    List.mem protocol_version [ "13"; "12" ]
+    List.mem protocol_version [ "14"; "13"; "12" ]
     && String.equal (Execution_model.name model) "quote_trade_v1"
   then
     `Assoc
@@ -309,7 +310,7 @@ let execution_to_yojson ~protocol_version model execution =
             ] );
       ]
   else if
-    String.equal protocol_version "13"
+    List.mem protocol_version [ "14"; "13" ]
     && String.equal (Execution_model.name model) "order_book_v1"
   then
     `Assoc
@@ -328,7 +329,8 @@ let execution_to_yojson ~protocol_version model execution =
                 `Int (Option.get (Execution.book_depth_limit execution)) );
             ] );
       ]
-  else if List.mem protocol_version [ "13"; "12"; "11"; "10"; "9"; "8"; "7" ]
+  else if
+    List.mem protocol_version [ "14"; "13"; "12"; "11"; "10"; "9"; "8"; "7" ]
   then
     `Assoc
       [
@@ -368,6 +370,7 @@ let execution_to_yojson ~protocol_version model execution =
 
 let protocol_version initialization =
   match initialization.scenario_contract_version with
+  | "16" -> "14"
   | "15" -> "13"
   | "14" -> "12"
   | "13" -> "11"
@@ -417,7 +420,9 @@ let initialize_message ~sequence:message_sequence initialization =
     ]
   in
   let fields =
-    if List.mem protocol_version [ "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6" ]
+    if
+      List.mem protocol_version
+        [ "14"; "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6" ]
     then
       let initial_portfolio =
         Option.fold ~none:`Null ~some:Codec.initial_portfolio_to_yojson
@@ -431,7 +436,9 @@ let initialize_message ~sequence:message_sequence initialization =
             ( "venue_calendars",
               `List (List.map venue_calendar_to_yojson venue_calendars) );
           ];
-          (if List.mem protocol_version [ "13"; "12"; "11"; "10"; "9"; "8" ]
+          (if
+             List.mem protocol_version
+               [ "14"; "13"; "12"; "11"; "10"; "9"; "8" ]
            then
              [
                ( "financing",
@@ -439,7 +446,8 @@ let initialize_message ~sequence:message_sequence initialization =
                    initialization.financing );
              ]
            else []);
-          (if List.mem protocol_version [ "13"; "12"; "11"; "10"; "9" ] then
+          (if List.mem protocol_version [ "14"; "13"; "12"; "11"; "10"; "9" ]
+           then
              [
                ( "settlement",
                  Option.fold ~none:`Null ~some:settlement_to_yojson
@@ -473,14 +481,15 @@ let cash_attribution_to_yojson ~protocol_version
        ("fx_rate", price balance.fx_rate);
        ("base_value", money balance.base_value);
      ]
-    @ (if List.mem protocol_version [ "13"; "12"; "11"; "10"; "9"; "8" ] then
+    @ (if List.mem protocol_version [ "14"; "13"; "12"; "11"; "10"; "9"; "8" ]
+       then
          [
            ("interest", money balance.interest);
            ("base_interest", money balance.base_interest);
          ]
        else [])
     @
-    if List.mem protocol_version [ "13"; "12"; "11"; "10"; "9" ] then
+    if List.mem protocol_version [ "14"; "13"; "12"; "11"; "10"; "9" ] then
       [
         ("settled_amount", money balance.settled_amount);
         ("unsettled_amount", money balance.unsettled_amount);
@@ -500,7 +509,7 @@ let marked_position_to_yojson ~protocol_version
        ("weight", Option.fold ~none:`Null ~some:weight position.weight);
      ]
     @
-    if List.mem protocol_version [ "13"; "12"; "11"; "10"; "9" ] then
+    if List.mem protocol_version [ "14"; "13"; "12"; "11"; "10"; "9" ] then
       [
         ("settled_quantity", quantity position.settled_quantity);
         ("unsettled_quantity", quantity position.unsettled_quantity);
@@ -585,7 +594,7 @@ let context_to_yojson ~protocol_version context =
           (List.map
              (if
                 List.mem protocol_version
-                  [ "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6" ]
+                  [ "14"; "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6" ]
               then Codec.order_to_yojson_v8
               else Codec.order_to_yojson)
              working_orders) );
@@ -598,7 +607,9 @@ let event_to_yojson ~protocol_version = function
         [
           ("type", string "market_slice_closed");
           ( "market_slice",
-            if String.equal protocol_version "13" then
+            if String.equal protocol_version "14" then
+              Codec.market_slice_to_yojson_v16 market_slice
+            else if String.equal protocol_version "13" then
               Codec.market_slice_to_yojson_v15 market_slice
             else if String.equal protocol_version "12" then
               Codec.market_slice_to_yojson_v14 market_slice
@@ -619,7 +630,7 @@ let event_to_yojson ~protocol_version = function
           ( "fill",
             if
               List.mem protocol_version
-                [ "13"; "12"; "11"; "10"; "9"; "8"; "7" ]
+                [ "14"; "13"; "12"; "11"; "10"; "9"; "8"; "7" ]
             then Codec.fill_to_yojson_v9 fill
             else Codec.fill_to_yojson fill );
         ]
@@ -630,7 +641,7 @@ let event_to_yojson ~protocol_version = function
           ( "order",
             if
               List.mem protocol_version
-                [ "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6" ]
+                [ "14"; "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6" ]
             then Codec.order_to_yojson_v8 order
             else Codec.order_to_yojson order );
         ]
@@ -718,7 +729,8 @@ let parse_intents_payload ~protocol_version json =
           let* intent =
             Scenario.intent_of_yojson
               ~contract_version:
-                (if String.equal protocol_version "13" then "15"
+                (if String.equal protocol_version "14" then "16"
+                 else if List.mem protocol_version [ "14"; "13" ] then "15"
                  else if String.equal protocol_version "12" then "14"
                  else if String.equal protocol_version "11" then "13"
                  else if String.equal protocol_version "10" then "12"

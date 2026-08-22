@@ -320,8 +320,11 @@ let command_intents context command =
       ]
   | Emit_metric value ->
       [
-        T.Strategy.Emit_metric
-          { name = "generated.reducer.metric"; value = string_of_int value };
+        ( T.Metric.create ~name:"generated.reducer.metric"
+            ~value:(T.Metric.String (string_of_int value))
+            ()
+        |> Result.get_ok
+        |> fun metric -> T.Strategy.Emit_metric metric );
       ]
 
 module Asset_set = Set.Make (struct
