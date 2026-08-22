@@ -1,0 +1,50 @@
+#!/bin/sh
+
+set -eu
+
+repository_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+schema_environment="$repository_root/.venv-schema"
+schema_lock="$repository_root/requirements/schema.lock"
+
+require_command() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    printf '%s\n' "error: $1 is required; install it and rerun 'make bootstrap'" >&2
+    exit 1
+  fi
+}
+
+require_command opam
+require_command uv
+require_command python3
+
+if [ ! -f "$repository_root/_opam/.opam-switch/switch-config" ]; then
+  printf '%s\n' "Creating the repository-local OCaml 5.5.0 switch..."
+  opam switch create "$repository_root" 5.5.0 --no-install --yes
+fi
+
+printf '%s\n' "Installing locked OCaml development dependencies..."
+opam install "$repository_root" \
+  --deps-only \
+  --with-test \
+  --with-doc \
+  --locked \
+  --require-checksums \
+  --switch "$repository_root" \
+  --yes
+
+if [ ! -x "$schema_environment/bin/python" ]; then
+  printf '%s\n' "Creating the repository-local schema environment..."
+  uv venv \
+    --python "$(command -v python3)" \
+    --no-python-downloads \
+    "$schema_environment"
+fi
+
+printf '%s\n' "Installing locked JSON Schema dependencies..."
+uv pip sync \
+  --python "$schema_environment/bin/python" \
+  --no-python-downloads \
+  --strict \
+  "$schema_lock"
+
+"$repository_root/scripts/check-development-environment"

@@ -126,3 +126,11 @@
    %{dep:../contracts/strategy/v3/message.schema.json}
    %{dep:../contracts/strategy/v3/transcript.schema.json}
    %{dep:../contracts/strategy/v3/fixtures/external.strategy.jsonl})))
+
+(rule
+ (alias runtest)
+ (deps
+  test_development_environment.py
+  ../scripts/check-schema-environment.py)
+ (action
+  (run python3 %{dep:test_development_environment.py})))
