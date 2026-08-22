@@ -70,6 +70,7 @@ let initialization_of_scenario ~scenario_sha256 (scenario : Scenario.t) =
       execution_model = scenario.execution_model;
       execution = scenario.execution;
       financing = scenario.financing;
+      settlement = scenario.settlement;
     }
 
 let initialization_of_header ~scenario_sha256 (header : Scenario.stream_header)
@@ -89,19 +90,25 @@ let initialization_of_header ~scenario_sha256 (header : Scenario.stream_header)
       execution_model = header.execution_model;
       execution = header.execution;
       financing = header.financing;
+      settlement = header.settlement;
     }
 
 let create_runner ~contract_version ~run_id ~scenario_sha256 ~risk
-    ~venue_calendars ~execution_model ~execution ~financing ~max_internal_events
-    ~initial_cash ~initial_portfolio =
+    ~venue_calendars ~execution_model ~execution ~financing ~settlement
+    ~max_internal_events ~initial_cash ~initial_portfolio =
   let* config =
-    (match financing with
-      | None ->
+    (match (financing, settlement) with
+      | None, None ->
           Engine.config_v8 ~contract_version ~risk ~venue_calendars
             ~execution_model ~execution ~max_internal_events
-      | Some financing ->
+      | Some financing, None ->
           Engine.config_v10 ~contract_version ~risk ~venue_calendars
-            ~execution_model ~execution ~financing ~max_internal_events)
+            ~execution_model ~execution ~financing ~max_internal_events
+      | Some financing, Some settlement ->
+          Engine.config_v11 ~contract_version ~risk ~venue_calendars
+            ~execution_model ~execution ~financing ~settlement
+            ~max_internal_events
+      | None, Some _ -> Error "settlement requires financing configuration")
     |> reducer_result
   in
   match initial_portfolio with
@@ -188,7 +195,7 @@ let run ?(durability = Artifact_writer.Buffered) ~env ~scenario_sha256
         ~run_id:scenario.run_id ~scenario_sha256 ~risk:scenario.risk
         ~venue_calendars:scenario.venue_calendars
         ~execution_model:scenario.execution_model ~execution:scenario.execution
-        ~financing:scenario.financing
+        ~financing:scenario.financing ~settlement:scenario.settlement
         ~max_internal_events:scenario.max_internal_events
         ~initial_cash:scenario.initial_cash
         ~initial_portfolio:scenario.initial_portfolio
@@ -245,7 +252,7 @@ let validate_stream_pass ~scenario_sha256 channel =
           ~run_id:header.Scenario.run_id ~scenario_sha256 ~risk:header.risk
           ~venue_calendars:header.venue_calendars
           ~execution_model:header.execution_model ~execution:header.execution
-          ~financing:header.financing
+          ~financing:header.financing ~settlement:header.settlement
           ~max_internal_events:header.max_internal_events
           ~initial_cash:header.initial_cash
           ~initial_portfolio:header.initial_portfolio
@@ -276,7 +283,7 @@ let replay_stream_pass ~scenario_sha256 ~journal ~session channel =
           ~run_id:header.Scenario.run_id ~scenario_sha256 ~risk:header.risk
           ~venue_calendars:header.venue_calendars
           ~execution_model:header.execution_model ~execution:header.execution
-          ~financing:header.financing
+          ~financing:header.financing ~settlement:header.settlement
           ~max_internal_events:header.max_internal_events
           ~initial_cash:header.initial_cash
           ~initial_portfolio:header.initial_portfolio

@@ -141,6 +141,22 @@ let fill_limit_to_yojson = function
             ("unit", string "quantity");
             ("value", quantity value);
           ] )
+  | Risk.Settlement_cash_buying_power (currency, value) ->
+      ( "settlement_cash_buying_power",
+        `Assoc
+          [
+            ("currency", string currency);
+            ("unit", string "money");
+            ("value", money value);
+          ] )
+  | Risk.Settlement_position_availability (id, value) ->
+      ( "settlement_position_availability",
+        `Assoc
+          [
+            ("instrument_id", instrument_id id);
+            ("unit", string "quantity");
+            ("value", quantity value);
+          ] )
   | Risk.Instrument_initial_margin (id, value) ->
       ( "instrument_initial_margin",
         `Assoc
@@ -245,6 +261,13 @@ let cash_rate_observation_to_yojson observation =
       ("debit_rate_bps", `Int observation.debit_rate_bps);
     ]
 
+let settlement_failure_to_yojson failure =
+  `Assoc
+    [
+      ("instruction_id", string failure.Settlement.instruction_id);
+      ("reason", string failure.reason);
+    ]
+
 let versioned_market_slice_to_yojson ~contract_version market_slice =
   `Assoc
     [
@@ -261,7 +284,17 @@ let versioned_market_slice_to_yojson ~contract_version market_slice =
       );
     ]
   |> function
-  | `Assoc fields when String.equal contract_version "10" ->
+  | `Assoc fields when List.mem contract_version [ "11"; "10" ] ->
+      let settlement =
+        if String.equal contract_version "11" then
+          [
+            ( "settlement_failures",
+              `List
+                (List.map settlement_failure_to_yojson
+                   market_slice.Market_slice.settlement_failures) );
+          ]
+        else []
+      in
       `Assoc
         (fields
         @ [
@@ -273,7 +306,8 @@ let versioned_market_slice_to_yojson ~contract_version market_slice =
               `List
                 (List.map cash_rate_observation_to_yojson
                    market_slice.Market_slice.cash_rate_observations) );
-          ])
+          ]
+        @ settlement)
   | json -> json
 
 let market_slice_to_yojson market_slice =
@@ -281,6 +315,9 @@ let market_slice_to_yojson market_slice =
 
 let market_slice_to_yojson_v10 market_slice =
   versioned_market_slice_to_yojson ~contract_version:"10" market_slice
+
+let market_slice_to_yojson_v11 market_slice =
+  versioned_market_slice_to_yojson ~contract_version:"11" market_slice
 
 let request_fields request =
   let kind, limit_price =
@@ -385,7 +422,8 @@ let order_to_yojson_v8 order =
       ])
 
 let versioned_order_to_yojson ~contract_version order =
-  if List.mem contract_version [ "10"; "9"; "8" ] then order_to_yojson_v8 order
+  if List.mem contract_version [ "11"; "10"; "9"; "8" ] then
+    order_to_yojson_v8 order
   else order_to_yojson order
 
 let fill_to_yojson fill =
@@ -518,6 +556,17 @@ let position_attribution_to_yojson_v9 position =
           ])
   | _ -> assert false
 
+let position_attribution_to_yojson_v11 position =
+  match position_attribution_to_yojson_v9 position with
+  | `Assoc fields ->
+      `Assoc
+        (fields
+        @ [
+            ("settled_quantity", quantity position.Account.settled_quantity);
+            ("unsettled_quantity", quantity position.unsettled_quantity);
+          ])
+  | _ -> assert false
+
 let cash_attribution_to_yojson cash =
   `Assoc
     [
@@ -535,6 +584,19 @@ let cash_attribution_to_yojson_v10 cash =
         @ [
             ("interest", money cash.Account.interest);
             ("base_interest", money cash.base_interest);
+          ])
+  | _ -> assert false
+
+let cash_attribution_to_yojson_v11 cash =
+  match cash_attribution_to_yojson_v10 cash with
+  | `Assoc fields ->
+      `Assoc
+        (fields
+        @ [
+            ("settled_amount", money cash.Account.settled_amount);
+            ("unsettled_amount", money cash.unsettled_amount);
+            ("base_settled_value", money cash.base_settled_value);
+            ("base_unsettled_value", money cash.base_unsettled_value);
           ])
   | _ -> assert false
 
@@ -558,14 +620,18 @@ let account_valuation_to_yojson ?(contract_version = "8") valuation =
       ( "cash_balances",
         `List
           (List.map
-             (if String.equal contract_version "10" then
+             (if String.equal contract_version "11" then
+                cash_attribution_to_yojson_v11
+              else if String.equal contract_version "10" then
                 cash_attribution_to_yojson_v10
               else cash_attribution_to_yojson)
              valuation.cash_balances) );
       ( "positions",
         `List
           (List.map
-             (if
+             (if String.equal contract_version "11" then
+                position_attribution_to_yojson_v11
+              else if
                 String.equal contract_version "9"
                 || String.equal contract_version "10"
               then position_attribution_to_yojson_v9
@@ -573,12 +639,18 @@ let account_valuation_to_yojson ?(contract_version = "8") valuation =
              valuation.positions) );
     ]
   |> function
-  | `Assoc fields
-    when String.equal contract_version "9" || String.equal contract_version "10"
-    ->
+  | `Assoc fields when List.mem contract_version [ "11"; "10"; "9" ] ->
       let financing =
-        if String.equal contract_version "10" then
+        if List.mem contract_version [ "11"; "10" ] then
           [ ("cash_interest", money valuation.Account.cash_interest) ]
+        else []
+      in
+      let settlement =
+        if String.equal contract_version "11" then
+          [
+            ("settled_cash", money valuation.Account.settled_cash);
+            ("unsettled_cash", money valuation.unsettled_cash);
+          ]
         else []
       in
       `Assoc
@@ -589,7 +661,7 @@ let account_valuation_to_yojson ?(contract_version = "8") valuation =
                 (List.map execution_fee_component_attribution_to_yojson
                    valuation.Account.execution_fee_components) );
           ]
-        @ financing)
+        @ financing @ settlement)
   | json -> json
 
 let margin_to_yojson margin =
@@ -621,7 +693,7 @@ let valuation_to_yojson ~contract_version valuation =
   | `Assoc fields ->
       let fields = fields @ [ ("margin", margin_to_yojson valuation.margin) ] in
       let fields =
-        if List.mem contract_version [ "10"; "9"; "8" ] then
+        if List.mem contract_version [ "11"; "10"; "9"; "8" ] then
           fields
           @ [
               ( "group_exposures",
@@ -642,6 +714,30 @@ let order_counts_to_yojson counts =
       ("filled", `Int counts.filled);
       ("rejected", `Int counts.rejected);
       ("cancelled", `Int counts.cancelled);
+    ]
+
+let settlement_instruction_to_yojson instruction =
+  let settled_at, failed_at, failure_reason =
+    match instruction.Settlement.status with
+    | Settlement.Pending -> (`Null, `Null, `Null)
+    | Settlement.Settled value -> (timestamp value, `Null, `Null)
+    | Settlement.Failed { failed_at; reason } ->
+        (`Null, timestamp failed_at, string reason)
+  in
+  `Assoc
+    [
+      ("instruction_id", string instruction.instruction_id);
+      ("fill_id", string (Id.Fill.to_string instruction.fill_id));
+      ("instrument_id", instrument_id instruction.instrument_id);
+      ("currency", string instruction.currency);
+      ("cash_movement", money instruction.cash_movement);
+      ("position_movement", quantity instruction.position_movement);
+      ("trade_date", string instruction.trade_date);
+      ("due_date", string instruction.due_date);
+      ("status", string (Settlement.status_to_string instruction.status));
+      ("settled_at", settled_at);
+      ("failed_at", failed_at);
+      ("failure_reason", failure_reason);
     ]
 
 let requested_target_to_yojson target =
@@ -706,9 +802,13 @@ let payload_to_yojson ~contract_version = function
           ("action_id", string (Id.Corporate_action.to_string action_id));
         ]
   | Audit.Fill_applied fill ->
-      if String.equal contract_version "9" || String.equal contract_version "10"
-      then fill_to_yojson_v9 fill
+      if List.mem contract_version [ "11"; "10"; "9" ] then
+        fill_to_yojson_v9 fill
       else fill_to_yojson fill
+  | Audit.Settlement_instruction_created instruction
+  | Audit.Settlement_completed instruction
+  | Audit.Settlement_failed instruction ->
+      settlement_instruction_to_yojson instruction
   | Audit.Margin_limited
       {
         order_id = id;

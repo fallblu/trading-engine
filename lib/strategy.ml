@@ -8,6 +8,8 @@ type context = {
 and marked_position = {
   instrument_id : Id.Instrument.t;
   quantity : Scalar.Quantity.t;
+  settled_quantity : Scalar.Quantity.t;
+  unsettled_quantity : Scalar.Quantity.t;
   mark : Scalar.Price.t;
   base_market_value : Scalar.Money.t;
   weight : Scalar.Weight.t option;
@@ -71,6 +73,8 @@ let context ~now ~(valuation : Account.valuation) ~group_exposures
           ({
              instrument_id = position.instrument_id;
              quantity = position.quantity;
+             settled_quantity = position.settled_quantity;
+             unsettled_quantity = position.unsettled_quantity;
              mark = position.mark;
              base_market_value = position.base_market_value;
              weight = position_weight;

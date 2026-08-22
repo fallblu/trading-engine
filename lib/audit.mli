@@ -54,6 +54,9 @@ type event =
     }
   | Order_adjusted of { order : Order.t; action_id : Id.Corporate_action.t }
   | Fill_applied of Fill.t
+  | Settlement_instruction_created of Settlement.instruction
+  | Settlement_completed of Settlement.instruction
+  | Settlement_failed of Settlement.instruction
   | Margin_limited of {
       order_id : Id.Order.t;
       instrument_id : Id.Instrument.t;

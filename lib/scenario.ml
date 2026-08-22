@@ -11,6 +11,7 @@ type t = {
   execution_model : Execution_model.t;
   execution : Execution.t;
   financing : Financing.policy option;
+  settlement : Settlement.policy option;
   max_internal_events : int;
   schedule : (int64 * Strategy.intent list) list;
   slices : Market_slice.t list;
@@ -29,6 +30,7 @@ type stream_header = {
   execution_model : Execution_model.t;
   execution : Execution.t;
   financing : Financing.policy option;
+  settlement : Settlement.policy option;
   max_internal_events : int;
 }
 
@@ -552,7 +554,7 @@ let parse_v7_risk base_currency instruments json =
     ~max_gross_exposure ~max_leverage ~short_borrow_bps
 
 let parse_risk ~contract_version base_currency instruments json =
-  if List.mem contract_version [ "10"; "9"; "8"; "7" ] then
+  if List.mem contract_version [ "11"; "10"; "9"; "8"; "7" ] then
     parse_v7_risk base_currency instruments json
   else parse_legacy_risk base_currency instruments json
 
@@ -744,7 +746,7 @@ let parse_versioned_execution ~contract_version ~instruments json =
     Ok (execution_model, execution)
 
 let parse_execution ~contract_version ~instruments json =
-  if List.mem contract_version [ "10"; "9"; "8"; "7"; "6"; "5" ] then
+  if List.mem contract_version [ "11"; "10"; "9"; "8"; "7"; "6"; "5" ] then
     parse_versioned_execution ~contract_version ~instruments json
   else parse_legacy_execution ~contract_version json
 
@@ -793,7 +795,7 @@ let parse_portfolio_intent ~name ~parse_target make json =
   Ok (make targets)
 
 let parse_submit_intent ~contract_version json =
-  let versioned = List.mem contract_version [ "10"; "9"; "8" ] in
+  let versioned = List.mem contract_version [ "11"; "10"; "9"; "8" ] in
   let* fields =
     object_fields ~name:"submit_order intent"
       ~expected:
@@ -1171,6 +1173,105 @@ let parse_financing json =
     (Financing.policy ~day_count ~compounding ~borrow_missing_data
        ~cash_missing_data ~locate_policy ~recall_policy)
 
+let parse_settlement_calendar json =
+  let* fields =
+    object_fields ~name:"settlement calendar"
+      ~expected:[ "calendar_id"; "version"; "business_dates" ]
+      json
+  in
+  let* calendar_id =
+    Result.bind
+      (field fields "calendar_id")
+      (string ~name:"settlement calendar_id")
+  in
+  let* version =
+    Result.bind (field fields "version")
+      (string ~name:"settlement calendar version")
+  in
+  let* dates_json =
+    Result.bind
+      (field fields "business_dates")
+      (list ~name:"settlement business_dates")
+  in
+  let* business_dates =
+    map_list (string ~name:"settlement business date") dates_json
+  in
+  Settlement.calendar ~calendar_id ~version ~business_dates
+
+let parse_settlement_rule json =
+  let* fields =
+    object_fields ~name:"settlement rule"
+      ~expected:[ "instrument_id"; "calendar_id"; "lag_business_days" ]
+      json
+  in
+  let* instrument_id =
+    Result.bind
+      (field fields "instrument_id")
+      (parse_id Id.Instrument.of_string ~name:"settlement instrument_id")
+  in
+  let* calendar_id =
+    Result.bind
+      (field fields "calendar_id")
+      (string ~name:"settlement calendar_id")
+  in
+  let* lag_business_days =
+    Result.bind
+      (field fields "lag_business_days")
+      (integer ~name:"lag_business_days")
+  in
+  Settlement.rule ~instrument_id ~calendar_id ~lag_business_days
+
+let parse_settlement json =
+  let* fields =
+    object_fields ~name:"settlement policy"
+      ~expected:
+        [ "cash_buying_power"; "position_availability"; "calendars"; "rules" ]
+      json
+  in
+  let text name = Result.bind (field fields name) (string ~name) in
+  let* cash_buying_power =
+    match text "cash_buying_power" with
+    | Ok "total_cash" -> Ok Settlement.Total_cash
+    | Ok "settled_cash" -> Ok Settlement.Settled_cash
+    | Ok _ -> Error "cash_buying_power must be total_cash or settled_cash"
+    | Error _ as error -> error
+  in
+  let* position_availability =
+    match text "position_availability" with
+    | Ok "total_positions" -> Ok Settlement.Total_positions
+    | Ok "settled_positions" -> Ok Settlement.Settled_positions
+    | Ok _ ->
+        Error
+          "position_availability must be total_positions or settled_positions"
+    | Error _ as error -> error
+  in
+  let* calendars_json =
+    Result.bind (field fields "calendars") (list ~name:"settlement calendars")
+  in
+  let* calendars = map_list parse_settlement_calendar calendars_json in
+  let* rules_json =
+    Result.bind (field fields "rules") (list ~name:"settlement rules")
+  in
+  let* rules = map_list parse_settlement_rule rules_json in
+  Settlement.policy ~cash_buying_power ~position_availability ~calendars ~rules
+
+let parse_settlement_failure json =
+  let* fields =
+    object_fields ~name:"settlement failure"
+      ~expected:[ "instruction_id"; "reason" ]
+      json
+  in
+  let* instruction_id =
+    Result.bind
+      (field fields "instruction_id")
+      (string ~name:"settlement instruction_id")
+  in
+  let* reason =
+    Result.bind (field fields "reason")
+      (string ~name:"settlement failure reason")
+  in
+  Settlement.failure ~instruction_id ~reason
+
 let parse_borrow_observation json =
   let* fields =
     object_fields ~name:"borrow observation"
@@ -1241,9 +1342,12 @@ let parse_cash_rate_observation json =
 
 let parse_slice ~contract_version json =
   let financing_fields =
-    if String.equal contract_version "10" then
+    if List.mem contract_version [ "11"; "10" ] then
       [ "borrow_observations"; "cash_rate_observations" ]
     else []
+  in
+  let settlement_fields =
+    if String.equal contract_version "11" then [ "settlement_failures" ] else []
   in
   let* fields =
     object_fields ~name:"market slice"
@@ -1258,7 +1362,7 @@ let parse_slice ~contract_version json =
            "fx_rates";
            "corporate_actions";
          ]
-        @ financing_fields)
+        @ financing_fields @ settlement_fields)
       json
   in
   let* sequence_json = field fields "slice_sequence" in
@@ -1280,7 +1384,7 @@ let parse_slice ~contract_version json =
   let* actions_json = field fields "corporate_actions" in
   let* actions_json = list ~name:"corporate_actions" actions_json in
   let* corporate_actions = map_list parse_corporate_action actions_json in
-  if String.equal contract_version "10" then
+  if List.mem contract_version [ "11"; "10" ] then
     let* borrow_json =
       Result.bind
         (field fields "borrow_observations")
@@ -1295,9 +1399,22 @@ let parse_slice ~contract_version json =
     let* cash_rate_observations =
       map_list parse_cash_rate_observation cash_json
     in
-    Market_slice.create_v10 ~slice_sequence ~start_at ~end_at ~available_at
-      ~received_at ~bars ~fx_rates ~corporate_actions ~borrow_observations
-      ~cash_rate_observations
+    if String.equal contract_version "11" then
+      let* failures_json =
+        Result.bind
+          (field fields "settlement_failures")
+          (list ~name:"settlement_failures")
+      in
+      let* settlement_failures =
+        map_list parse_settlement_failure failures_json
+      in
+      Market_slice.create_v11 ~slice_sequence ~start_at ~end_at ~available_at
+        ~received_at ~bars ~fx_rates ~corporate_actions ~borrow_observations
+        ~cash_rate_observations ~settlement_failures
+    else
+      Market_slice.create_v10 ~slice_sequence ~start_at ~end_at ~available_at
+        ~received_at ~bars ~fx_rates ~corporate_actions ~borrow_observations
+        ~cash_rate_observations
   else
     Market_slice.create ~slice_sequence ~start_at ~end_at ~available_at
       ~received_at ~bars ~fx_rates ~corporate_actions
@@ -1333,7 +1450,7 @@ let construct_header ~root ~contract_path ~contract_version
       |> at (child root "base_currency")
     in
     let* initial_cash, initial_portfolio =
-      if List.mem contract_version [ "10"; "9"; "8"; "7"; "6" ] then
+      if List.mem contract_version [ "11"; "10"; "9"; "8"; "7"; "6" ] then
         let* portfolio =
           parse_initial_portfolio ~base_currency shape.initial_state
           |> at (child root "initial_portfolio")
@@ -1395,13 +1512,23 @@ let construct_header ~root ~contract_path ~contract_version
     in
     let* financing =
       match (contract_version, shape.financing) with
-      | "10", Some json -> parse_financing json |> at (child root "financing")
-      | "10", None ->
+      | ("11" | "10"), Some json ->
+          parse_financing json |> at (child root "financing")
+      | ("11" | "10"), None ->
           Error "missing financing policy" |> at (child root "financing")
       | _, _ -> Ok Financing.legacy_policy
     in
     let financing =
-      if String.equal contract_version "10" then Some financing else None
+      if List.mem contract_version [ "11"; "10" ] then Some financing else None
+    in
+    let* settlement =
+      match (contract_version, shape.settlement) with
+      | "11", Some json ->
+          let* policy = parse_settlement json |> at (child root "settlement") in
+          Ok (Some policy)
+      | "11", None ->
+          Error "missing settlement policy" |> at (child root "settlement")
+      | _, _ -> Ok None
     in
     let header : stream_header =
       {
@@ -1417,6 +1544,7 @@ let construct_header ~root ~contract_path ~contract_version
         execution_model;
         execution;
         financing;
+        settlement;
         max_internal_events;
       }
     in
@@ -1462,6 +1590,7 @@ let construct_batch (shape : Scenario_shape.batch) =
       execution_model = header.execution_model;
       execution = header.execution;
       financing = header.financing;
+      settlement = header.settlement;
       max_internal_events = header.max_internal_events;
       schedule;
       slices;

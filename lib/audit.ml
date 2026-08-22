@@ -52,6 +52,9 @@ type event =
     }
   | Order_adjusted of { order : Order.t; action_id : Id.Corporate_action.t }
   | Fill_applied of Fill.t
+  | Settlement_instruction_created of Settlement.instruction
+  | Settlement_completed of Settlement.instruction
+  | Settlement_failed of Settlement.instruction
   | Margin_limited of {
       order_id : Id.Order.t;
       instrument_id : Id.Instrument.t;
@@ -170,6 +173,9 @@ let event_name = function
   | Cash_dividend_applied _ -> "cash_dividend_applied"
   | Order_adjusted _ -> "order_adjusted"
   | Fill_applied _ -> "fill_applied"
+  | Settlement_instruction_created _ -> "settlement_instruction_created"
+  | Settlement_completed _ -> "settlement_completed"
+  | Settlement_failed _ -> "settlement_failed"
   | Margin_limited _ -> "margin_limited"
   | Fill_clipped _ -> "fill_clipped"
   | Borrow_fee_applied _ -> "borrow_fee_applied"

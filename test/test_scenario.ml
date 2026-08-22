@@ -2,12 +2,12 @@ open Test_support
 module T = Trading_engine
 
 let demo_document () =
-  In_channel.with_open_bin "../contracts/v10/fixtures/demo.scenario.json"
+  In_channel.with_open_bin "../contracts/v11/fixtures/demo.scenario.json"
     In_channel.input_all
 
 let demo () = T.Scenario.of_string (demo_document ()) |> ok
 let demo_hash () = T.Sha256.digest_string (demo_document ())
-let stream_path = "../contracts/v10/fixtures/demo.scenario.jsonl"
+let stream_path = "../contracts/v11/fixtures/demo.scenario.jsonl"
 
 let stream_document () =
   In_channel.with_open_bin stream_path In_channel.input_all
@@ -75,7 +75,7 @@ let write_large_stream path slice_count =
               ~effective_at:start_at ~credit_rate_bps:0 ~debit_rate_bps:0
             |> ok
           in
-          T.Market_slice.create_v10 ~slice_sequence:(Int64.of_int index)
+          T.Market_slice.create_v11 ~slice_sequence:(Int64.of_int index)
             ~start_at
             ~end_at:(add_seconds base (offset + 1))
             ~available_at:(add_seconds base (offset + 2))
@@ -88,13 +88,13 @@ let write_large_stream path slice_count =
               ]
             ~fx_rates:[ fx_mark () ]
             ~corporate_actions:[] ~borrow_observations:[ borrow_observation ]
-            ~cash_rate_observations:[ cash_rate ]
+            ~cash_rate_observations:[ cash_rate ] ~settlement_failures:[]
           |> ok
         in
         let payload =
           `Assoc
             [
-              ("market_slice", T.Codec.market_slice_to_yojson_v10 market_slice);
+              ("market_slice", T.Codec.market_slice_to_yojson_v11 market_slice);
               ("intents", `List []);
             ]
         in
@@ -139,9 +139,9 @@ let schema_artifacts_parse () =
           (List.mem_assoc "$defs" fields)
     | _ -> Alcotest.fail (path ^ " must contain a JSON object")
   in
-  check_schema "../contracts/v10/scenario.schema.json";
-  check_schema "../contracts/v10/scenario-stream.schema.json";
-  check_schema "../contracts/v10/journal.schema.json"
+  check_schema "../contracts/v11/scenario.schema.json";
+  check_schema "../contracts/v11/scenario-stream.schema.json";
+  check_schema "../contracts/v11/journal.schema.json"
 
 let timestamp_precision_is_bounded () =
   List.iter
@@ -203,8 +203,8 @@ let contract_version_is_required_and_supported () =
   let unsupported_diagnostic = T.Scenario.of_yojson unsupported |> error in
   Alcotest.(check string)
     "unsupported version diagnosed"
-    "unsupported scenario contract_version \"2\" (expected one of 10, 9, 8, 7, \
-     6, 5, 4, 3)"
+    "unsupported scenario contract_version \"2\" (expected one of 11, 10, 9, \
+     8, 7, 6, 5, 4, 3)"
     (T.Diagnostic.to_human unsupported_diagnostic);
   Alcotest.(check string)
     "unsupported version code" "scenario.unsupported_contract"
@@ -354,7 +354,7 @@ let dense_schedule_document slice_count =
             ~effective_at:start_at ~credit_rate_bps:100 ~debit_rate_bps:200
           |> ok
         in
-        T.Market_slice.create_v10 ~slice_sequence:(Int64.of_int index) ~start_at
+        T.Market_slice.create_v11 ~slice_sequence:(Int64.of_int index) ~start_at
           ~end_at:(add_seconds base (time_offset + 1))
           ~available_at:(add_seconds base (time_offset + 2))
           ~received_at:(add_seconds base (time_offset + 3))
@@ -367,7 +367,8 @@ let dense_schedule_document slice_count =
           ~fx_rates:[ fx_mark () ]
           ~corporate_actions:[] ~borrow_observations:[ borrow_observation ]
           ~cash_rate_observations:[ cash_rate_observation ]
-        |> ok |> T.Codec.market_slice_to_yojson_v10)
+          ~settlement_failures:[]
+        |> ok |> T.Codec.market_slice_to_yojson_v11)
   in
   let schedule =
     List.init slice_count (fun offset ->
@@ -899,7 +900,7 @@ let replay_matches_golden_file () =
     |> fun value -> value ^ "\n"
   in
   let expected =
-    In_channel.with_open_bin "../contracts/v10/fixtures/demo.journal.jsonl"
+    In_channel.with_open_bin "../contracts/v11/fixtures/demo.journal.jsonl"
       In_channel.input_all
   in
   Alcotest.(check string) "stable audit contract" expected actual
@@ -927,7 +928,7 @@ let v3_replay_matches_frozen_golden_file () =
 let fill_clipping_fixture_reconciles () =
   let document =
     In_channel.with_open_bin
-      "../contracts/v10/fixtures/fill-clipped.scenario.json"
+      "../contracts/v11/fixtures/fill-clipped.scenario.json"
       In_channel.input_all
   in
   let scenario = T.Scenario.of_string document |> ok in
@@ -941,7 +942,7 @@ let fill_clipping_fixture_reconciles () =
   in
   let expected =
     In_channel.with_open_bin
-      "../contracts/v10/fixtures/fill-clipped.journal.jsonl"
+      "../contracts/v11/fixtures/fill-clipped.journal.jsonl"
       In_channel.input_all
   in
   Alcotest.(check string) "fill clipping audit reconciliation" expected actual
@@ -1041,7 +1042,7 @@ let streamed_replay_matches_batch_semantics () =
       Alcotest.(check int64) "four streamed slices" 4L result.slice_count;
       Alcotest.(check int64) "two schedule batches" 2L result.schedule_count;
       Alcotest.(check int) "one instrument" 1 result.instrument_count;
-      Alcotest.(check int64) "twenty-six audits" 26L result.audit_count;
+      Alcotest.(check int64) "thirty-one audits" 31L result.audit_count;
       Alcotest.check money_testable "same equity" (money "10111.946958")
         result.valuation.equity;
       Alcotest.(check string)

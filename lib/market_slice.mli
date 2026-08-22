@@ -16,6 +16,7 @@ type t = private {
   corporate_actions : Corporate_action.t list;
   borrow_observations : Financing.borrow_observation list;
   cash_rate_observations : Financing.cash_rate_observation list;
+  settlement_failures : Settlement.failure list;
 }
 
 val create :
@@ -40,6 +41,20 @@ val create_v10 :
   corporate_actions:Corporate_action.t list ->
   borrow_observations:Financing.borrow_observation list ->
   cash_rate_observations:Financing.cash_rate_observation list ->
+  (t, string) result
+
+val create_v11 :
+  slice_sequence:int64 ->
+  start_at:Ptime.t ->
+  end_at:Ptime.t ->
+  available_at:Ptime.t ->
+  received_at:Ptime.t ->
+  bars:Bar.t list ->
+  fx_rates:fx_mark list ->
+  corporate_actions:Corporate_action.t list ->
+  borrow_observations:Financing.borrow_observation list ->
+  cash_rate_observations:Financing.cash_rate_observation list ->
+  settlement_failures:Settlement.failure list ->
   (t, string) result
 
 val bar : t -> Id.Instrument.t -> Bar.t option

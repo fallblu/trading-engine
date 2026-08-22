@@ -11,6 +11,7 @@ type t = {
   corporate_actions : Corporate_action.t list;
   borrow_observations : Financing.borrow_observation list;
   cash_rate_observations : Financing.cash_rate_observation list;
+  settlement_failures : Settlement.failure list;
 }
 
 let valid_currency value =
@@ -29,9 +30,9 @@ let fx_mark ~currency ~rate =
 let compare_bar left right =
   Id.Instrument.compare left.Bar.instrument_id right.Bar.instrument_id
 
-let create_v10 ~slice_sequence ~start_at ~end_at ~available_at ~received_at
+let create_v11 ~slice_sequence ~start_at ~end_at ~available_at ~received_at
     ~bars ~fx_rates ~corporate_actions ~borrow_observations
-    ~cash_rate_observations =
+    ~cash_rate_observations ~settlement_failures =
   if Int64.compare slice_sequence 0L <= 0 then
     Error "market slice sequence must be positive"
   else if Ptime.compare start_at end_at >= 0 then
@@ -98,6 +99,19 @@ let create_v10 ~slice_sequence ~start_at ~end_at ~available_at ~received_at
           (not (String.equal left.Financing.currency right.Financing.currency))
           && unique_cash_rate remaining
     in
+    let settlement_failures =
+      List.sort
+        (fun (left : Settlement.failure) (right : Settlement.failure) ->
+          String.compare left.instruction_id right.instruction_id)
+        settlement_failures
+    in
+    let rec unique_failure = function
+      | [] | [ _ ] -> true
+      | left :: (right :: _ as remaining) ->
+          (not
+             (String.equal left.Settlement.instruction_id right.instruction_id))
+          && unique_failure remaining
+    in
     if not (unique bars) then
       Error "market slice must contain one bar per instrument"
     else if fx_rates = [] then Error "market slice must contain FX rates"
@@ -109,6 +123,8 @@ let create_v10 ~slice_sequence ~start_at ~end_at ~available_at ~received_at
       Error "market slice borrow observation instrument IDs must be unique"
     else if not (unique_cash_rate cash_rate_observations) then
       Error "market slice cash rate currencies must be unique"
+    else if not (unique_failure settlement_failures) then
+      Error "market slice settlement failure instruction IDs must be unique"
     else
       Ok
         {
@@ -122,7 +138,15 @@ let create_v10 ~slice_sequence ~start_at ~end_at ~available_at ~received_at
           corporate_actions;
           borrow_observations;
           cash_rate_observations;
+          settlement_failures;
         }
+
+let create_v10 ~slice_sequence ~start_at ~end_at ~available_at ~received_at
+    ~bars ~fx_rates ~corporate_actions ~borrow_observations
+    ~cash_rate_observations =
+  create_v11 ~slice_sequence ~start_at ~end_at ~available_at ~received_at ~bars
+    ~fx_rates ~corporate_actions ~borrow_observations ~cash_rate_observations
+    ~settlement_failures:[]
 
 let create ~slice_sequence ~start_at ~end_at ~available_at ~received_at ~bars
     ~fx_rates ~corporate_actions =
@@ -146,9 +170,10 @@ let compare_replay_order left right =
 
 let pp formatter state =
   Format.fprintf formatter
-    "slice[%Ld] bars=%d fx=%d actions=%d borrow=%d cash_rates=%d"
+    "slice[%Ld] bars=%d fx=%d actions=%d borrow=%d cash_rates=%d failures=%d"
     state.slice_sequence (List.length state.bars)
     (List.length state.fx_rates)
     (List.length state.corporate_actions)
     (List.length state.borrow_observations)
     (List.length state.cash_rate_observations)
+    (List.length state.settlement_failures)
