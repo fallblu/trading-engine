@@ -37,6 +37,11 @@ module Completed_bar_adverse_touch_v1 = struct
   let start_slice = Execution.start_slice_adverse_touch
 end
 
+module Quote_trade_v1 = struct
+  let name = "quote_trade_v1"
+  let start_slice = Execution.start_slice_quote_trade
+end
+
 let of_module model = model
 let name (module Model : S) = Model.name
 
@@ -45,6 +50,7 @@ let builtins : t list =
     (module Completed_bar_v1);
     (module Completed_bar_next_open_v1);
     (module Completed_bar_adverse_touch_v1);
+    (module Quote_trade_v1);
   ]
 
 let supported = List.map name builtins
@@ -54,7 +60,7 @@ let completed_bar_v1_contract =
     version = "2";
     previous_versions = [ "1" ];
     scenario_contract_versions =
-      [ "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6"; "5"; "4"; "3" ];
+      [ "14"; "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6"; "5"; "4"; "3" ];
     required_fields = [ "version"; "participation_bps"; "fee_schedules" ];
     legacy_required_fields =
       [ "version"; "participation_bps"; "fixed_fee"; "fee_bps" ];
@@ -75,7 +81,7 @@ let conservative_contract =
   {
     version = "1";
     previous_versions = [];
-    scenario_contract_versions = [ "13" ];
+    scenario_contract_versions = [ "14"; "13" ];
     required_fields =
       [
         "version";
@@ -100,11 +106,34 @@ let conservative_contract =
         ];
   }
 
+let quote_trade_contract =
+  {
+    version = "1";
+    previous_versions = [];
+    scenario_contract_versions = [ "14" ];
+    required_fields = [ "version"; "participation_bps"; "fee_schedules" ];
+    legacy_required_fields = [];
+    supported_order_types = [ "market"; "limit"; "stop"; "stop_limit" ];
+    data_requirements =
+      [
+        "causally_ordered_bid_ask_quotes";
+        "aggressor_classified_trades_for_passive_fills";
+        "completed_bars_for_valuation";
+      ];
+    limits =
+      `Assoc
+        [
+          ( "participation_bps",
+            `Assoc [ ("minimum", `Int 0); ("maximum", `Int 10_000) ] );
+        ];
+  }
+
 let configuration_contract model =
   match name model with
   | "completed_bar_v1" -> completed_bar_v1_contract
   | "completed_bar_next_open_v1" | "completed_bar_adverse_touch_v1" ->
       conservative_contract
+  | "quote_trade_v1" -> quote_trade_contract
   | unsupported ->
       invalid_arg
         (Printf.sprintf "execution model %S has no configuration contract"

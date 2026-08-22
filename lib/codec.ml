@@ -359,6 +359,36 @@ let settlement_failure_to_yojson failure =
       ("reason", string failure.reason);
     ]
 
+let market_event_to_yojson event =
+  let common =
+    [
+      ("instrument_id", instrument_id event.Market_event.instrument_id);
+      ("event_at", timestamp event.event_at);
+      ("available_at", timestamp event.available_at);
+      ("received_at", timestamp event.received_at);
+      ("ingest_sequence", int64 event.ingest_sequence);
+    ]
+  in
+  match event.kind with
+  | Market_event.Quote { bid_price; bid_quantity; ask_price; ask_quantity } ->
+      `Assoc
+        ((("type", string "quote") :: common)
+        @ [
+            ("bid_price", price bid_price);
+            ("bid_quantity", quantity bid_quantity);
+            ("ask_price", price ask_price);
+            ("ask_quantity", quantity ask_quantity);
+          ])
+  | Market_event.Trade { price = value; quantity = size; aggressor_side } ->
+      `Assoc
+        ((("type", string "trade") :: common)
+        @ [
+            ("price", price value);
+            ("quantity", quantity size);
+            ( "aggressor_side",
+              string (Market_event.aggressor_side_to_string aggressor_side) );
+          ])
+
 let versioned_market_slice_to_yojson ~contract_version market_slice =
   `Assoc
     [
@@ -375,9 +405,10 @@ let versioned_market_slice_to_yojson ~contract_version market_slice =
       );
     ]
   |> function
-  | `Assoc fields when List.mem contract_version [ "13"; "12"; "11"; "10" ] ->
+  | `Assoc fields
+    when List.mem contract_version [ "14"; "13"; "12"; "11"; "10" ] ->
       let settlement =
-        if List.mem contract_version [ "13"; "12"; "11" ] then
+        if List.mem contract_version [ "14"; "13"; "12"; "11" ] then
           [
             ( "settlement_failures",
               `List
@@ -387,12 +418,22 @@ let versioned_market_slice_to_yojson ~contract_version market_slice =
         else []
       in
       let lifecycle =
-        if List.mem contract_version [ "13"; "12" ] then
+        if List.mem contract_version [ "14"; "13"; "12" ] then
           [
             ( "lifecycle_events",
               `List
                 (List.map lifecycle_event_to_yojson
                    market_slice.Market_slice.lifecycle_events) );
+          ]
+        else []
+      in
+      let market_events =
+        if String.equal contract_version "14" then
+          [
+            ( "market_events",
+              `List
+                (List.map market_event_to_yojson
+                   market_slice.Market_slice.market_events) );
           ]
         else []
       in
@@ -408,7 +449,7 @@ let versioned_market_slice_to_yojson ~contract_version market_slice =
                 (List.map cash_rate_observation_to_yojson
                    market_slice.Market_slice.cash_rate_observations) );
           ]
-        @ settlement @ lifecycle)
+        @ settlement @ lifecycle @ market_events)
   | json -> json
 
 let market_slice_to_yojson market_slice =
@@ -425,6 +466,9 @@ let market_slice_to_yojson_v12 market_slice =
 
 let market_slice_to_yojson_v13 market_slice =
   versioned_market_slice_to_yojson ~contract_version:"13" market_slice
+
+let market_slice_to_yojson_v14 market_slice =
+  versioned_market_slice_to_yojson ~contract_version:"14" market_slice
 
 let request_fields request =
   let kind, limit_price =
@@ -529,7 +573,7 @@ let order_to_yojson_v8 order =
       ])
 
 let versioned_order_to_yojson ~contract_version order =
-  if List.mem contract_version [ "13"; "12"; "11"; "10"; "9"; "8" ] then
+  if List.mem contract_version [ "14"; "13"; "12"; "11"; "10"; "9"; "8" ] then
     order_to_yojson_v8 order
   else order_to_yojson order
 
@@ -727,7 +771,7 @@ let account_valuation_to_yojson ?(contract_version = "8") valuation =
       ( "cash_balances",
         `List
           (List.map
-             (if List.mem contract_version [ "13"; "12"; "11" ] then
+             (if List.mem contract_version [ "14"; "13"; "12"; "11" ] then
                 cash_attribution_to_yojson_v11
               else if String.equal contract_version "10" then
                 cash_attribution_to_yojson_v10
@@ -736,7 +780,7 @@ let account_valuation_to_yojson ?(contract_version = "8") valuation =
       ( "positions",
         `List
           (List.map
-             (if List.mem contract_version [ "13"; "12"; "11" ] then
+             (if List.mem contract_version [ "14"; "13"; "12"; "11" ] then
                 position_attribution_to_yojson_v11
               else if
                 String.equal contract_version "9"
@@ -746,15 +790,15 @@ let account_valuation_to_yojson ?(contract_version = "8") valuation =
              valuation.positions) );
     ]
   |> function
-  | `Assoc fields when List.mem contract_version [ "13"; "12"; "11"; "10"; "9" ]
-    ->
+  | `Assoc fields
+    when List.mem contract_version [ "14"; "13"; "12"; "11"; "10"; "9" ] ->
       let financing =
-        if List.mem contract_version [ "13"; "12"; "11"; "10" ] then
+        if List.mem contract_version [ "14"; "13"; "12"; "11"; "10" ] then
           [ ("cash_interest", money valuation.Account.cash_interest) ]
         else []
       in
       let settlement =
-        if List.mem contract_version [ "13"; "12"; "11" ] then
+        if List.mem contract_version [ "14"; "13"; "12"; "11" ] then
           [
             ("settled_cash", money valuation.Account.settled_cash);
             ("unsettled_cash", money valuation.unsettled_cash);
@@ -801,7 +845,8 @@ let valuation_to_yojson ~contract_version valuation =
   | `Assoc fields ->
       let fields = fields @ [ ("margin", margin_to_yojson valuation.margin) ] in
       let fields =
-        if List.mem contract_version [ "13"; "12"; "11"; "10"; "9"; "8" ] then
+        if List.mem contract_version [ "14"; "13"; "12"; "11"; "10"; "9"; "8" ]
+        then
           fields
           @ [
               ( "group_exposures",
@@ -942,7 +987,7 @@ let payload_to_yojson ~contract_version = function
           ("final_price", price attribution.final_price);
         ]
   | Audit.Fill_applied fill ->
-      if List.mem contract_version [ "13"; "12"; "11"; "10"; "9" ] then
+      if List.mem contract_version [ "14"; "13"; "12"; "11"; "10"; "9" ] then
         fill_to_yojson_v9 fill
       else fill_to_yojson fill
   | Audit.Settlement_instruction_created instruction

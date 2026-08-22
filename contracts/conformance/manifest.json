@@ -715,9 +715,18 @@
       "version_field": "contract_version",
       "version": "11",
       "sources": [
-        { "path": "v11/fixtures/demo.scenario.json", "format": "json" },
-        { "path": "v11/fixtures/fill-clipped.scenario.json", "format": "json" },
-        { "path": "strategy/v9/fixtures/external.scenario.json", "format": "json" }
+        {
+          "path": "v11/fixtures/demo.scenario.json",
+          "format": "json"
+        },
+        {
+          "path": "v11/fixtures/fill-clipped.scenario.json",
+          "format": "json"
+        },
+        {
+          "path": "strategy/v9/fixtures/external.scenario.json",
+          "format": "json"
+        }
       ]
     },
     {
@@ -726,8 +735,14 @@
       "version_field": "contract_version",
       "version": "11",
       "sources": [
-        { "path": "v11/fixtures/demo.scenario.jsonl", "format": "jsonl" },
-        { "path": "strategy/v9/fixtures/external.scenario.jsonl", "format": "jsonl" }
+        {
+          "path": "v11/fixtures/demo.scenario.jsonl",
+          "format": "jsonl"
+        },
+        {
+          "path": "strategy/v9/fixtures/external.scenario.jsonl",
+          "format": "jsonl"
+        }
       ]
     },
     {
@@ -736,8 +751,14 @@
       "version_field": "contract_version",
       "version": "11",
       "sources": [
-        { "path": "v11/fixtures/demo.journal.jsonl", "format": "jsonl" },
-        { "path": "v11/fixtures/fill-clipped.journal.jsonl", "format": "jsonl" }
+        {
+          "path": "v11/fixtures/demo.journal.jsonl",
+          "format": "jsonl"
+        },
+        {
+          "path": "v11/fixtures/fill-clipped.journal.jsonl",
+          "format": "jsonl"
+        }
       ]
     },
     {
@@ -746,7 +767,13 @@
       "version_field": "strategy_protocol_version",
       "version": "9",
       "sources": [
-        { "path": "strategy/v9/fixtures/external.strategy.jsonl", "format": "jsonl", "extract": ["message"] }
+        {
+          "path": "strategy/v9/fixtures/external.strategy.jsonl",
+          "format": "jsonl",
+          "extract": [
+            "message"
+          ]
+        }
       ]
     },
     {
@@ -755,7 +782,10 @@
       "version_field": "strategy_protocol_version",
       "version": "9",
       "sources": [
-        { "path": "strategy/v9/fixtures/external.strategy.jsonl", "format": "jsonl" }
+        {
+          "path": "strategy/v9/fixtures/external.strategy.jsonl",
+          "format": "jsonl"
+        }
       ]
     },
     {
@@ -764,9 +794,18 @@
       "version_field": "contract_version",
       "version": "12",
       "sources": [
-        { "path": "v12/fixtures/demo.scenario.json", "format": "json" },
-        { "path": "v12/fixtures/fill-clipped.scenario.json", "format": "json" },
-        { "path": "strategy/v10/fixtures/external.scenario.json", "format": "json" }
+        {
+          "path": "v12/fixtures/demo.scenario.json",
+          "format": "json"
+        },
+        {
+          "path": "v12/fixtures/fill-clipped.scenario.json",
+          "format": "json"
+        },
+        {
+          "path": "strategy/v10/fixtures/external.scenario.json",
+          "format": "json"
+        }
       ]
     },
     {
@@ -775,8 +814,14 @@
       "version_field": "contract_version",
       "version": "12",
       "sources": [
-        { "path": "v12/fixtures/demo.scenario.jsonl", "format": "jsonl" },
-        { "path": "strategy/v10/fixtures/external.scenario.jsonl", "format": "jsonl" }
+        {
+          "path": "v12/fixtures/demo.scenario.jsonl",
+          "format": "jsonl"
+        },
+        {
+          "path": "strategy/v10/fixtures/external.scenario.jsonl",
+          "format": "jsonl"
+        }
       ]
     },
     {
@@ -785,8 +830,14 @@
       "version_field": "contract_version",
       "version": "12",
       "sources": [
-        { "path": "v12/fixtures/demo.journal.jsonl", "format": "jsonl" },
-        { "path": "v12/fixtures/fill-clipped.journal.jsonl", "format": "jsonl" }
+        {
+          "path": "v12/fixtures/demo.journal.jsonl",
+          "format": "jsonl"
+        },
+        {
+          "path": "v12/fixtures/fill-clipped.journal.jsonl",
+          "format": "jsonl"
+        }
       ]
     },
     {
@@ -795,7 +846,13 @@
       "version_field": "strategy_protocol_version",
       "version": "10",
       "sources": [
-        { "path": "strategy/v10/fixtures/external.strategy.jsonl", "format": "jsonl", "extract": ["message"] }
+        {
+          "path": "strategy/v10/fixtures/external.strategy.jsonl",
+          "format": "jsonl",
+          "extract": [
+            "message"
+          ]
+        }
       ]
     },
     {
@@ -804,7 +861,10 @@
       "version_field": "strategy_protocol_version",
       "version": "10",
       "sources": [
-        { "path": "strategy/v10/fixtures/external.strategy.jsonl", "format": "jsonl" }
+        {
+          "path": "strategy/v10/fixtures/external.strategy.jsonl",
+          "format": "jsonl"
+        }
       ]
     },
     {
@@ -813,9 +873,18 @@
       "version_field": "contract_version",
       "version": "13",
       "sources": [
-        { "path": "v13/fixtures/demo.scenario.json", "format": "json" },
-        { "path": "v13/fixtures/fill-clipped.scenario.json", "format": "json" },
-        { "path": "strategy/v11/fixtures/external.scenario.json", "format": "json" }
+        {
+          "path": "v13/fixtures/demo.scenario.json",
+          "format": "json"
+        },
+        {
+          "path": "v13/fixtures/fill-clipped.scenario.json",
+          "format": "json"
+        },
+        {
+          "path": "strategy/v11/fixtures/external.scenario.json",
+          "format": "json"
+        }
       ]
     },
     {
@@ -824,8 +893,14 @@
       "version_field": "contract_version",
       "version": "13",
       "sources": [
-        { "path": "v13/fixtures/demo.scenario.jsonl", "format": "jsonl" },
-        { "path": "strategy/v11/fixtures/external.scenario.jsonl", "format": "jsonl" }
+        {
+          "path": "v13/fixtures/demo.scenario.jsonl",
+          "format": "jsonl"
+        },
+        {
+          "path": "strategy/v11/fixtures/external.scenario.jsonl",
+          "format": "jsonl"
+        }
       ]
     },
     {
@@ -834,8 +909,14 @@
       "version_field": "contract_version",
       "version": "13",
       "sources": [
-        { "path": "v13/fixtures/demo.journal.jsonl", "format": "jsonl" },
-        { "path": "v13/fixtures/fill-clipped.journal.jsonl", "format": "jsonl" }
+        {
+          "path": "v13/fixtures/demo.journal.jsonl",
+          "format": "jsonl"
+        },
+        {
+          "path": "v13/fixtures/fill-clipped.journal.jsonl",
+          "format": "jsonl"
+        }
       ]
     },
     {
@@ -844,7 +925,13 @@
       "version_field": "strategy_protocol_version",
       "version": "11",
       "sources": [
-        { "path": "strategy/v11/fixtures/external.strategy.jsonl", "format": "jsonl", "extract": ["message"] }
+        {
+          "path": "strategy/v11/fixtures/external.strategy.jsonl",
+          "format": "jsonl",
+          "extract": [
+            "message"
+          ]
+        }
       ]
     },
     {
@@ -853,7 +940,101 @@
       "version_field": "strategy_protocol_version",
       "version": "11",
       "sources": [
-        { "path": "strategy/v11/fixtures/external.strategy.jsonl", "format": "jsonl" }
+        {
+          "path": "strategy/v11/fixtures/external.strategy.jsonl",
+          "format": "jsonl"
+        }
+      ]
+    },
+    {
+      "name": "scenario-v14",
+      "schema": "v14/scenario.schema.json",
+      "version_field": "contract_version",
+      "version": "14",
+      "sources": [
+        {
+          "path": "v14/fixtures/demo.scenario.json",
+          "format": "json"
+        },
+        {
+          "path": "v14/fixtures/fill-clipped.scenario.json",
+          "format": "json"
+        },
+        {
+          "path": "v14/fixtures/quote-trade.scenario.json",
+          "format": "json"
+        },
+        {
+          "path": "strategy/v12/fixtures/external.scenario.json",
+          "format": "json"
+        }
+      ]
+    },
+    {
+      "name": "scenario-stream-v14",
+      "schema": "v14/scenario-stream.schema.json",
+      "version_field": "contract_version",
+      "version": "14",
+      "sources": [
+        {
+          "path": "v14/fixtures/demo.scenario.jsonl",
+          "format": "jsonl"
+        },
+        {
+          "path": "v14/fixtures/quote-trade.scenario.jsonl",
+          "format": "jsonl"
+        },
+        {
+          "path": "strategy/v12/fixtures/external.scenario.jsonl",
+          "format": "jsonl"
+        }
+      ]
+    },
+    {
+      "name": "journal-v14",
+      "schema": "v14/journal.schema.json",
+      "version_field": "contract_version",
+      "version": "14",
+      "sources": [
+        {
+          "path": "v14/fixtures/demo.journal.jsonl",
+          "format": "jsonl"
+        },
+        {
+          "path": "v14/fixtures/fill-clipped.journal.jsonl",
+          "format": "jsonl"
+        },
+        {
+          "path": "v14/fixtures/quote-trade.journal.jsonl",
+          "format": "jsonl"
+        }
+      ]
+    },
+    {
+      "name": "strategy-message-v12",
+      "schema": "strategy/v12/message.schema.json",
+      "version_field": "strategy_protocol_version",
+      "version": "12",
+      "sources": [
+        {
+          "path": "strategy/v12/fixtures/external.strategy.jsonl",
+          "format": "jsonl",
+          "extract": [
+            "message"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "strategy-transcript-v12",
+      "schema": "strategy/v12/transcript.schema.json",
+      "version_field": "strategy_protocol_version",
+      "version": "12",
+      "sources": [
+        {
+          "path": "strategy/v12/fixtures/external.strategy.jsonl",
+          "format": "jsonl"
+        }
       ]
     }
   ]

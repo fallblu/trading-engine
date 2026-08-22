@@ -48,7 +48,9 @@ let validate_venue_calendars ~root catalog venue_calendars =
 let header ~root ~contract_version ~base_currency ~initial_cash ~instruments
     ~venue_calendars ~max_internal_events =
   let* () =
-    if List.mem contract_version [ "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6" ]
+    if
+      List.mem contract_version
+        [ "14"; "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6" ]
     then Ok ()
     else
       Account.create ~base_currency ~initial_cash
@@ -69,7 +71,7 @@ let header ~root ~contract_version ~base_currency ~initial_cash ~instruments
       let* () =
         if
           List.mem contract_version
-            [ "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6"; "5" ]
+            [ "14"; "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6"; "5" ]
         then validate_venue_calendars ~root catalog venue_calendars
         else Ok ()
       in
@@ -89,7 +91,7 @@ let header ~root ~contract_version ~base_currency ~initial_cash ~instruments
             (child root
                (if
                   List.mem contract_version
-                    [ "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6" ]
+                    [ "14"; "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6" ]
                 then "initial_portfolio.cash"
                 else "initial_cash"))
           "initial cash must contain every scenario currency exactly once"
@@ -384,6 +386,39 @@ let validate_slices_at ~paths ~base_currency ~currencies ~instruments slices =
                        bar.volume)
             market_slice.bars
         in
+        let market_events_valid =
+          List.for_all
+            (fun (event : Market_event.t) ->
+              match
+                Id.Instrument.Map.find_opt event.instrument_id instrument_map
+              with
+              | None -> false
+              | Some instrument ->
+                  let prices, quantities =
+                    match event.kind with
+                    | Market_event.Quote
+                        { bid_price; bid_quantity; ask_price; ask_quantity } ->
+                        ( [ bid_price; ask_price ],
+                          [ bid_quantity; ask_quantity ] )
+                    | Trade { price; quantity; _ } -> ([ price ], [ quantity ])
+                  in
+                  List.for_all
+                    (fun price ->
+                      Scalar.Price.is_multiple price ~tick:instrument.tick_size)
+                    prices
+                  && List.for_all
+                       (fun quantity ->
+                         Scalar.Quantity.is_multiple quantity
+                           ~lot:instrument.lot_size)
+                       quantities
+                  && Ptime.compare event.event_at market_slice.start_at >= 0
+                  && Ptime.compare event.event_at market_slice.end_at <= 0
+                  && Ptime.compare event.available_at market_slice.available_at
+                     <= 0
+                  && Ptime.compare event.received_at market_slice.received_at
+                     <= 0)
+            market_slice.market_events
+        in
         if not (Id.Instrument.Set.equal catalog ids) then
           fail ~json_path:(child root "bars")
             "each market slice must contain every configured instrument"
@@ -413,6 +448,11 @@ let validate_slices_at ~paths ~base_currency ~currencies ~instruments slices =
         else if not bars_aligned then
           fail ~json_path:(child root "bars")
             "market prices and volumes must align with instrument increments"
+        else if not market_events_valid then
+          fail
+            ~json_path:(child root "market_events")
+            "market events must be known, aligned, and observable within the \
+             slice"
         else if
           Option.exists
             (fun sequence ->

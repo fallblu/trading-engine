@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add causal quote/trade replay with displayed-liquidity capacity, aggressor-qualified passive
+  fills, maker/taker fee attribution, and economic event timestamps.
+- Publish scenario/journal contract v14 and external strategy protocol v12 while preserving v13
+  and protocol v11 as frozen compatibility contracts.
 - Add conservative next-open and adverse-touch completed-bar execution models with strict fixed
   spread and linear participation-impact configuration, explicit missing-volume policy,
   tick-aligned prices, and separate price-component audit attribution.

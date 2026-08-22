@@ -105,7 +105,11 @@ let create_runner ~contract_version ~run_id ~scenario_sha256 ~risk
           Engine.config_v10 ~contract_version ~risk ~venue_calendars
             ~execution_model ~execution ~financing ~max_internal_events
       | Some financing, Some settlement ->
-          if String.equal contract_version "13" then
+          if String.equal contract_version "14" then
+            Engine.config_v14 ~contract_version ~risk ~venue_calendars
+              ~execution_model ~execution ~financing ~settlement
+              ~max_internal_events
+          else if String.equal contract_version "13" then
             Engine.config_v13 ~contract_version ~risk ~venue_calendars
               ~execution_model ~execution ~financing ~settlement
               ~max_internal_events
