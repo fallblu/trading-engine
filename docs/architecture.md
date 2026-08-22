@@ -55,7 +55,8 @@ For each synchronized market slice, the engine:
 1. Validates catalog coverage, slice order, receipt order, and market time.
 2. Stores the synchronized closes and complete FX vector, emits `run_started` once, and then emits
    `market_slice_received`.
-3. Applies splits and dividends, adjusting signed positions, persistent targets, and active orders.
+3. Applies corporate distributions and lifecycle events, adjusting positions, basis, targets,
+   listings, and active orders.
 4. Accrues borrow fees on open shorts for the slice interval.
 5. Fixes the priority sequence of orders that became eligible after an earlier slice.
 6. Offers each instrument's remaining capacity to liquidation orders first, then applies

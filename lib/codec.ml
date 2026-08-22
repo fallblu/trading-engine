@@ -241,6 +241,97 @@ let corporate_action_to_yojson action =
       `Assoc
         ((("type", string "cash_dividend") :: common)
         @ [ ("amount_per_unit", money amount_per_unit) ])
+  | Corporate_action.Distribution
+      {
+        distribution_type;
+        destination_instrument_id;
+        numerator;
+        denominator;
+        basis_allocation_bps;
+        fractional_policy;
+      } ->
+      let fractional_policy =
+        match fractional_policy with
+        | Corporate_action.Reject_fractional ->
+            `Assoc [ ("policy", string "reject") ]
+        | Cash_in_lieu { price = value; currency } ->
+            `Assoc
+              [
+                ("policy", string "cash_in_lieu");
+                ("price", price value);
+                ("currency", string currency);
+              ]
+      in
+      `Assoc
+        (( "type",
+           string
+             (Corporate_action.distribution_type_to_string distribution_type) )
+         :: common
+        @ [
+            ( "destination_instrument_id",
+              instrument_id destination_instrument_id );
+            ("numerator", int64 numerator);
+            ("denominator", int64 denominator);
+            ("basis_allocation_bps", `Int basis_allocation_bps);
+            ("fractional_policy", fractional_policy);
+          ])
+
+let terminal_policy_to_yojson = function
+  | Instrument_lifecycle.Hold -> `Assoc [ ("policy", string "hold") ]
+  | Cash_out { price = value; currency } ->
+      `Assoc
+        [
+          ("policy", string "cash_out");
+          ("price", price value);
+          ("currency", string currency);
+        ]
+
+let lifecycle_event_to_yojson event =
+  let common =
+    [
+      ( "event_id",
+        string (Id.Corporate_action.to_string event.Instrument_lifecycle.id) );
+      ("instrument_id", instrument_id event.instrument_id);
+    ]
+  in
+  match event.kind with
+  | Instrument_lifecycle.Halt { reason } ->
+      `Assoc (("type", string "halt") :: ("reason", string reason) :: common)
+  | Resume -> `Assoc (("type", string "resume") :: common)
+  | Identifier_change { symbol; provider; provider_instrument_id } ->
+      `Assoc
+        ((("type", string "identifier_change") :: common)
+        @ [
+            ("symbol", string symbol);
+            ("provider", string provider);
+            ("provider_instrument_id", string provider_instrument_id);
+          ])
+  | Expiration { terminal_policy } ->
+      `Assoc
+        ((("type", string "expiration") :: common)
+        @ [ ("terminal_policy", terminal_policy_to_yojson terminal_policy) ])
+  | Delisting { terminal_policy; reason } ->
+      `Assoc
+        ((("type", string "delisting") :: ("reason", string reason) :: common)
+        @ [ ("terminal_policy", terminal_policy_to_yojson terminal_policy) ])
+
+let lifecycle_listing_to_yojson listing =
+  `Assoc
+    [
+      ("instrument_id", instrument_id listing.Instrument_lifecycle.instrument_id);
+      ("symbol", string listing.symbol);
+      ("status", string (Instrument_lifecycle.status_to_string listing.status));
+      ( "provider_mappings",
+        `List
+          (List.map
+             (fun (provider, provider_instrument_id) ->
+               `Assoc
+                 [
+                   ("provider", string provider);
+                   ("provider_instrument_id", string provider_instrument_id);
+                 ])
+             listing.provider_mappings) );
+    ]
 
 let borrow_observation_to_yojson observation =
   `Assoc
@@ -284,14 +375,24 @@ let versioned_market_slice_to_yojson ~contract_version market_slice =
       );
     ]
   |> function
-  | `Assoc fields when List.mem contract_version [ "11"; "10" ] ->
+  | `Assoc fields when List.mem contract_version [ "12"; "11"; "10" ] ->
       let settlement =
-        if String.equal contract_version "11" then
+        if List.mem contract_version [ "12"; "11" ] then
           [
             ( "settlement_failures",
               `List
                 (List.map settlement_failure_to_yojson
                    market_slice.Market_slice.settlement_failures) );
+          ]
+        else []
+      in
+      let lifecycle =
+        if String.equal contract_version "12" then
+          [
+            ( "lifecycle_events",
+              `List
+                (List.map lifecycle_event_to_yojson
+                   market_slice.Market_slice.lifecycle_events) );
           ]
         else []
       in
@@ -307,7 +408,7 @@ let versioned_market_slice_to_yojson ~contract_version market_slice =
                 (List.map cash_rate_observation_to_yojson
                    market_slice.Market_slice.cash_rate_observations) );
           ]
-        @ settlement)
+        @ settlement @ lifecycle)
   | json -> json
 
 let market_slice_to_yojson market_slice =
@@ -318,6 +419,9 @@ let market_slice_to_yojson_v10 market_slice =
 
 let market_slice_to_yojson_v11 market_slice =
   versioned_market_slice_to_yojson ~contract_version:"11" market_slice
+
+let market_slice_to_yojson_v12 market_slice =
+  versioned_market_slice_to_yojson ~contract_version:"12" market_slice
 
 let request_fields request =
   let kind, limit_price =
@@ -422,7 +526,7 @@ let order_to_yojson_v8 order =
       ])
 
 let versioned_order_to_yojson ~contract_version order =
-  if List.mem contract_version [ "11"; "10"; "9"; "8" ] then
+  if List.mem contract_version [ "12"; "11"; "10"; "9"; "8" ] then
     order_to_yojson_v8 order
   else order_to_yojson order
 
@@ -620,7 +724,7 @@ let account_valuation_to_yojson ?(contract_version = "8") valuation =
       ( "cash_balances",
         `List
           (List.map
-             (if String.equal contract_version "11" then
+             (if List.mem contract_version [ "12"; "11" ] then
                 cash_attribution_to_yojson_v11
               else if String.equal contract_version "10" then
                 cash_attribution_to_yojson_v10
@@ -629,7 +733,7 @@ let account_valuation_to_yojson ?(contract_version = "8") valuation =
       ( "positions",
         `List
           (List.map
-             (if String.equal contract_version "11" then
+             (if List.mem contract_version [ "12"; "11" ] then
                 position_attribution_to_yojson_v11
               else if
                 String.equal contract_version "9"
@@ -639,14 +743,14 @@ let account_valuation_to_yojson ?(contract_version = "8") valuation =
              valuation.positions) );
     ]
   |> function
-  | `Assoc fields when List.mem contract_version [ "11"; "10"; "9" ] ->
+  | `Assoc fields when List.mem contract_version [ "12"; "11"; "10"; "9" ] ->
       let financing =
-        if List.mem contract_version [ "11"; "10" ] then
+        if List.mem contract_version [ "12"; "11"; "10" ] then
           [ ("cash_interest", money valuation.Account.cash_interest) ]
         else []
       in
       let settlement =
-        if String.equal contract_version "11" then
+        if List.mem contract_version [ "12"; "11" ] then
           [
             ("settled_cash", money valuation.Account.settled_cash);
             ("unsettled_cash", money valuation.unsettled_cash);
@@ -693,7 +797,7 @@ let valuation_to_yojson ~contract_version valuation =
   | `Assoc fields ->
       let fields = fields @ [ ("margin", margin_to_yojson valuation.margin) ] in
       let fields =
-        if List.mem contract_version [ "11"; "10"; "9"; "8" ] then
+        if List.mem contract_version [ "12"; "11"; "10"; "9"; "8" ] then
           fields
           @ [
               ( "group_exposures",
@@ -795,6 +899,26 @@ let payload_to_yojson ~contract_version = function
           ("quantity", quantity held);
           ("cash_amount", money cash_amount);
         ]
+  | Audit.Distribution_applied { action; result } ->
+      `Assoc
+        [
+          ("action", corporate_action_to_yojson action);
+          ("source_quantity", quantity result.Account.source_quantity);
+          ("destination_quantity", quantity result.destination_quantity);
+          ("fractional_quantity", quantity result.fractional_quantity);
+          ("allocated_basis", money result.allocated_basis);
+          ("fractional_basis", money result.fractional_basis);
+          ("cash_in_lieu", money result.cash_in_lieu);
+        ]
+  | Audit.Lifecycle_applied
+      { lifecycle_event; listing; liquidated_quantity; cash_amount } ->
+      `Assoc
+        [
+          ("lifecycle_event", lifecycle_event_to_yojson lifecycle_event);
+          ("listing", lifecycle_listing_to_yojson listing);
+          ("liquidated_quantity", quantity liquidated_quantity);
+          ("cash_amount", money cash_amount);
+        ]
   | Audit.Order_adjusted { order; action_id } ->
       `Assoc
         [
@@ -802,7 +926,7 @@ let payload_to_yojson ~contract_version = function
           ("action_id", string (Id.Corporate_action.to_string action_id));
         ]
   | Audit.Fill_applied fill ->
-      if List.mem contract_version [ "11"; "10"; "9" ] then
+      if List.mem contract_version [ "12"; "11"; "10"; "9" ] then
         fill_to_yojson_v9 fill
       else fill_to_yojson fill
   | Audit.Settlement_instruction_created instruction

@@ -4,8 +4,8 @@ A replay scenario uses either one strict JSON object or a strict JSON Lines stre
 weights, quantities, money, and sequences are canonical JSON strings. Counts and basis points are
 JSON integers. Unknown, missing, duplicate, noncanonical, and non-finite values fail parsing.
 
-Use [the v11 demo](../contracts/v11/fixtures/demo.scenario.json) as the canonical complete example.
-The [scenario JSON Schema](../contracts/v11/scenario.schema.json) provides structural validation.
+Use [the v12 demo](../contracts/v12/fixtures/demo.scenario.json) as the canonical complete example.
+The [scenario JSON Schema](../contracts/v12/scenario.schema.json) provides structural validation.
 The engine parser also enforces cross-field and cross-record invariants. Diagnostics identify the
 failed field or array item. Stream diagnostics additionally retain the record line and sequence.
 
@@ -32,8 +32,8 @@ The batch object and stream header share one domain-construction path and the sa
 checks. Stream items reuse the batch slice and intent validators directly; no synthetic batch
 scenario is constructed.
 
-The [stream record JSON Schema](../contracts/v11/scenario-stream.schema.json) validates each line,
-and [the v11 stream fixture](../contracts/v11/fixtures/demo.scenario.jsonl) is the canonical example.
+The [stream record JSON Schema](../contracts/v12/scenario-stream.schema.json) validates each line,
+and [the v12 stream fixture](../contracts/v12/fixtures/demo.scenario.jsonl) is the canonical example.
 The engine validates the entire stream before creating a journal. It then replays one record at a
 time without retaining prior slices, scheduled batches, or audit events. Reducer state still
 retains current account, order, target, and latest-bar state required by execution semantics.
@@ -42,7 +42,7 @@ retains current account, order, target, and latest-bar state required by executi
 
 | Field | Meaning |
 |---|---|
-| `contract_version` | Required string identifying this file contract; v11 is `"11"` |
+| `contract_version` | Required string identifying this file contract; v12 is `"12"` |
 | `metadata` | Required arbitrary JSON object preserved for provenance and ignored by execution |
 | `run_id` | Stable identity used in generated IDs |
 | `base_currency` | Reporting currency used for aggregate risk and valuation |
@@ -222,7 +222,7 @@ has zero available quantity. The latest observation remains active until replace
 missing-data handling, `reject_order` or `clip_fill` locate behavior, and
 `reject_new_shorts` or `close_out` recall behavior.
 
-The v11 `settlement` object selects `total_cash` or `settled_cash` buying power and
+The v12 `settlement` object selects `total_cash` or `settled_cash` buying power and
 `total_positions` or `settled_positions` availability. Its immutable calendars contain ordered
 canonical business dates, and each instrument has exactly one calendar and a lag from zero through
 30 business days. A fill updates economic accounting immediately and creates a deterministic
@@ -230,7 +230,11 @@ instruction. Pending cash and quantity appear as unsettled attribution until the
 after the due date. A due instruction named in that slice's `settlement_failures` becomes failed
 instead, retains its unsettled balances, and records the supplied reason.
 
-Supported corporate actions are exact-ratio `split` and per-unit `cash_dividend` records. Action
+Supported corporate actions are exact-ratio `split`, per-unit `cash_dividend`, `stock_dividend`,
+`rights`, and `spin_off` records. Distribution records name a destination instrument, entitlement
+ratio, basis allocation in basis points, and a fractional policy. `reject` fails on a non-lot
+entitlement; `cash_in_lieu` requires an explicit destination-quote-currency price and journals the
+delivered quantity, fractional quantity, allocated basis, fractional basis, and cash amount. Action
 IDs are unique across the scenario. Actions are applied in canonical ID order before borrow fees
 and matching. A split rescales the position, persistent target, and active orders while preserving
 basis; it does not rescale unit-based risk limits. Split-adjusted positions and targets are
@@ -239,12 +243,19 @@ but each fill is bounded by `max_order_quantity`; GTC limit remainders may fill 
 while market IOC remainders are cancelled. A dividend changes the quote-currency cash ledger and
 realized dividend P&L, crediting a long and debiting a short.
 
+Version 12 slices also carry `lifecycle_events`. Stable `instrument_id` never changes. An
+`identifier_change` updates the current symbol and one named provider mapping with provenance;
+`halt` and `resume` control whether new exposure is accepted. `expiration` and `delisting` are
+terminal and require either `hold` or an explicit quote-currency `cash_out` price. Halts and
+terminal events cancel active orders. Terminal events set persistent target exposure to zero and
+cash-out clears the position with exact realized-P&L attribution.
+
 For causal next-open execution, an order-changing schedule entry's anchor `received_at` is no later
 than the next slice `start_at`.
 
 ## Audit journal
 
-The [journal JSON Schema](../contracts/v11/journal.schema.json) validates each JSON Lines record.
+The [journal JSON Schema](../contracts/v12/journal.schema.json) validates each JSON Lines record.
 Every record contains `contract_version`, `engine_sequence`, deterministic `event_id`, ordered
 `causation_ids`, `run_id`, `recorded_at`, `event_type`, and an event-specific `payload`. Causal
 references are unique prior event IDs from the same run. The version is repeated on every record
@@ -263,7 +274,8 @@ fill and the greatest lot-aligned permitted quantity. Its reason taxonomy versio
 ratio, or basis-points threshold.
 Each order snapshot retains both creation and latest-update event IDs.
 
-The journal also records split/dividend application, split-driven order adjustments, observed
+The journal also records split/dividend/distribution application, lifecycle transitions,
+action-driven order adjustments, observed
 borrow charges, recalls and close-outs, cash-interest entries, margin calls, liquidation-origin
 orders, and restoration. Every valuation contains complete
 per-currency cash attribution, signed per-instrument native and base-currency attribution, long,
