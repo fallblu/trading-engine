@@ -8,13 +8,13 @@ bootstrap:
 environment-check:
 	@./scripts/check-development-environment
 
-build: environment-check
+build:
 	opam exec -- dune build @all
 
-test: environment-check
+test:
 	opam exec -- dune runtest
 
-fmt-check: environment-check
+fmt-check:
 	opam exec -- dune build @fmt
 
-check: fmt-check build test
+check: environment-check fmt-check build test
