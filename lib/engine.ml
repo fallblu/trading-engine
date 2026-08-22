@@ -15,6 +15,18 @@ let make_config ~venue_calendars ~contract_version ~risk ~execution_model
     ~execution ~financing ~settlement ~max_internal_events =
   if not (Contract.is_supported contract_version) then
     Error "engine contract version is unsupported"
+  else if
+    List.mem (Execution_model.name execution_model) Execution_model.supported
+    && not (Execution_model.supports_contract execution_model contract_version)
+  then Error "execution model does not support the engine contract version"
+  else if
+    String.equal (Execution_model.name execution_model) "completed_bar_v1"
+    && Option.is_some (Execution.cost_model execution)
+    || List.mem
+         (Execution_model.name execution_model)
+         [ "completed_bar_next_open_v1"; "completed_bar_adverse_touch_v1" ]
+       && Option.is_none (Execution.cost_model execution)
+  then Error "execution model and pricing configuration are incompatible"
   else if max_internal_events <= 0 then
     Error "maximum internal events must be positive"
   else if max_internal_events > Resource_limits.internal_events then
@@ -56,6 +68,7 @@ let config_v11 ~contract_version ~risk ~venue_calendars ~execution_model
     ~max_internal_events
 
 let config_v12 = config_v11
+let config_v13 = config_v12
 
 let valid_sha256 value =
   String.length value = 64
@@ -1907,6 +1920,22 @@ module Interactive = struct
         with
         | None -> Error "execution order refers to an unknown instrument"
         | Some instrument -> (
+            let* reduction =
+              match proposed.Execution.price_attribution with
+              | None -> Ok reduction
+              | Some attribution ->
+                  let* reduction, price_event_id =
+                    emit_with_id reduction
+                      (Audit.Execution_price_selected
+                         {
+                           order_id = order.id;
+                           instrument_id = order.request.instrument_id;
+                           side = order.request.side;
+                           attribution;
+                         })
+                  in
+                  Ok (with_causes reduction [ price_event_id ])
+            in
             let id = fill_id reduction.state in
             match increment_fill_number reduction.state with
             | Error _ as error -> error

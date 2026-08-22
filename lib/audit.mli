@@ -65,6 +65,12 @@ type event =
       cash_amount : Scalar.Money.t;
     }
   | Order_adjusted of { order : Order.t; action_id : Id.Corporate_action.t }
+  | Execution_price_selected of {
+      order_id : Id.Order.t;
+      instrument_id : Id.Instrument.t;
+      side : Order.side;
+      attribution : Execution.price_attribution;
+    }
   | Fill_applied of Fill.t
   | Settlement_instruction_created of Settlement.instruction
   | Settlement_completed of Settlement.instruction

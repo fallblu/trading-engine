@@ -1,6 +1,20 @@
 (** Deterministic synchronized-slice execution simulation. *)
 
 type t
+type missing_volume_policy = Reject_missing_volume | Zero_impact
+
+type cost_model = private {
+  half_spread_bps : int;
+  impact_coefficient_bps : int;
+  missing_volume_policy : missing_volume_policy;
+}
+
+type price_attribution = private {
+  reference_price : Scalar.Price.t;
+  spread_adjustment : Scalar.Money.t;
+  impact_adjustment : Scalar.Money.t;
+  final_price : Scalar.Price.t;
+}
 
 type proposed_fill = private {
   order_id : Id.Order.t;
@@ -10,6 +24,7 @@ type proposed_fill = private {
   fee_components : Fee_schedule.calculated_component list;
   liquidity : Fee_schedule.liquidity;
   executed_at : Ptime.t;
+  price_attribution : price_attribution option;
 }
 
 type match_result = private {
@@ -39,10 +54,19 @@ val create_v2 :
   fee_schedules:Fee_schedule.t list ->
   (t, string) result
 
+val create_conservative :
+  participation_bps:int ->
+  fee_schedules:Fee_schedule.t list ->
+  half_spread_bps:int ->
+  impact_coefficient_bps:int ->
+  missing_volume_policy:missing_volume_policy ->
+  (t, string) result
+
 val participation_bps : t -> int
 val fixed_fee : t -> Scalar.Money.t
 val fee_bps : t -> int
 val fee_schedules : t -> Fee_schedule.t list
+val cost_model : t -> cost_model option
 
 val calculate_fee :
   t ->
@@ -61,6 +85,20 @@ val start_slice :
   (cursor, string) result
 (** Start an immutable matching cursor from the orders eligible at the slice
     boundary. *)
+
+val start_slice_next_open :
+  t ->
+  instruments:Instrument.t list ->
+  oms:Oms.t ->
+  Market_slice.t ->
+  (cursor, string) result
+
+val start_slice_adverse_touch :
+  t ->
+  instruments:Instrument.t list ->
+  oms:Oms.t ->
+  Market_slice.t ->
+  (cursor, string) result
 
 val finished : Id.Order.t list -> cursor
 (** Build a cursor that immediately finishes. This supports execution models

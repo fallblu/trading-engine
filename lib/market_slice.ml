@@ -155,6 +155,8 @@ let create_v12 ~slice_sequence ~start_at ~end_at ~available_at ~received_at
           settlement_failures;
         }
 
+let create_v13 = create_v12
+
 let create_v11 ~slice_sequence ~start_at ~end_at ~available_at ~received_at
     ~bars ~fx_rates ~corporate_actions ~borrow_observations
     ~cash_rate_observations ~settlement_failures =

@@ -91,13 +91,30 @@ let capabilities_publish_versioned_resource_limits () =
     (T.Diagnostic.code_to_string T.Diagnostic.Resource_limit)
 
 let capabilities_describe_execution_contracts () =
-  let model =
+  let models =
     match
       T.Contract.capabilities_to_yojson () |> field "execution_model_contracts"
     with
-    | `List [ model ] -> model
-    | _ -> Alcotest.fail "expected one execution-model capability"
+    | `List models -> models
+    | _ -> Alcotest.fail "expected execution-model capabilities"
   in
+  let names =
+    List.map
+      (fun model ->
+        match field "name" model with
+        | `String value -> value
+        | _ -> Alcotest.fail "expected execution-model name")
+      models
+  in
+  Alcotest.(check (list string))
+    "stable model catalog"
+    [
+      "completed_bar_v1";
+      "completed_bar_next_open_v1";
+      "completed_bar_adverse_touch_v1";
+    ]
+    names;
+  let model = List.hd models in
   Alcotest.(check string)
     "stable model name" "completed_bar_v1"
     (match field "name" model with
@@ -118,7 +135,7 @@ let capabilities_describe_execution_contracts () =
     (strings "configuration_versions");
   Alcotest.(check (list string))
     "scenario contracts"
-    [ "12"; "11"; "10"; "9"; "8"; "7"; "6"; "5"; "4"; "3" ]
+    [ "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6"; "5"; "4"; "3" ]
     (strings "scenario_contract_versions");
   Alcotest.(check (list string))
     "required fields"
