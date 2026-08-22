@@ -2,6 +2,8 @@
  (name trading_engine)
  (public_name trading_engine)
  (private_modules reducer_phases scenario_shape scenario_validation)
+ (instrumentation
+  (backend bisect_ppx))
  (foreign_stubs
   (language c)
   (names process_tree_stubs))

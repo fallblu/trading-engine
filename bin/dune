@@ -2,4 +2,6 @@
  (name main)
  (public_name trading-engine)
  (package trading_engine)
+ (instrumentation
+  (backend bisect_ppx))
  (libraries trading_engine cmdliner eio_main fmt.tty logs.fmt logs.cli))

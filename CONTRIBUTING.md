@@ -31,6 +31,10 @@ campaigns and reproduction controls, see [Protocol fuzzing](docs/fuzzing.md).
 Reducer model properties also print reproducible seeds and shrink failures into scenario-like
 traces; see [Reducer property testing](docs/reducer-property-testing.md).
 
+Run `make coverage` to enforce the OCaml coverage floor and generate per-module, control-flow
+HTML, and Cobertura reports. See [OCaml coverage](docs/coverage.md) for report locations,
+instrumentation scope, and the explained-threshold-change policy.
+
 The gate formats a copy check, builds every target, and runs all tests. Keep commits small,
 coherent, and working. Use subject-only conventional commit messages such as
 `feat: implement deterministic order matching`.
