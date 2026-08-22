@@ -1,0 +1,42 @@
+#!/bin/sh
+set -eu
+
+repository_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+coverage_root="$repository_root/_coverage"
+coverage_data="$coverage_root/data"
+
+if [ "$coverage_root" != "$repository_root/_coverage" ]; then
+  echo "refusing to clean an unexpected coverage directory" >&2
+  exit 1
+fi
+
+rm -rf -- "$coverage_root"
+mkdir -p "$coverage_data"
+
+export BISECT_FILE="$coverage_data/bisect"
+cd "$repository_root"
+
+opam exec --switch . -- dune clean
+opam exec --switch . -- dune runtest --instrument-with bisect_ppx --force
+opam exec --switch . -- bisect-ppx-report summary \
+  --coverage-path "$coverage_data" \
+  --per-file \
+  --expect bin/ \
+  --expect lib/ \
+  | tee "$coverage_root/summary.txt"
+opam exec --switch . -- bisect-ppx-report html \
+  --coverage-path "$coverage_data" \
+  --expect bin/ \
+  --expect lib/ \
+  --sort-by-stats \
+  --tree \
+  --title "Trading Engine OCaml coverage" \
+  -o "$coverage_root/html"
+opam exec --switch . -- bisect-ppx-report cobertura \
+  --coverage-path "$coverage_data" \
+  --expect bin/ \
+  --expect lib/ \
+  "$coverage_root/cobertura.xml"
+python3 scripts/check-ocaml-coverage.py \
+  coverage/ocaml-policy.json \
+  "$coverage_root/summary.txt"

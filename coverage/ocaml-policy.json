@@ -1,0 +1,12 @@
+{
+  "format_version": 1,
+  "minimum_coverage_percent": 86.0,
+  "threshold_history": [
+    {
+      "minimum_coverage_percent": 86.0,
+      "reason": "Initial floor after covering bar and corporate-action validation boundaries.",
+      "issue_url": "https://github.com/fallblu/trading-engine/issues/17"
+    }
+  ],
+  "excluded_paths": []
+}

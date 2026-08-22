@@ -1,0 +1,48 @@
+# OCaml coverage
+
+The OCaml coverage gate instruments the production library and command-line executable with
+Bisect_ppx while running the normal Dune test aliases. Normal `make build`, `make test`, and
+`make check` targets remain uninstrumented, so coverage cannot change deterministic journals,
+transcripts, diagnostics, or other contract output.
+
+The opam manifests and bootstrap script pin Bisect_ppx to one upstream commit that supports the
+project's OCaml 5.5 and ppxlib toolchain. The environment check verifies that exact source pin as
+well as the locked dependency versions, preventing a local fallback to an incompatible release.
+
+Run the gate from a bootstrapped development environment:
+
+```sh
+make coverage
+```
+
+The command cleans Dune's generated build tree, recreates `_coverage/`, and writes three views of
+the same run. Cleaning first ensures every test executable and cram invocation contributes fresh
+instrumentation data:
+
+- `summary.txt` lists every production module and the project-wide instrumented-point result.
+- `html/index.html` highlights expression and control-flow points, making unvisited match arms,
+  conditions, and exception paths directly inspectable.
+- `cobertura.xml` provides line-oriented machine-readable data for CI and external analysis.
+
+CI publishes these files as the `ocaml-coverage` artifact for 14 days. The report command uses
+`--expect bin/` and `--expect lib/`, so a production module that silently disappears from the
+instrumented report fails the job.
+
+## Threshold policy
+
+`coverage/ocaml-policy.json` records the active project-wide minimum and its complete change
+history. Every entry requires both an explanation and a repository issue. A lower minimum must be
+appended as a new explained history entry; editing the active number alone fails the policy check.
+Raise the minimum when sustained coverage permits it.
+
+There are currently no excluded production paths. Tests, generated build files, vendored
+dependencies, schemas, and Python validation tools are outside the OCaml instrumentation scope;
+they are exercised by the same Dune aliases but do not contribute points. If a production
+expression must use `[@coverage off]` or a production path must be excluded later, add the path and
+a concrete reason to `excluded_paths` in the policy before using the exclusion. Do not exclude
+defensive failures merely because they are difficult to trigger.
+
+The initial floor was measured only after adding focused tests for bar price/volume invariants and
+corporate-action validation, comparison, and rendering. These paths guard market-data integrity
+and split/dividend semantics, so their coverage was addressed before adopting the project-wide
+minimum.
