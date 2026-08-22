@@ -7,6 +7,8 @@ type proposed_fill = private {
   quantity : Scalar.Quantity.t;
   price : Scalar.Price.t;
   fee : Scalar.Money.t;
+  fee_components : Fee_schedule.calculated_component list;
+  liquidity : Fee_schedule.liquidity;
   executed_at : Ptime.t;
 }
 
@@ -32,9 +34,24 @@ val create :
   fee_bps:int ->
   (t, string) result
 
+val create_v2 :
+  participation_bps:int ->
+  fee_schedules:Fee_schedule.t list ->
+  (t, string) result
+
 val participation_bps : t -> int
 val fixed_fee : t -> Scalar.Money.t
 val fee_bps : t -> int
+val fee_schedules : t -> Fee_schedule.t list
+
+val calculate_fee :
+  t ->
+  instrument:Instrument.t ->
+  notional:Scalar.Money.t ->
+  quantity:Scalar.Quantity.t ->
+  liquidity:Fee_schedule.liquidity ->
+  fx_rates:(string * Scalar.Price.t) list ->
+  (Fee_schedule.calculated_component list * Scalar.Money.t, string) result
 
 val start_slice :
   t ->

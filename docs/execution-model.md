@@ -1,11 +1,11 @@
 # Execution model
 
 The engine selects a compiled execution module by the scenario's stable `execution.model` name.
-Contract v7 advertises and accepts `completed_bar_v1`; embedders can inject another module through
+Contract v9 advertises and accepts `completed_bar_v1`; embedders can inject another module through
 the typed engine configuration without introducing runtime shared-library loading. The selected
 name is repeated in both terminal audit records.
 
-Each compiled model owns a strict configuration contract. The v7 envelope separates selection from
+Each compiled model owns a strict configuration contract. The v9 envelope separates selection from
 model-specific parameters:
 
 ```json
@@ -13,10 +13,21 @@ model-specific parameters:
   "execution": {
     "model": "completed_bar_v1",
     "configuration": {
-      "version": "1",
+      "version": "2",
       "participation_bps": 5000,
-      "fixed_fee": "0.25",
-      "fee_bps": 10
+      "fee_schedules": [
+        {
+          "schedule_id": "acme-fees-v1",
+          "instrument_id": "acme",
+          "settlement_currency": "USD",
+          "minimum": "0.3",
+          "maximum": "5",
+          "components": [
+            { "name": "broker", "currency": "USD", "kind": "fixed", "value": "0.25", "rounding": "up", "applies_to": "any" },
+            { "name": "exchange", "currency": "USD", "kind": "notional_bps", "value": 10, "rounding": "up", "applies_to": "taker" }
+          ]
+        }
+      ]
     }
   }
 }
@@ -24,7 +35,7 @@ model-specific parameters:
 
 The model and configuration version are validated before replay. Unknown models, unsupported
 model/version pairs, missing fields, and fields from another model are rejected. Contracts v3 and
-v4 retain their frozen flat execution object; v5 retains its frozen configured envelope.
+v4 retain their frozen flat execution object; v8 and earlier configured envelopes remain frozen.
 
 `--capabilities` preserves the `execution_models` name list and publishes one deterministic
 descriptor per model under `execution_model_contracts`: supported scenario and configuration
@@ -138,11 +149,16 @@ micro-unit.
 
 ## Risk-limited fills and fees
 
-Each proposed fill pays:
+Contract v9 selects exactly one fee schedule per instrument. A schedule composes named `fixed`,
+`notional_bps`, and `per_unit` components. Each component declares its currency, `up`, `down`, or
+`nearest` rounding, and `any`, `maker`, or `taker` applicability. A limit filled at its intrabar
+touch is maker liquidity; market orders and limits marketable at the open are takers.
 
-```text
-fixed_fee + ceil(fill_notional × fee_bps / 10,000)
-```
+Component amounts are calculated in their declared currencies. Slice FX rates convert quote
+notional into the component currency and each result back into the fill's quote currency. The
+schedule then applies its optional minimum and maximum in the settlement currency. Any difference
+is retained as a named `minimum_adjustment` or `maximum_adjustment`, so the component list always
+sums exactly to the signed aggregate fill fee. Negative components are rebates.
 
 Liquidation proposals are processed first, followed by sells and then buys within each origin
 class. For each proposal, the engine searches for the largest lot-aligned quantity whose signed
@@ -160,7 +176,9 @@ This bounded-fill policy preserves split-adjusted GTC limit orders: an oversized
 fill over multiple slices. Market orders remain IOC, so they fill at most one bounded quantity and
 cancel any remainder after their eligible slice.
 
-Each partial fill pays its own fixed fee, so fragmentation affects total cost.
+The complete schedule, including minimum and maximum, is evaluated independently for every partial
+fill, so fragmentation can change total cost. Contract v8 configuration v1 retains its frozen
+`fixed_fee + ceil(notional × fee_bps / 10,000)` rule.
 
 ## Exact values
 

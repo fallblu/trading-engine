@@ -337,7 +337,7 @@ let order_to_yojson_v8 order =
       ])
 
 let versioned_order_to_yojson ~contract_version order =
-  if String.equal contract_version "8" then order_to_yojson_v8 order
+  if List.mem contract_version [ "9"; "8" ] then order_to_yojson_v8 order
   else order_to_yojson order
 
 let fill_to_yojson fill =
@@ -355,6 +355,29 @@ let fill_to_yojson fill =
       ("executed_at", timestamp fill.executed_at);
       ("slice_sequence", int64 fill.slice_sequence);
     ]
+
+let calculated_fee_component_to_yojson component =
+  `Assoc
+    [
+      ("name", string component.Fee_schedule.name);
+      ("kind", string component.kind);
+      ("currency", string component.currency);
+      ("amount", money component.amount);
+      ("quote_amount", money component.quote_amount);
+    ]
+
+let fill_to_yojson_v9 fill =
+  match fill_to_yojson fill with
+  | `Assoc fields ->
+      `Assoc
+        (fields
+        @ [
+            ( "fee_components",
+              `List
+                (List.map calculated_fee_component_to_yojson
+                   fill.Fill.fee_components) );
+          ])
+  | _ -> assert false
 
 let initial_position_to_yojson (position : Initial_portfolio.position) =
   `Assoc
@@ -422,6 +445,31 @@ let position_attribution_to_yojson position =
       ("base_total_fees", money position.base_total_fees);
     ]
 
+let execution_fee_component_attribution_to_yojson component =
+  `Assoc
+    [
+      ("name", string component.Account.name);
+      ("kind", string component.kind);
+      ("currency", string component.currency);
+      ("amount", money component.amount);
+      ("quote_currency", string component.quote_currency);
+      ("quote_amount", money component.quote_amount);
+      ("base_amount", money component.base_amount);
+    ]
+
+let position_attribution_to_yojson_v9 position =
+  match position_attribution_to_yojson position with
+  | `Assoc fields ->
+      `Assoc
+        (fields
+        @ [
+            ( "execution_fee_components",
+              `List
+                (List.map execution_fee_component_attribution_to_yojson
+                   position.Account.execution_fee_components) );
+          ])
+  | _ -> assert false
+
 let cash_attribution_to_yojson cash =
   `Assoc
     [
@@ -431,7 +479,7 @@ let cash_attribution_to_yojson cash =
       ("base_value", money cash.base_value);
     ]
 
-let account_valuation_to_yojson valuation =
+let account_valuation_to_yojson ?(contract_version = "8") valuation =
   `Assoc
     [
       ("base_currency", string valuation.Account.base_currency);
@@ -451,8 +499,24 @@ let account_valuation_to_yojson valuation =
       ( "cash_balances",
         `List (List.map cash_attribution_to_yojson valuation.cash_balances) );
       ( "positions",
-        `List (List.map position_attribution_to_yojson valuation.positions) );
+        `List
+          (List.map
+             (if String.equal contract_version "9" then
+                position_attribution_to_yojson_v9
+              else position_attribution_to_yojson)
+             valuation.positions) );
     ]
+  |> function
+  | `Assoc fields when String.equal contract_version "9" ->
+      `Assoc
+        (fields
+        @ [
+            ( "execution_fee_components",
+              `List
+                (List.map execution_fee_component_attribution_to_yojson
+                   valuation.Account.execution_fee_components) );
+          ])
+  | json -> json
 
 let margin_to_yojson margin =
   `Assoc
@@ -477,11 +541,13 @@ let group_exposure_to_yojson (exposure : Risk.group_exposure) =
     ]
 
 let valuation_to_yojson ~contract_version valuation =
-  match account_valuation_to_yojson valuation.Audit.account with
+  match
+    account_valuation_to_yojson ~contract_version valuation.Audit.account
+  with
   | `Assoc fields ->
       let fields = fields @ [ ("margin", margin_to_yojson valuation.margin) ] in
       let fields =
-        if String.equal contract_version Contract.version then
+        if List.mem contract_version [ "9"; "8" ] then
           fields
           @ [
               ( "group_exposures",
@@ -565,7 +631,9 @@ let payload_to_yojson ~contract_version = function
           ("order", versioned_order_to_yojson ~contract_version order);
           ("action_id", string (Id.Corporate_action.to_string action_id));
         ]
-  | Audit.Fill_applied fill -> fill_to_yojson fill
+  | Audit.Fill_applied fill ->
+      if String.equal contract_version "9" then fill_to_yojson_v9 fill
+      else fill_to_yojson fill
   | Audit.Margin_limited
       {
         order_id = id;

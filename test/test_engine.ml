@@ -6,6 +6,7 @@ let () =
       ("accounting", Test_accounting.tests);
       ("execution", Test_execution.tests);
       ("order-lifetimes", Test_order_lifetimes.tests);
+      ("fee-schedules", Test_fee_schedules.tests);
       ("reducer", Test_reducer.tests);
       ("reducer-properties", Test_reducer_properties.tests);
       ("checkpoint4", Test_checkpoint4.tests);

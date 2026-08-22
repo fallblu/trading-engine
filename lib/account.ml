@@ -7,6 +7,25 @@ type position = {
   dividend_pnl : Scalar.Money.t;
   execution_fees : Scalar.Money.t;
   borrow_fees : Scalar.Money.t;
+  execution_fee_components : execution_fee_component list;
+}
+
+and execution_fee_component = {
+  name : string;
+  kind : string;
+  currency : string;
+  amount : Scalar.Money.t;
+  quote_amount : Scalar.Money.t;
+}
+
+type execution_fee_component_attribution = {
+  name : string;
+  kind : string;
+  currency : string;
+  amount : Scalar.Money.t;
+  quote_currency : string;
+  quote_amount : Scalar.Money.t;
+  base_amount : Scalar.Money.t;
 }
 
 type cash_attribution = {
@@ -38,6 +57,7 @@ type position_attribution = {
   base_borrow_fees : Scalar.Money.t;
   total_fees : Scalar.Money.t;
   base_total_fees : Scalar.Money.t;
+  execution_fee_components : execution_fee_component_attribution list;
 }
 
 type t = {
@@ -64,6 +84,7 @@ type valuation = {
   total_fees : Scalar.Money.t;
   cash_balances : cash_attribution list;
   positions : position_attribution list;
+  execution_fee_components : execution_fee_component_attribution list;
 }
 
 let ( let* ) result function_ =
@@ -77,6 +98,7 @@ let empty_position =
     dividend_pnl = Scalar.Money.zero;
     execution_fees = Scalar.Money.zero;
     borrow_fees = Scalar.Money.zero;
+    execution_fee_components = [];
   }
 
 let valid_currency value =
@@ -133,6 +155,7 @@ let of_initial_portfolio (initial : Initial_portfolio.t) =
             dividend_pnl = value.dividend_pnl;
             execution_fees = value.execution_fees;
             borrow_fees = value.borrow_fees;
+            execution_fee_components = [];
           }
           positions)
       Id.Instrument.Map.empty initial.positions
@@ -172,6 +195,7 @@ let update_position (positions : position Id.Instrument.Map.t) instrument_id
     && Scalar.Money.equal value.dividend_pnl Scalar.Money.zero
     && Scalar.Money.equal value.execution_fees Scalar.Money.zero
     && Scalar.Money.equal value.borrow_fees Scalar.Money.zero
+    && value.execution_fee_components = []
   then Id.Instrument.Map.remove instrument_id positions
   else Id.Instrument.Map.add instrument_id value positions
 
@@ -182,9 +206,46 @@ let adjust_cash (state : t) currency delta =
       let* amount = Scalar.Money.add current delta in
       Ok { state with cash = Currency_map.add currency amount state.cash }
 
-let add_execution_fee (position : position) fee =
+let add_fee_component (components : execution_fee_component list)
+    (component : Fee_schedule.calculated_component) =
+  let rec add prefix = function
+    | [] ->
+        Ok
+          (List.rev_append prefix
+             [
+               {
+                 name = component.name;
+                 kind = component.kind;
+                 currency = component.currency;
+                 amount = component.amount;
+                 quote_amount = component.quote_amount;
+               };
+             ])
+    | (current : execution_fee_component) :: remaining
+      when String.equal current.name component.name
+           && String.equal current.kind component.kind
+           && String.equal current.currency component.currency ->
+        let* amount = Scalar.Money.add current.amount component.amount in
+        let* quote_amount =
+          Scalar.Money.add current.quote_amount component.quote_amount
+        in
+        Ok
+          (List.rev_append prefix
+             ({ current with amount; quote_amount } :: remaining))
+    | current :: remaining -> add (current :: prefix) remaining
+  in
+  add [] components
+
+let add_execution_fee (position : position) fee fee_components =
   let* execution_fees = Scalar.Money.add position.execution_fees fee in
-  Ok { position with execution_fees }
+  let* execution_fee_components =
+    List.fold_left
+      (fun result component ->
+        let* components = result in
+        add_fee_component components component)
+      (Ok position.execution_fee_components) fee_components
+  in
+  Ok { position with execution_fees; execution_fee_components }
 
 let ensure_no_cross current delta =
   let* projected = Scalar.Quantity.add current delta in
@@ -202,7 +263,9 @@ let apply_open_long (state : t) fill (current : position) projected =
   let* state = adjust_cash state fill.quote_currency cash_delta in
   let* cost_basis = Scalar.Money.add current.cost_basis acquisition_cost in
   let* updated =
-    add_execution_fee { current with quantity = projected; cost_basis } fill.fee
+    add_execution_fee
+      { current with quantity = projected; cost_basis }
+      fill.fee fill.fee_components
   in
   Ok
     {
@@ -216,7 +279,9 @@ let apply_open_short (state : t) fill (current : position) projected =
   let* basis_delta = Scalar.Money.negate net_proceeds in
   let* cost_basis = Scalar.Money.add current.cost_basis basis_delta in
   let* updated =
-    add_execution_fee { current with quantity = projected; cost_basis } fill.fee
+    add_execution_fee
+      { current with quantity = projected; cost_basis }
+      fill.fee fill.fee_components
   in
   Ok
     {
@@ -239,7 +304,7 @@ let apply_close_long (state : t) fill (current : position) projected =
   let* updated =
     add_execution_fee
       { current with quantity = projected; cost_basis; realized_pnl }
-      fill.fee
+      fill.fee fill.fee_components
   in
   Ok
     {
@@ -267,7 +332,7 @@ let apply_close_short (state : t) fill (current : position) projected =
   let* updated =
     add_execution_fee
       { current with quantity = projected; cost_basis; realized_pnl }
-      fill.fee
+      fill.fee fill.fee_components
   in
   Ok
     {
@@ -405,6 +470,28 @@ let value (state : t) ~instruments ~marks ~fx_rates =
     let* base_execution_fees = convert current.execution_fees in
     let* base_borrow_fees = convert current.borrow_fees in
     let* base_total_fees = convert total_fees in
+    let* execution_fee_components =
+      List.fold_left
+        (fun result (component : execution_fee_component) ->
+          let* values = result in
+          let* component_fx = fx component.currency in
+          let* base_amount =
+            Scalar.Money.convert component.amount ~rate:component_fx
+          in
+          Ok
+            ({
+               name = component.name;
+               kind = component.kind;
+               currency = component.currency;
+               amount = component.amount;
+               quote_currency = instrument.quote_currency;
+               quote_amount = component.quote_amount;
+               base_amount;
+             }
+            :: values))
+        (Ok []) current.execution_fee_components
+      |> Result.map List.rev
+    in
     Ok
       {
         instrument_id;
@@ -428,6 +515,7 @@ let value (state : t) ~instruments ~marks ~fx_rates =
         base_borrow_fees;
         total_fees;
         base_total_fees;
+        execution_fee_components;
       }
   in
   let unknown_mark =
@@ -564,6 +652,35 @@ let value (state : t) ~instruments ~marks ~fx_rates =
   in
   let* gross_exposure = add long_market_value short_market_value in
   let* equity = add cash net_market_value in
+  let add_attribution (components : execution_fee_component_attribution list)
+      (component : execution_fee_component_attribution) =
+    let rec add_component prefix = function
+      | [] -> Ok (List.rev_append prefix [ component ])
+      | (current : execution_fee_component_attribution) :: remaining
+        when String.equal current.name component.name
+             && String.equal current.kind component.kind
+             && String.equal current.currency component.currency
+             && String.equal current.quote_currency component.quote_currency ->
+          let* amount = add current.amount component.amount in
+          let* quote_amount = add current.quote_amount component.quote_amount in
+          let* base_amount = add current.base_amount component.base_amount in
+          Ok
+            (List.rev_append prefix
+               ({ current with amount; quote_amount; base_amount } :: remaining))
+      | current :: remaining -> add_component (current :: prefix) remaining
+    in
+    add_component [] components
+  in
+  let* execution_fee_components =
+    List.fold_left
+      (fun result (position : position_attribution) ->
+        List.fold_left
+          (fun result component ->
+            let* components = result in
+            add_attribution components component)
+          result position.execution_fee_components)
+      (Ok []) positions
+  in
   Ok
     {
       base_currency = state.base_currency;
@@ -582,6 +699,7 @@ let value (state : t) ~instruments ~marks ~fx_rates =
       total_fees;
       cash_balances;
       positions;
+      execution_fee_components;
     }
 
 let pp_valuation formatter valuation =

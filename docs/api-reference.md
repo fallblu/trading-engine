@@ -7,4 +7,4 @@ that every public interface has a corresponding page.
 <!-- generated-api-link -->
 
 The generated reference describes library types and functions. The versioned JSON and JSON Lines
-files under [Contracts](../contracts/v8/README.md) remain authoritative for process boundaries.
+files under [Contracts](../contracts/v9/README.md) remain authoritative for process boundaries.
