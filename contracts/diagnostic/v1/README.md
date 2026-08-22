@@ -1,7 +1,7 @@
 # Diagnostic contract v1
 
 This directory defines the stable JSON emitted on standard error when the CLI uses
-`--diagnostic-format json`. Validate each complete document against
+`--diagnostic-format json` or `--output-format json`. Validate each complete document against
 [`diagnostic.schema.json`](diagnostic.schema.json).
 
 The `code` and typed `context` fields are the machine contract. Treat `message`, cause messages,

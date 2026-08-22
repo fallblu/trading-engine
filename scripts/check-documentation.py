@@ -26,6 +26,7 @@ REQUIRED_NAVIGATION = (
     "docs/persistra.md",
     "SECURITY.md",
     "contracts/conformance/README.md",
+    "contracts/cli/v1/README.md",
     "contracts/v16/README.md",
     "contracts/v5/README.md",
     "contracts/v4/README.md",

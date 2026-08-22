@@ -1242,6 +1242,18 @@
           "format": "jsonl"
         }
       ]
+    },
+    {
+      "name": "cli-result-v1",
+      "schema": "cli/v1/result.schema.json",
+      "version_field": "result_version",
+      "version": "1",
+      "sources": [
+        {
+          "path": "cli/v1/fixtures/demo.result.json",
+          "format": "json"
+        }
+      ]
     }
   ]
 }
