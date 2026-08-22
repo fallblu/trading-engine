@@ -16,5 +16,9 @@ val order_to_yojson_v8 : Order.t -> Yojson.Safe.t
 val fill_to_yojson : Fill.t -> Yojson.Safe.t
 val fill_to_yojson_v9 : Fill.t -> Yojson.Safe.t
 val initial_portfolio_to_yojson : Initial_portfolio.t -> Yojson.Safe.t
+
+val account_valuation_to_yojson :
+  ?contract_version:string -> Account.valuation -> Yojson.Safe.t
+
 val audit_to_yojson : Audit.t -> Yojson.Safe.t
 val audit_to_string : Audit.t -> string

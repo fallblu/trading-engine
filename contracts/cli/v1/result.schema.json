@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/fallblu/trading-engine/contracts/cli/v1/result.schema.json",
+  "title": "Trading Engine CLI success result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "result_version",
+    "status",
+    "operation",
+    "run_id",
+    "hashes",
+    "counts",
+    "valuation",
+    "artifacts"
+  ],
+  "properties": {
+    "result_version": { "const": "1" },
+    "status": { "const": "success" },
+    "operation": { "enum": ["validate", "replay"] },
+    "run_id": { "$ref": "https://github.com/fallblu/trading-engine/contracts/v16/journal.schema.json#/$defs/identifier" },
+    "hashes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scenario_sha256", "journal_sha256", "strategy_transcript_sha256"],
+      "properties": {
+        "scenario_sha256": { "$ref": "#/$defs/sha256" },
+        "journal_sha256": { "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] },
+        "strategy_transcript_sha256": { "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] }
+      }
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["instruments", "schedule_batches", "slices", "audits", "orders", "active_orders", "filled_orders", "rejected_orders"],
+      "properties": {
+        "instruments": { "$ref": "#/$defs/count" },
+        "schedule_batches": { "$ref": "#/$defs/count" },
+        "slices": { "$ref": "#/$defs/count" },
+        "audits": { "$ref": "#/$defs/count" },
+        "orders": { "$ref": "#/$defs/count" },
+        "active_orders": { "$ref": "#/$defs/count" },
+        "filled_orders": { "$ref": "#/$defs/count" },
+        "rejected_orders": { "$ref": "#/$defs/count" }
+      }
+    },
+    "valuation": { "$ref": "#/$defs/accountValuation" },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["journal", "strategy_transcript"],
+      "properties": {
+        "journal": { "oneOf": [{ "type": "string", "minLength": 1 }, { "type": "null" }] },
+        "strategy_transcript": { "oneOf": [{ "type": "string", "minLength": 1 }, { "type": "null" }] }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "operation": { "const": "validate" } } },
+      "then": {
+        "properties": {
+          "hashes": { "properties": { "journal_sha256": { "type": "null" }, "strategy_transcript_sha256": { "type": "null" } } },
+          "artifacts": { "properties": { "journal": { "type": "null" }, "strategy_transcript": { "type": "null" } } }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "operation": { "const": "replay" } } },
+      "then": {
+        "properties": {
+          "hashes": { "properties": { "journal_sha256": { "$ref": "#/$defs/sha256" } } },
+          "artifacts": { "properties": { "journal": { "type": "string", "minLength": 1 } } }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "count": { "type": "integer", "minimum": 0 },
+    "accountValuation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "base_currency",
+        "cash",
+        "settled_cash",
+        "unsettled_cash",
+        "net_market_value",
+        "long_market_value",
+        "short_market_value",
+        "gross_exposure",
+        "cost_basis",
+        "realized_pnl",
+        "unrealized_pnl",
+        "equity",
+        "dividend_pnl",
+        "execution_fees",
+        "borrow_fees",
+        "cash_interest",
+        "total_fees",
+        "cash_balances",
+        "positions",
+        "execution_fee_components"
+      ],
+      "properties": {
+        "base_currency": { "$ref": "https://github.com/fallblu/trading-engine/contracts/v16/journal.schema.json#/$defs/identifier" },
+        "cash": { "$ref": "https://github.com/fallblu/trading-engine/contracts/v16/journal.schema.json#/$defs/signedDecimal" },
+        "settled_cash": { "$ref": "https://github.com/fallblu/trading-engine/contracts/v16/journal.schema.json#/$defs/signedDecimal" },
+        "unsettled_cash": { "$ref": "https://github.com/fallblu/trading-engine/contracts/v16/journal.schema.json#/$defs/signedDecimal" },
+        "net_market_value": { "$ref": "https://github.com/fallblu/trading-engine/contracts/v16/journal.schema.json#/$defs/signedDecimal" },
+        "long_market_value": { "$ref": "https://github.com/fallblu/trading-engine/contracts/v16/journal.schema.json#/$defs/unsignedDecimal" },
+        "short_market_value": { "$ref": "https://github.com/fallblu/trading-engine/contracts/v16/journal.schema.json#/$defs/unsignedDecimal" },
+        "gross_exposure": { "$ref": "https://github.com/fallblu/trading-engine/contracts/v16/journal.schema.json#/$defs/unsignedDecimal" },
+        "cost_basis": { "$ref": "https://github.com/fallblu/trading-engine/contracts/v16/journal.schema.json#/$defs/signedDecimal" },
+        "realized_pnl": { "$ref": "https://github.com/fallblu/trading-engine/contracts/v16/journal.schema.json#/$defs/signedDecimal" },
+        "unrealized_pnl": { "$ref": "https://github.com/fallblu/trading-engine/contracts/v16/journal.schema.json#/$defs/signedDecimal" },
+        "equity": { "$ref": "https://github.com/fallblu/trading-engine/contracts/v16/journal.schema.json#/$defs/signedDecimal" },
+        "dividend_pnl": { "$ref": "https://github.com/fallblu/trading-engine/contracts/v16/journal.schema.json#/$defs/signedDecimal" },
+        "execution_fees": { "$ref": "https://github.com/fallblu/trading-engine/contracts/v16/journal.schema.json#/$defs/signedDecimal" },
+        "borrow_fees": { "$ref": "https://github.com/fallblu/trading-engine/contracts/v16/journal.schema.json#/$defs/signedDecimal" },
+        "cash_interest": { "$ref": "https://github.com/fallblu/trading-engine/contracts/v16/journal.schema.json#/$defs/signedDecimal" },
+        "total_fees": { "$ref": "https://github.com/fallblu/trading-engine/contracts/v16/journal.schema.json#/$defs/signedDecimal" },
+        "cash_balances": { "type": "array", "minItems": 1, "items": { "$ref": "https://github.com/fallblu/trading-engine/contracts/v16/journal.schema.json#/$defs/cashAttribution" } },
+        "positions": { "type": "array", "items": { "$ref": "https://github.com/fallblu/trading-engine/contracts/v16/journal.schema.json#/$defs/positionAttribution" } },
+        "execution_fee_components": { "type": "array", "items": { "$ref": "https://github.com/fallblu/trading-engine/contracts/v16/journal.schema.json#/$defs/feeComponentAttribution" } }
+      }
+    }
+  }
+}

@@ -26,6 +26,8 @@ nav:
       - Security policy: SECURITY.md
   - Contracts:
       - Conformance corpus: contracts/conformance/README.md
+      - CLI results:
+          - Current v1: contracts/cli/v1/README.md
       - Diagnostics:
           - Current v1: contracts/diagnostic/v1/README.md
       - Scenario and journal:

@@ -1,0 +1,7 @@
+(install
+ (section share)
+ (package trading_engine)
+ (files
+  (README.md as contracts/cli/v1/README.md)
+  (result.schema.json as contracts/cli/v1/result.schema.json)
+  (fixtures/demo.result.json as contracts/cli/v1/fixtures/demo.result.json)))

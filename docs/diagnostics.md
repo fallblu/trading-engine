@@ -2,7 +2,8 @@
 
 Process and file boundaries return diagnostic contract version `1`. The CLI prints the concise
 `message` by default. Pass `--diagnostic-format json` to write one machine-readable diagnostic to
-standard error. The process exits with status 123 for either format.
+standard error. `--output-format json` also selects JSON diagnostics so an automation client needs
+only one format option. The process exits with status 123 for either format.
 
 The versioned [diagnostic JSON Schema](../contracts/diagnostic/v1/diagnostic.schema.json) is the
 authoritative structural contract. The adjacent fixture demonstrates every optional context

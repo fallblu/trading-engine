@@ -5,6 +5,7 @@
 
 val version : string
 val scenario_record_bytes : int
+val scenario_stream_bytes : int
 val strategy_message_bytes : int
 val internal_events : int
 val catalog_instruments : int
