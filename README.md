@@ -73,6 +73,10 @@ make bootstrap
 make check
 ```
 
+Run the advisory batch, stream, dense-OMS, and external-strategy performance matrix with
+`make benchmark`. See [Performance](docs/performance.md) for workload definitions, reported
+metrics, and the baseline tolerance policy.
+
 Validate the included scenario with an in-memory replay:
 
 ```sh
