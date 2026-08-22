@@ -42,6 +42,11 @@ module Quote_trade_v1 = struct
   let start_slice = Execution.start_slice_quote_trade
 end
 
+module Order_book_v1 = struct
+  let name = "order_book_v1"
+  let start_slice = Execution.start_slice_order_book
+end
+
 let of_module model = model
 let name (module Model : S) = Model.name
 
@@ -51,6 +56,7 @@ let builtins : t list =
     (module Completed_bar_next_open_v1);
     (module Completed_bar_adverse_touch_v1);
     (module Quote_trade_v1);
+    (module Order_book_v1);
   ]
 
 let supported = List.map name builtins
@@ -60,7 +66,7 @@ let completed_bar_v1_contract =
     version = "2";
     previous_versions = [ "1" ];
     scenario_contract_versions =
-      [ "14"; "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6"; "5"; "4"; "3" ];
+      [ "15"; "14"; "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6"; "5"; "4"; "3" ];
     required_fields = [ "version"; "participation_bps"; "fee_schedules" ];
     legacy_required_fields =
       [ "version"; "participation_bps"; "fixed_fee"; "fee_bps" ];
@@ -81,7 +87,7 @@ let conservative_contract =
   {
     version = "1";
     previous_versions = [];
-    scenario_contract_versions = [ "14"; "13" ];
+    scenario_contract_versions = [ "15"; "14"; "13" ];
     required_fields =
       [
         "version";
@@ -110,7 +116,7 @@ let quote_trade_contract =
   {
     version = "1";
     previous_versions = [];
-    scenario_contract_versions = [ "14" ];
+    scenario_contract_versions = [ "15"; "14" ];
     required_fields = [ "version"; "participation_bps"; "fee_schedules" ];
     legacy_required_fields = [];
     supported_order_types = [ "market"; "limit"; "stop"; "stop_limit" ];
@@ -128,12 +134,39 @@ let quote_trade_contract =
         ];
   }
 
+let order_book_contract =
+  {
+    version = "1";
+    previous_versions = [];
+    scenario_contract_versions = [ "15" ];
+    required_fields =
+      [ "version"; "participation_bps"; "fee_schedules"; "max_depth_levels" ];
+    legacy_required_fields = [];
+    supported_order_types = [ "market"; "limit"; "stop"; "stop_limit" ];
+    data_requirements =
+      [
+        "slice_open_level_two_snapshot";
+        "contiguous_absolute_level_updates";
+        "aggressor_classified_depth_consuming_trades";
+        "completed_bars_for_valuation";
+      ];
+    limits =
+      `Assoc
+        [
+          ( "participation_bps",
+            `Assoc [ ("minimum", `Int 0); ("maximum", `Int 10_000) ] );
+          ( "max_depth_levels",
+            `Assoc [ ("minimum", `Int 1); ("maximum", `Int 1024) ] );
+        ];
+  }
+
 let configuration_contract model =
   match name model with
   | "completed_bar_v1" -> completed_bar_v1_contract
   | "completed_bar_next_open_v1" | "completed_bar_adverse_touch_v1" ->
       conservative_contract
   | "quote_trade_v1" -> quote_trade_contract
+  | "order_book_v1" -> order_book_contract
   | unsupported ->
       invalid_arg
         (Printf.sprintf "execution model %S has no configuration contract"

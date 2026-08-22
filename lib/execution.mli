@@ -62,7 +62,14 @@ val create_conservative :
   missing_volume_policy:missing_volume_policy ->
   (t, string) result
 
+val create_order_book :
+  participation_bps:int ->
+  fee_schedules:Fee_schedule.t list ->
+  max_depth_levels:int ->
+  (t, string) result
+
 val participation_bps : t -> int
+val book_depth_limit : t -> int option
 val fixed_fee : t -> Scalar.Money.t
 val fee_bps : t -> int
 val fee_schedules : t -> Fee_schedule.t list
@@ -101,6 +108,13 @@ val start_slice_adverse_touch :
   (cursor, string) result
 
 val start_slice_quote_trade :
+  t ->
+  instruments:Instrument.t list ->
+  oms:Oms.t ->
+  Market_slice.t ->
+  (cursor, string) result
+
+val start_slice_order_book :
   t ->
   instruments:Instrument.t list ->
   oms:Oms.t ->

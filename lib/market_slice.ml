@@ -8,6 +8,7 @@ type t = {
   received_at : Ptime.t;
   bars : Bar.t list;
   market_events : Market_event.t list;
+  order_book_events : Order_book_event.t list;
   fx_rates : fx_mark list;
   corporate_actions : Corporate_action.t list;
   lifecycle_events : Instrument_lifecycle.event list;
@@ -32,10 +33,10 @@ let fx_mark ~currency ~rate =
 let compare_bar left right =
   Id.Instrument.compare left.Bar.instrument_id right.Bar.instrument_id
 
-let create_v14 ~slice_sequence ~start_at ~end_at ~available_at ~received_at
+let create_v15 ~slice_sequence ~start_at ~end_at ~available_at ~received_at
     ~bars ~fx_rates ~corporate_actions ~borrow_observations
     ~cash_rate_observations ~settlement_failures ~lifecycle_events
-    ~market_events =
+    ~market_events ~order_book_events =
   if Int64.compare slice_sequence 0L <= 0 then
     Error "market slice sequence must be positive"
   else if Ptime.compare start_at end_at >= 0 then
@@ -134,6 +135,15 @@ let create_v14 ~slice_sequence ~start_at ~end_at ~available_at ~received_at
              < 0
           && ordered_events remaining
     in
+    let rec ordered_book_events = function
+      | [] | [ _ ] -> true
+      | left :: (right :: _ as remaining) ->
+          Order_book_event.compare_replay_order left right < 0
+          && Int64.compare left.Order_book_event.ingest_sequence
+               right.Order_book_event.ingest_sequence
+             < 0
+          && ordered_book_events remaining
+    in
     if not (unique bars) then
       Error "market slice must contain one bar per instrument"
     else if fx_rates = [] then Error "market slice must contain FX rates"
@@ -153,6 +163,10 @@ let create_v14 ~slice_sequence ~start_at ~end_at ~available_at ~received_at
       Error
         "market events must be strictly ordered by availability, receipt, and \
          ingest sequence"
+    else if not (ordered_book_events order_book_events) then
+      Error
+        "order-book events must be strictly ordered by availability, receipt, \
+         and ingest sequence"
     else
       Ok
         {
@@ -163,6 +177,7 @@ let create_v14 ~slice_sequence ~start_at ~end_at ~available_at ~received_at
           received_at;
           bars;
           market_events;
+          order_book_events;
           fx_rates;
           corporate_actions;
           lifecycle_events;
@@ -171,12 +186,21 @@ let create_v14 ~slice_sequence ~start_at ~end_at ~available_at ~received_at
           settlement_failures;
         }
 
+let create_v14 ~slice_sequence ~start_at ~end_at ~available_at ~received_at
+    ~bars ~fx_rates ~corporate_actions ~borrow_observations
+    ~cash_rate_observations ~settlement_failures ~lifecycle_events
+    ~market_events =
+  create_v15 ~slice_sequence ~start_at ~end_at ~available_at ~received_at ~bars
+    ~fx_rates ~corporate_actions ~borrow_observations ~cash_rate_observations
+    ~settlement_failures ~lifecycle_events ~market_events ~order_book_events:[]
+
 let create_v12 ~slice_sequence ~start_at ~end_at ~available_at ~received_at
     ~bars ~fx_rates ~corporate_actions ~borrow_observations
     ~cash_rate_observations ~settlement_failures ~lifecycle_events =
-  create_v14 ~slice_sequence ~start_at ~end_at ~available_at ~received_at ~bars
+  create_v15 ~slice_sequence ~start_at ~end_at ~available_at ~received_at ~bars
     ~fx_rates ~corporate_actions ~borrow_observations ~cash_rate_observations
     ~settlement_failures ~lifecycle_events ~market_events:[]
+    ~order_book_events:[]
 
 let create_v13 = create_v12
 
@@ -216,10 +240,11 @@ let compare_replay_order left right =
 
 let pp formatter state =
   Format.fprintf formatter
-    "slice[%Ld] bars=%d events=%d fx=%d actions=%d lifecycle=%d borrow=%d \
-     cash_rates=%d failures=%d"
+    "slice[%Ld] bars=%d events=%d book_events=%d fx=%d actions=%d lifecycle=%d \
+     borrow=%d cash_rates=%d failures=%d"
     state.slice_sequence (List.length state.bars)
     (List.length state.market_events)
+    (List.length state.order_book_events)
     (List.length state.fx_rates)
     (List.length state.corporate_actions)
     (List.length state.lifecycle_events)

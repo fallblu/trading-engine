@@ -181,8 +181,8 @@ let market_event_validation () =
   let base = market_slice 2L in
   Alcotest.(check string)
     "slice rendering includes market-event count"
-    "slice[2] bars=1 events=0 fx=1 actions=0 lifecycle=0 borrow=0 cash_rates=0 \
-     failures=0"
+    "slice[2] bars=1 events=0 book_events=0 fx=1 actions=0 lifecycle=0 \
+     borrow=0 cash_rates=0 failures=0"
     (Format.asprintf "%a" T.Market_slice.pp base);
   Alcotest.(check bool)
     "nonmonotonic ingest rejected" true
@@ -197,6 +197,115 @@ let market_event_validation () =
           ~settlement_failures:base.settlement_failures
           ~lifecycle_events:base.lifecycle_events
           ~market_events:[ first; second ]))
+
+let order_book_event_validation () =
+  let instrument_id = instrument_id "book-validation" in
+  let event_at = timestamp "2026-01-03T14:30:00Z" in
+  let available_at = timestamp "2026-01-03T14:30:01Z" in
+  let received_at = timestamp "2026-01-03T14:30:02Z" in
+  let level price_value quantity_value =
+    T.Order_book_event.level ~price:(price price_value)
+      ~quantity:(quantity quantity_value)
+    |> ok
+  in
+  let snapshot bids asks =
+    T.Order_book_event.snapshot ~instrument_id ~event_at ~available_at
+      ~received_at ~ingest_sequence:1L ~book_sequence:1L ~bids ~asks
+  in
+  Alcotest.(check bool)
+    "locked snapshot accepted" true
+    (Result.is_ok (snapshot [ level "100" "2" ] [ level "100" "3" ]));
+  Alcotest.(check bool)
+    "crossed snapshot rejected" true
+    (Result.is_error (snapshot [ level "101" "2" ] [ level "100" "3" ]));
+  Alcotest.(check bool)
+    "unordered duplicate depth rejected" true
+    (Result.is_error
+       (snapshot [ level "100" "2"; level "100" "3" ] [ level "101" "2" ]));
+  Alcotest.(check bool)
+    "empty side rejected" true
+    (Result.is_error (snapshot [] [ level "101" "2" ]));
+  Alcotest.(check bool)
+    "zero level rejected" true
+    (Result.is_error
+       (T.Order_book_event.level ~price:(price "100")
+          ~quantity:T.Scalar.Quantity.zero));
+  Alcotest.(check bool)
+    "zero ingest sequence rejected" true
+    (Result.is_error
+       (T.Order_book_event.snapshot ~instrument_id ~event_at ~available_at
+          ~received_at ~ingest_sequence:0L ~book_sequence:1L
+          ~bids:[ level "99" "1" ]
+          ~asks:[ level "101" "1" ]));
+  Alcotest.(check bool)
+    "zero book sequence rejected" true
+    (Result.is_error
+       (T.Order_book_event.snapshot ~instrument_id ~event_at ~available_at
+          ~received_at ~ingest_sequence:1L ~book_sequence:0L
+          ~bids:[ level "99" "1" ]
+          ~asks:[ level "101" "1" ]));
+  Alcotest.(check bool)
+    "availability before book event rejected" true
+    (Result.is_error
+       (T.Order_book_event.delete ~instrument_id ~event_at
+          ~available_at:(timestamp "2026-01-03T14:29:59Z")
+          ~received_at ~ingest_sequence:1L ~book_sequence:1L
+          ~side:T.Order_book_event.Bid ~price:(price "99")));
+  Alcotest.(check bool)
+    "receipt before book availability rejected" true
+    (Result.is_error
+       (T.Order_book_event.delete ~instrument_id ~event_at ~available_at
+          ~received_at:event_at ~ingest_sequence:1L ~book_sequence:1L
+          ~side:T.Order_book_event.Bid ~price:(price "99")));
+  Alcotest.(check bool)
+    "zero set rejected" true
+    (Result.is_error
+       (T.Order_book_event.set ~instrument_id ~event_at ~available_at
+          ~received_at ~ingest_sequence:1L ~book_sequence:1L
+          ~side:T.Order_book_event.Bid ~price:(price "99")
+          ~quantity:T.Scalar.Quantity.zero));
+  Alcotest.(check bool)
+    "zero book trade rejected" true
+    (Result.is_error
+       (T.Order_book_event.trade ~instrument_id ~event_at ~available_at
+          ~received_at ~ingest_sequence:1L ~book_sequence:1L ~price:(price "99")
+          ~quantity:T.Scalar.Quantity.zero ~aggressor_side:T.Market_event.Sell));
+  Alcotest.(check bool)
+    "unknown book side rejected" true
+    (Result.is_error (T.Order_book_event.side_of_string "offer"));
+  let earlier = snapshot [ level "99" "1" ] [ level "101" "1" ] |> ok in
+  let later =
+    T.Order_book_event.delete ~instrument_id ~event_at ~available_at
+      ~received_at:(timestamp "2026-01-03T14:30:03Z")
+      ~ingest_sequence:2L ~book_sequence:2L ~side:T.Order_book_event.Bid
+      ~price:(price "99")
+    |> ok
+  in
+  Alcotest.(check bool)
+    "book receipt orders replay" true
+    (T.Order_book_event.compare_replay_order earlier later < 0);
+  let same_time_later_sequence =
+    T.Order_book_event.delete ~instrument_id ~event_at ~available_at
+      ~received_at ~ingest_sequence:2L ~book_sequence:2L
+      ~side:T.Order_book_event.Bid ~price:(price "99")
+    |> ok
+  in
+  Alcotest.(check bool)
+    "book ingest sequence orders final replay tie" true
+    (T.Order_book_event.compare_replay_order earlier same_time_later_sequence
+    < 0);
+  List.iter
+    (fun (wire, side) ->
+      Alcotest.(check string)
+        (wire ^ " book side round trip")
+        wire
+        (T.Order_book_event.side_of_string wire
+        |> ok |> T.Order_book_event.side_to_string);
+      Alcotest.(check string)
+        (wire ^ " book side rendering")
+        wire
+        (T.Order_book_event.side_to_string side))
+    [ ("bid", T.Order_book_event.Bid); ("ask", T.Order_book_event.Ask) ]
 
 let bar_validation_boundaries () =
   let instrument_id = instrument_id "bar-validation" in
@@ -397,6 +506,8 @@ let tests =
       portfolio_weight_rounds_toward_zero;
     Alcotest.test_case "market slice validation" `Quick market_slice_validation;
     Alcotest.test_case "market event validation" `Quick market_event_validation;
+    Alcotest.test_case "order-book event validation" `Quick
+      order_book_event_validation;
     Alcotest.test_case "bar validation boundaries" `Quick
       bar_validation_boundaries;
     Alcotest.test_case "corporate action validation boundaries" `Quick

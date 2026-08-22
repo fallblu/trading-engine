@@ -54,12 +54,12 @@ lifecycle belong to Persistra.
 Persistra currently uses the transitional v3
 [scenario](../contracts/v3/scenario.schema.json) and
 [journal](../contracts/v3/journal.schema.json) schemas and their adjacent conformance fixtures for
-structural checks. The engine advertises current contract v14 while retaining v13 through v3 and
+structural checks. The engine advertises current contract v15 while retaining v14 through v3 and
 exact v3 journal output for v3 inputs. The engine parser is authoritative for ordering, catalog coverage,
 causality, tick, lot, risk, and accounting invariants that JSON Schema cannot express.
 
 External strategies use the separate
-[strategy protocol v12](../contracts/strategy/v12/README.md). Persistra's host turns protocol
+[strategy protocol v13](../contracts/strategy/v13/README.md). Persistra's host turns protocol
 initialization, marked portfolio contexts, market-slice, fill, order, and rejection events into
 typed callbacks. Realized weights are available only for positive equity. The retained run
 manifest binds the strategy identity, executable hash, declared input hashes, transcript hash,
@@ -79,14 +79,14 @@ compatibility claim.
 - **Engine:** `--capabilities` is the authoritative machine-readable surface. The engine must
   reject unsupported versions and malformed or semantically invalid input before reporting a
   successful run.
-- **Scenario:** Frozen scenario and stream artifacts do not change. The current v14 contract may
+- **Scenario:** Frozen scenario and stream artifacts do not change. The current v15 contract may
   receive additive changes only when old valid inputs retain their meaning; breaking changes need
   a new version. Transitional v3 support remains explicit in `--capabilities`.
 - **Journal:** A run emits the journal version paired with its accepted scenario. Record ordering,
   causal references, scenario hashing, terminal completion, and exact accounting remain runtime
   invariants even when JSON Schema cannot express them.
 - **Strategy:** Protocol and transcript versions are independent of scenario versions. The current
-  external boundary is strategy v12; a host must complete its exact initialization, event,
+  external boundary is strategy v13; a host must complete its exact initialization, event,
   shutdown, timeout, and rejection lifecycle.
 - **Persistra:** The required integration gate uses a full Persistra commit and its v3 scenario,
   journal, and strategy integration tests. Passing that gate claims compatibility only for the
