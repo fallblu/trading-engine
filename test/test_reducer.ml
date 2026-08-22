@@ -186,10 +186,10 @@ let superseding_target_replaces_retry () =
               (event_names events)))
   | _ -> Alcotest.fail "expected one replacement order"
 
-let fill_limit_clips_buy_to_lots () =
+let fill_limit_clips_buy_to_lots ?(contract_version = T.Contract.version) () =
   let constrained = risk ~max_leverage:"1" () in
   let state =
-    runner ~initial_cash:"550" ~risk:constrained
+    runner ~contract_version ~initial_cash:"550" ~risk:constrained
       ~execution:(execution ~fixed_fee:"10" ())
       [ (1L, [ target "10" ]) ]
   in
@@ -215,6 +215,8 @@ let fill_limit_clips_buy_to_lots () =
         String.equal (T.Audit.event_name audit.T.Audit.event) "fill_clipped")
       events
   in
+  Alcotest.(check string)
+    "fill-clipped contract version" contract_version limited.contract_version;
   match limited.event with
   | T.Audit.Fill_clipped
       {
@@ -234,11 +236,14 @@ let fill_limit_clips_buy_to_lots () =
         (T.Scalar.Ratio.to_decimal_string threshold)
   | _ -> Alcotest.fail "expected leverage clipping audit"
 
+let v4_replays_keep_the_fill_clipped_record () =
+  fill_limit_clips_buy_to_lots ~contract_version:T.Contract.previous_version ()
+
 let v3_replays_keep_the_legacy_clipping_record () =
   let constrained = risk ~max_leverage:"1" () in
   let state =
-    runner ~contract_version:T.Contract.previous_version ~initial_cash:"550"
-      ~risk:constrained
+    runner ~contract_version:T.Contract.legacy_journal_version
+      ~initial_cash:"550" ~risk:constrained
       ~execution:(execution ~fixed_fee:"10" ())
       [ (1L, [ target "10" ]) ]
   in
@@ -260,7 +265,7 @@ let v3_replays_keep_the_legacy_clipping_record () =
       events
   in
   Alcotest.(check string)
-    "legacy journal version" T.Contract.previous_version
+    "legacy journal version" T.Contract.legacy_journal_version
     limited.contract_version;
   match limited.event with
   | T.Audit.Margin_limited { requested_quantity; permitted_quantity; _ } ->
@@ -799,6 +804,8 @@ let tests =
       superseding_target_replaces_retry;
     Alcotest.test_case "fill clipping identifies leverage" `Quick
       fill_limit_clips_buy_to_lots;
+    Alcotest.test_case "v4 keeps fill clipping records" `Quick
+      v4_replays_keep_the_fill_clipped_record;
     Alcotest.test_case "v3 keeps legacy clipping records" `Quick
       v3_replays_keep_the_legacy_clipping_record;
     Alcotest.test_case "invalid fill candidates fail" `Quick

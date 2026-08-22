@@ -1,6 +1,7 @@
-let version = "4"
-let previous_version = "3"
-let supported_versions = [ version; previous_version ]
+let version = "5"
+let previous_version = "4"
+let legacy_journal_version = "3"
+let supported_versions = [ version; previous_version; legacy_journal_version ]
 let is_supported version = List.mem version supported_versions
 let strategy_protocol_version = "3"
 let engine_version = "1.0.0"

@@ -84,7 +84,7 @@ Validate the included scenario with an in-memory replay:
 
 ```sh
 opam exec -- dune exec trading-engine -- \
-  --input contracts/v4/fixtures/demo.scenario.json \
+  --input contracts/v5/fixtures/demo.scenario.json \
   --validate-only
 ```
 
@@ -92,7 +92,7 @@ Run it and create a journal:
 
 ```sh
 opam exec -- dune exec trading-engine -- \
-  --input contracts/v4/fixtures/demo.scenario.json \
+  --input contracts/v5/fixtures/demo.scenario.json \
   --journal demo.journal.jsonl
 ```
 
@@ -100,7 +100,7 @@ For larger histories, validate and replay the equivalent stream one slice at a t
 
 ```sh
 opam exec -- dune exec trading-engine -- \
-  --input contracts/v4/fixtures/demo.scenario.jsonl \
+  --input contracts/v5/fixtures/demo.scenario.jsonl \
   --input-format jsonl \
   --journal demo.journal.jsonl
 ```
@@ -216,12 +216,12 @@ do not provide reducer snapshots or restart recovery.
 - [Diagnostic contract](docs/diagnostics.md)
 - [Scenario contract](docs/scenario.md)
 - [Contract conformance corpus](contracts/conformance/README.md)
-- [Current contract v4 and conformance fixtures](contracts/v4/README.md)
+- [Current contract v5 and conformance fixtures](contracts/v5/README.md)
 - [Frozen contract v2](contracts/v2/README.md)
 - [Historical contract v1](contracts/v1/README.md)
-- [Scenario JSON Schema](contracts/v4/scenario.schema.json)
-- [Scenario stream record JSON Schema](contracts/v4/scenario-stream.schema.json)
-- [Journal record JSON Schema](contracts/v4/journal.schema.json)
+- [Scenario JSON Schema](contracts/v5/scenario.schema.json)
+- [Scenario stream record JSON Schema](contracts/v5/scenario-stream.schema.json)
+- [Journal record JSON Schema](contracts/v5/journal.schema.json)
 - [External strategy protocol v3](contracts/strategy/v3/README.md)
 - [Historical strategy protocol v2](contracts/strategy/v2/README.md)
 - [Historical strategy protocol v1](contracts/strategy/v1/README.md)

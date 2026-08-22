@@ -13,8 +13,40 @@ let at json_path result =
 
 let child root field = root ^ "." ^ field
 
-let header ~root ~base_currency ~initial_cash ~instruments ~max_internal_events
-    =
+let validate_venue_calendars ~root catalog venue_calendars =
+  let ids =
+    List.map (fun calendar -> calendar.Venue_calendar.id) venue_calendars
+  in
+  let unique_ids = List.sort_uniq Id.Venue_calendar.compare ids in
+  if List.length ids <> List.length unique_ids then
+    fail
+      ~json_path:(child root "venue_calendars")
+      "venue calendar IDs must be unique"
+  else
+    let coverage, overlap =
+      List.fold_left
+        (fun (covered, overlap) calendar ->
+          let members = calendar.Venue_calendar.instrument_ids in
+          ( Id.Instrument.Set.union covered members,
+            overlap
+            || not
+                 (Id.Instrument.Set.is_empty
+                    (Id.Instrument.Set.inter covered members)) ))
+        (Id.Instrument.Set.empty, false)
+        venue_calendars
+    in
+    if overlap then
+      fail
+        ~json_path:(child root "venue_calendars")
+        "each instrument must reference exactly one venue calendar"
+    else if not (Id.Instrument.Set.equal coverage catalog) then
+      fail
+        ~json_path:(child root "venue_calendars")
+        "venue calendars must cover every configured instrument exactly once"
+    else Ok ()
+
+let header ~root ~contract_version ~base_currency ~initial_cash ~instruments
+    ~venue_calendars ~max_internal_events =
   let* () =
     Account.create ~base_currency ~initial_cash
     |> Result.map (fun _ -> ())
@@ -31,6 +63,11 @@ let header ~root ~base_currency ~initial_cash ~instruments ~max_internal_events
     if Id.Instrument.Set.cardinal catalog <> List.length instruments then
       fail ~json_path:(child root "instruments") "instrument IDs must be unique"
     else
+      let* () =
+        if String.equal contract_version "5" then
+          validate_venue_calendars ~root catalog venue_calendars
+        else Ok ()
+      in
       let currencies =
         base_currency
         :: List.map
