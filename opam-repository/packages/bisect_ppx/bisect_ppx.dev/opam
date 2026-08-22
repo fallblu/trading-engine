@@ -1,0 +1,33 @@
+opam-version: "2.0"
+name: "bisect_ppx"
+version: "dev"
+synopsis: "Code coverage for OCaml"
+license: "MIT"
+homepage: "https://github.com/aantron/bisect_ppx"
+bug-reports: "https://github.com/aantron/bisect_ppx/issues"
+dev-repo: "git+https://github.com/aantron/bisect_ppx.git"
+authors: [
+  "Xavier Clerc <bisect@x9c.fr>"
+  "Leonid Rozenberg <leonidr@gmail.com>"
+  "Anton Bachin <antonbachin@yahoo.com>"
+]
+maintainer: [
+  "Anton Bachin <antonbachin@yahoo.com>"
+  "Leonid Rozenberg <leonidr@gmail.com>"
+]
+depends: [
+  "base-unix"
+  "cmdliner" {>= "1.3.0"}
+  "dune" {>= "2.9.0"}
+  "ocaml" {>= "4.03.0"}
+  "ppxlib" {>= "0.36.0"}
+]
+build: [
+  ["dune" "build" "-p" name "-j" jobs]
+]
+url {
+  src:
+    "https://github.com/aantron/bisect_ppx/archive/7061d643ff492b0045796357ee6917ded21fb1f0.tar.gz"
+  checksum:
+    "sha256=7ea9ec62296768c6f7a29b48b7e3a5c10fc3ae8a162c29886f404529a4f1686a"
+}

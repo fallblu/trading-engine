@@ -5,7 +5,8 @@ set -eu
 repository_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 local_switch="$repository_root/_opam"
 schema_python="$repository_root/.venv-schema/bin/python"
-bisect_ppx_source="git+https://github.com/aantron/bisect_ppx.git#7061d643ff492b0045796357ee6917ded21fb1f0"
+coverage_repository_name="trading-engine-coverage"
+coverage_repository_url="file://$repository_root/opam-repository"
 
 fail() {
   printf '%s\n' "error: $1" >&2
@@ -26,12 +27,20 @@ if [ "$actual_switch" != "$local_switch" ]; then
   fail "opam selected '$actual_switch' instead of '$local_switch'"
 fi
 
-bisect_ppx_pin=$(
-  opam pin list --switch "$repository_root" 2>/dev/null \
-    | awk '$1 == "bisect_ppx.dev" { print $3 }'
+if ! opam repository list --switch "$repository_root" --short 2>/dev/null \
+  | grep -Fqx "$coverage_repository_name"; then
+  fail "the checksummed OCaml coverage package repository is not registered"
+fi
+coverage_repository_actual=$(
+  opam repository list --switch "$repository_root" 2>/dev/null \
+    | awk '$2 == "trading-engine-coverage" { print $3 }'
 )
-if [ "$bisect_ppx_pin" != "$bisect_ppx_source" ]; then
-  fail "bisect_ppx is not pinned to the locked OCaml 5.5-compatible source"
+if [ "$coverage_repository_actual" != "$coverage_repository_url" ]; then
+  fail "the OCaml coverage package repository has an unexpected source"
+fi
+if opam pin list --switch "$repository_root" --short 2>/dev/null \
+  | grep -Fqx "bisect_ppx"; then
+  fail "bisect_ppx must resolve from the checksummed package repository"
 fi
 
 if ! pending_actions=$(

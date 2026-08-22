@@ -5,9 +5,10 @@ Bisect_ppx while running the normal Dune test aliases. Normal `make build`, `mak
 `make check` targets remain uninstrumented, so coverage cannot change deterministic journals,
 transcripts, diagnostics, or other contract output.
 
-The opam manifests and bootstrap script pin Bisect_ppx to one upstream commit that supports the
-project's OCaml 5.5 and ppxlib toolchain. The environment check verifies that exact source pin as
-well as the locked dependency versions, preventing a local fallback to an incompatible release.
+The repository-local opam package source selects one upstream Bisect_ppx commit that supports the
+project's OCaml 5.5 and ppxlib toolchain and verifies its archive with SHA-256. Bootstrap registers
+that package source before installing the lock. The environment check verifies the package source
+and locked dependency versions, preventing a local fallback to an incompatible release.
 
 Run the gate from a bootstrapped development environment:
 
