@@ -1,12 +1,12 @@
 # Execution model
 
 The engine selects a compiled execution module by the scenario's stable `execution.model` name.
-Contract v14 advertises `completed_bar_v1`, `completed_bar_next_open_v1`,
-`completed_bar_adverse_touch_v1`, and `quote_trade_v1`; embedders can inject another module through
+Contract v15 advertises `completed_bar_v1`, `completed_bar_next_open_v1`,
+`completed_bar_adverse_touch_v1`, `quote_trade_v1`, and `order_book_v1`; embedders can inject another module through
 the typed engine configuration without introducing runtime shared-library loading. The selected
 name is repeated in both terminal audit records.
 
-Each compiled model owns a strict configuration contract. The v14 envelope separates selection from
+Each compiled model owns a strict configuration contract. The v15 envelope separates selection from
 model-specific parameters:
 
 ```json
@@ -58,6 +58,18 @@ on their side. Passive buys consume only sell-aggressor trades at or below their
 sells consume only buy-aggressor trades at or above it. An `unknown` aggressor never supplies a
 passive fill. Each event has independent, lot-rounded capacity, and its `event_at` is the fill's
 economic timestamp. Completed bars remain required solely for synchronized valuation.
+
+The order-book model uses configuration version `"1"`, adding `max_depth_levels` from 1 through
+1,024. Each instrument's slice-local bundle begins with a full bid/ask snapshot and uses contiguous
+absolute set, delete, and trade updates. Crossed states, gaps, missing deletes, and states beyond
+the depth limit fail replay; a locked best bid and ask is accepted. Each later slice starts from a
+fresh snapshot, so no unbounded or hidden book state survives a slice boundary.
+
+Marketable orders walk observable opposite-side levels in price order. Passive limits start behind
+the displayed quantity at their price and behind earlier engine orders. Reductions decrease queue
+ahead, additions join behind, and an aggressor-qualified trade consumes queue ahead before filling
+the order. This model has its own liquidity state and does not reuse completed-bar or quote/trade
+fill semantics. Bars remain mandatory only for valuation.
 
 ## Eligibility
 

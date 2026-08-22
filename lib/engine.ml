@@ -27,6 +27,10 @@ let make_config ~venue_calendars ~contract_version ~risk ~execution_model
          [ "completed_bar_next_open_v1"; "completed_bar_adverse_touch_v1" ]
        && Option.is_none (Execution.cost_model execution)
   then Error "execution model and pricing configuration are incompatible"
+  else if
+    String.equal (Execution_model.name execution_model) "order_book_v1"
+    <> Option.is_some (Execution.book_depth_limit execution)
+  then Error "execution model and order-book configuration are incompatible"
   else if max_internal_events <= 0 then
     Error "maximum internal events must be positive"
   else if max_internal_events > Resource_limits.internal_events then
@@ -70,6 +74,7 @@ let config_v11 ~contract_version ~risk ~venue_calendars ~execution_model
 let config_v12 = config_v11
 let config_v13 = config_v12
 let config_v14 = config_v13
+let config_v15 = config_v14
 
 let valid_sha256 value =
   String.length value = 64

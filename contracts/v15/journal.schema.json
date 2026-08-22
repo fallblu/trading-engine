@@ -1,0 +1,2427 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/fallblu/trading-engine/contracts/v15/journal.schema.json",
+  "title": "Trading Engine v15 audit journal record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "engine_sequence",
+    "event_id",
+    "causation_ids",
+    "run_id",
+    "recorded_at",
+    "event_type",
+    "payload"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": "15"
+    },
+    "engine_sequence": {
+      "$ref": "#/$defs/sequence"
+    },
+    "event_id": {
+      "$ref": "#/$defs/identifier"
+    },
+    "causation_ids": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/identifier"
+      }
+    },
+    "run_id": {
+      "$ref": "#/$defs/identifier"
+    },
+    "recorded_at": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "event_type": {
+      "enum": [
+        "run_started",
+        "initial_state",
+        "market_slice_received",
+        "target_portfolio_requested",
+        "order_accepted",
+        "order_rejected",
+        "order_triggered",
+        "order_cancelled",
+        "split_applied",
+        "cash_dividend_applied",
+        "distribution_applied",
+        "lifecycle_applied",
+        "order_adjusted",
+        "execution_price_selected",
+        "fill_applied",
+        "settlement_instruction_created",
+        "settlement_completed",
+        "settlement_failed",
+        "fill_clipped",
+        "borrow_fee_applied",
+        "borrow_charge_applied",
+        "borrow_recall_received",
+        "cash_interest_applied",
+        "margin_call",
+        "margin_restored",
+        "intent_rejected",
+        "metric_emitted",
+        "valuation",
+        "run_completed"
+      ]
+    },
+    "payload": {
+      "type": "object"
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "event_type": { "const": "execution_price_selected" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/executionPriceSelected" } } }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "run_started"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/runStarted"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "initial_state"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/initialState"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "market_slice_received"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/marketSlice"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "target_portfolio_requested"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/targetPortfolio"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "enum": [
+              "order_accepted",
+              "order_rejected",
+              "order_triggered"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/order"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "order_cancelled"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/orderCancelled"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "split_applied"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/splitApplied"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "cash_dividend_applied"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/dividendApplied"
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "event_type": { "const": "distribution_applied" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/distributionApplied" } } }
+    },
+    {
+      "if": { "properties": { "event_type": { "const": "lifecycle_applied" } } },
+      "then": { "properties": { "payload": { "$ref": "#/$defs/lifecycleApplied" } } }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "order_adjusted"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/orderAdjusted"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "fill_applied"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/fill"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "enum": [
+              "settlement_instruction_created",
+              "settlement_completed",
+              "settlement_failed"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/settlementInstruction"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "fill_clipped"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/fillClipped"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "borrow_fee_applied"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/borrowFee"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "borrow_charge_applied"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/borrowCharge"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "borrow_recall_received"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/borrowRecall"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "cash_interest_applied"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/cashInterest"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "enum": [
+              "margin_call",
+              "margin_restored",
+              "valuation"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/valuation"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "intent_rejected"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/intentRejected"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "metric_emitted"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/metric"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "run_completed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "#/$defs/runCompleted"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^\\s\\u0000-\\u001f\\u007f]+$"
+    },
+    "signedDecimal": {
+      "type": "string",
+      "pattern": "^(?:0|-?(?:0[.][0-9]{0,5}[1-9]|[1-9][0-9]*(?:[.][0-9]{0,5}[1-9])?))$"
+    },
+    "unsignedDecimal": {
+      "type": "string",
+      "pattern": "^(?:0|0[.][0-9]{0,5}[1-9]|[1-9][0-9]*(?:[.][0-9]{0,5}[1-9])?)$"
+    },
+    "positiveDecimal": {
+      "type": "string",
+      "pattern": "^(?:0[.][0-9]{0,5}[1-9]|[1-9][0-9]*(?:[.][0-9]{0,5}[1-9])?)$"
+    },
+    "sequence": {
+      "type": "string",
+      "pattern": "^[1-9][0-9]*$"
+    },
+    "nonnegativeSequence": {
+      "type": "string",
+      "pattern": "^(?:0|[1-9][0-9]*)$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-5][0-9](?:[.][0-9]{1,6})?(?:[zZ]|[+-][0-9]{2}:[0-9]{2})$"
+    },
+    "runStarted": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scenario_sha256",
+        "execution_model"
+      ],
+      "properties": {
+        "scenario_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "execution_model": {
+          "enum": ["completed_bar_v1", "completed_bar_next_open_v1", "completed_bar_adverse_touch_v1", "quote_trade_v1", "order_book_v1"]
+        }
+      }
+    },
+    "initialState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "portfolio",
+        "valuation"
+      ],
+      "properties": {
+        "portfolio": {
+          "$ref": "https://github.com/fallblu/trading-engine/contracts/v15/scenario.schema.json#/$defs/initialPortfolio"
+        },
+        "valuation": {
+          "$ref": "#/$defs/valuation"
+        }
+      }
+    },
+    "bar": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "instrument_id",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume"
+      ],
+      "properties": {
+        "instrument_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "open": {
+          "$ref": "#/$defs/positiveDecimal"
+        },
+        "high": {
+          "$ref": "#/$defs/positiveDecimal"
+        },
+        "low": {
+          "$ref": "#/$defs/positiveDecimal"
+        },
+        "close": {
+          "$ref": "#/$defs/positiveDecimal"
+        },
+        "volume": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/unsignedDecimal"
+            }
+          ]
+        }
+      }
+    },
+    "fxRate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "currency",
+        "rate"
+      ],
+      "properties": {
+        "currency": {
+          "$ref": "#/$defs/identifier"
+        },
+        "rate": {
+          "$ref": "#/$defs/positiveDecimal"
+        }
+      }
+    },
+    "corporateAction": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "action_id",
+            "instrument_id",
+            "numerator",
+            "denominator"
+          ],
+          "properties": {
+            "type": {
+              "const": "split"
+            },
+            "action_id": {
+              "$ref": "#/$defs/identifier"
+            },
+            "instrument_id": {
+              "$ref": "#/$defs/identifier"
+            },
+            "numerator": {
+              "$ref": "#/$defs/sequence"
+            },
+            "denominator": {
+              "$ref": "#/$defs/sequence"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "action_id",
+            "instrument_id",
+            "amount_per_unit"
+          ],
+          "properties": {
+            "type": {
+              "const": "cash_dividend"
+            },
+            "action_id": {
+              "$ref": "#/$defs/identifier"
+            },
+            "instrument_id": {
+              "$ref": "#/$defs/identifier"
+            },
+            "amount_per_unit": {
+              "$ref": "#/$defs/positiveDecimal"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "action_id", "instrument_id", "destination_instrument_id", "numerator", "denominator", "basis_allocation_bps", "fractional_policy"],
+          "properties": {
+            "type": { "enum": ["stock_dividend", "rights", "spin_off"] },
+            "action_id": { "$ref": "#/$defs/identifier" },
+            "instrument_id": { "$ref": "#/$defs/identifier" },
+            "destination_instrument_id": { "$ref": "#/$defs/identifier" },
+            "numerator": { "$ref": "#/$defs/sequence" },
+            "denominator": { "$ref": "#/$defs/sequence" },
+            "basis_allocation_bps": { "type": "integer", "minimum": 0, "maximum": 10000 },
+            "fractional_policy": { "$ref": "https://github.com/fallblu/trading-engine/contracts/v15/scenario.schema.json#/$defs/fractionalPolicy" }
+          }
+        }
+      ]
+    },
+    "marketSlice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slice_sequence",
+        "start_at",
+        "end_at",
+        "available_at",
+        "received_at",
+        "bars",
+        "fx_rates",
+        "corporate_actions",
+        "borrow_observations",
+        "cash_rate_observations",
+        "settlement_failures",
+        "lifecycle_events",
+        "market_events",
+        "order_book_events"
+      ],
+      "properties": {
+        "slice_sequence": {
+          "$ref": "#/$defs/sequence"
+        },
+        "start_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "end_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "available_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "received_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "bars": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/bar"
+          }
+        },
+        "fx_rates": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/fxRate"
+          }
+        },
+        "corporate_actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/corporateAction"
+          }
+        },
+        "borrow_observations": {
+          "type": "array",
+          "items": {
+            "$ref": "https://github.com/fallblu/trading-engine/contracts/v15/scenario.schema.json#/$defs/borrowObservation"
+          }
+        },
+        "cash_rate_observations": {
+          "type": "array",
+          "items": {
+            "$ref": "https://github.com/fallblu/trading-engine/contracts/v15/scenario.schema.json#/$defs/cashRateObservation"
+          }
+        },
+        "settlement_failures": {
+          "type": "array",
+          "items": {
+            "$ref": "https://github.com/fallblu/trading-engine/contracts/v15/scenario.schema.json#/$defs/settlementFailure"
+          }
+        },
+        "lifecycle_events": {
+          "type": "array",
+          "items": {
+            "$ref": "https://github.com/fallblu/trading-engine/contracts/v15/scenario.schema.json#/$defs/lifecycleEvent"
+          }
+        },
+        "market_events": {
+          "type": "array",
+          "items": {
+            "$ref": "https://github.com/fallblu/trading-engine/contracts/v15/scenario.schema.json#/$defs/marketEvent"
+          }
+        },
+        "order_book_events": {
+          "type": "array",
+          "items": {
+            "$ref": "https://github.com/fallblu/trading-engine/contracts/v15/scenario.schema.json#/$defs/orderBookEvent"
+          }
+        }
+      }
+    },
+    "settlementInstruction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["instruction_id", "fill_id", "instrument_id", "currency", "cash_movement", "position_movement", "trade_date", "due_date", "status", "settled_at", "failed_at", "failure_reason"],
+      "properties": {
+        "instruction_id": { "$ref": "#/$defs/identifier" },
+        "fill_id": { "$ref": "#/$defs/identifier" },
+        "instrument_id": { "$ref": "#/$defs/identifier" },
+        "currency": { "$ref": "#/$defs/identifier" },
+        "cash_movement": { "$ref": "#/$defs/signedDecimal" },
+        "position_movement": { "$ref": "#/$defs/signedDecimal" },
+        "trade_date": { "type": "string", "format": "date", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "due_date": { "type": "string", "format": "date", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "status": { "enum": ["pending", "settled", "failed"] },
+        "settled_at": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/timestamp" }] },
+        "failed_at": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/timestamp" }] },
+        "failure_reason": { "oneOf": [{ "type": "null" }, { "type": "string", "minLength": 1, "pattern": "^\\S(?:.*\\S)?$" }] }
+      }
+    },
+    "targetPortfolio": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "basis",
+        "targets"
+      ],
+      "properties": {
+        "basis": {
+          "enum": [
+            "weights",
+            "quantities"
+          ]
+        },
+        "targets": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "instrument_id",
+              "weight",
+              "quantity",
+              "reference_price"
+            ],
+            "properties": {
+              "instrument_id": {
+                "$ref": "#/$defs/identifier"
+              },
+              "weight": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/$defs/signedDecimal"
+                  }
+                ]
+              },
+              "quantity": {
+                "$ref": "#/$defs/signedDecimal"
+              },
+              "reference_price": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/$defs/positiveDecimal"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "order": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "order_id",
+        "instrument_id",
+        "side",
+        "quantity",
+        "order_kind",
+        "trigger_price",
+        "limit_price",
+        "time_in_force",
+        "venue_id",
+        "calendar_id",
+        "expires_at",
+        "origin",
+        "created_event_id",
+        "updated_event_id",
+        "created_sequence",
+        "created_at",
+        "eligible_after_slice_sequence",
+        "triggered_at",
+        "triggered_slice_sequence",
+        "filled_quantity",
+        "filled_notional",
+        "status",
+        "rejection_reason"
+      ],
+      "properties": {
+        "order_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "instrument_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "side": {
+          "enum": [
+            "buy",
+            "sell"
+          ]
+        },
+        "quantity": {
+          "$ref": "#/$defs/positiveDecimal"
+        },
+        "order_kind": {
+          "enum": [
+            "market",
+            "limit",
+            "stop",
+            "stop_limit"
+          ]
+        },
+        "trigger_price": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/positiveDecimal"
+            }
+          ]
+        },
+        "limit_price": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/positiveDecimal"
+            }
+          ]
+        },
+        "time_in_force": {
+          "enum": [
+            "gtc",
+            "ioc",
+            "fok",
+            "day",
+            "gtd"
+          ]
+        },
+        "venue_id": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/identifier"
+            }
+          ]
+        },
+        "calendar_id": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/identifier"
+            }
+          ]
+        },
+        "expires_at": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/timestamp"
+            }
+          ]
+        },
+        "origin": {
+          "enum": [
+            "direct",
+            "target_rebalance",
+            "margin_liquidation",
+            "borrow_recall",
+            "instrument_halt",
+            "instrument_terminal"
+          ]
+        },
+        "created_event_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "updated_event_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "created_sequence": {
+          "$ref": "#/$defs/sequence"
+        },
+        "created_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "eligible_after_slice_sequence": {
+          "$ref": "#/$defs/nonnegativeSequence"
+        },
+        "triggered_at": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/timestamp"
+            }
+          ]
+        },
+        "triggered_slice_sequence": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/sequence"
+            }
+          ]
+        },
+        "filled_quantity": {
+          "$ref": "#/$defs/unsignedDecimal"
+        },
+        "filled_notional": {
+          "$ref": "#/$defs/unsignedDecimal"
+        },
+        "status": {
+          "enum": [
+            "working",
+            "partially_filled",
+            "filled",
+            "cancelled",
+            "rejected"
+          ]
+        },
+        "rejection_reason": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "minLength": 1
+            }
+          ]
+        }
+      }
+    },
+    "orderCancelled": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "order",
+        "reason"
+      ],
+      "properties": {
+        "order": {
+          "$ref": "#/$defs/order"
+        },
+        "reason": {
+          "enum": [
+            "strategy_requested",
+            "target_replaced",
+            "market_ioc",
+            "immediate_or_cancel",
+            "fill_or_kill",
+            "day_expired",
+            "gtd_expired",
+            "margin_call",
+            "borrow_recall"
+          ]
+        }
+      }
+    },
+    "splitApplied": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action",
+        "previous_quantity",
+        "adjusted_quantity"
+      ],
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/corporateAction"
+        },
+        "previous_quantity": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "adjusted_quantity": {
+          "$ref": "#/$defs/signedDecimal"
+        }
+      }
+    },
+    "dividendApplied": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action",
+        "quantity",
+        "cash_amount"
+      ],
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/corporateAction"
+        },
+        "quantity": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "cash_amount": {
+          "$ref": "#/$defs/signedDecimal"
+        }
+      }
+    },
+    "distributionApplied": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action", "source_quantity", "destination_quantity", "fractional_quantity", "allocated_basis", "fractional_basis", "cash_in_lieu"],
+      "properties": {
+        "action": { "$ref": "#/$defs/corporateAction" },
+        "source_quantity": { "$ref": "#/$defs/signedDecimal" },
+        "destination_quantity": { "$ref": "#/$defs/signedDecimal" },
+        "fractional_quantity": { "$ref": "#/$defs/signedDecimal" },
+        "allocated_basis": { "$ref": "#/$defs/signedDecimal" },
+        "fractional_basis": { "$ref": "#/$defs/signedDecimal" },
+        "cash_in_lieu": { "$ref": "#/$defs/signedDecimal" }
+      }
+    },
+    "lifecycleApplied": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lifecycle_event", "listing", "liquidated_quantity", "cash_amount"],
+      "properties": {
+        "lifecycle_event": { "$ref": "https://github.com/fallblu/trading-engine/contracts/v15/scenario.schema.json#/$defs/lifecycleEvent" },
+        "listing": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["instrument_id", "symbol", "status", "provider_mappings"],
+          "properties": {
+            "instrument_id": { "$ref": "#/$defs/identifier" },
+            "symbol": { "$ref": "#/$defs/identifier" },
+            "status": { "enum": ["tradable", "halted", "expired", "delisted"] },
+            "provider_mappings": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["provider", "provider_instrument_id"],
+                "properties": {
+                  "provider": { "$ref": "#/$defs/identifier" },
+                  "provider_instrument_id": { "$ref": "#/$defs/identifier" }
+                }
+              }
+            }
+          }
+        },
+        "liquidated_quantity": { "$ref": "#/$defs/signedDecimal" },
+        "cash_amount": { "$ref": "#/$defs/signedDecimal" }
+      }
+    },
+    "orderAdjusted": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "order",
+        "action_id"
+      ],
+      "properties": {
+        "order": {
+          "$ref": "#/$defs/order"
+        },
+        "action_id": {
+          "$ref": "#/$defs/identifier"
+        }
+      }
+    },
+    "executionPriceSelected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["order_id", "instrument_id", "side", "reference_price", "spread_adjustment", "impact_adjustment", "final_price"],
+      "properties": {
+        "order_id": { "$ref": "#/$defs/identifier" },
+        "instrument_id": { "$ref": "#/$defs/identifier" },
+        "side": { "enum": ["buy", "sell"] },
+        "reference_price": { "$ref": "#/$defs/positiveDecimal" },
+        "spread_adjustment": { "$ref": "#/$defs/unsignedDecimal" },
+        "impact_adjustment": { "$ref": "#/$defs/unsignedDecimal" },
+        "final_price": { "$ref": "#/$defs/positiveDecimal" }
+      }
+    },
+    "fill": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fill_id",
+        "order_id",
+        "instrument_id",
+        "quote_currency",
+        "side",
+        "quantity",
+        "price",
+        "notional",
+        "fee",
+        "executed_at",
+        "slice_sequence",
+        "fee_components"
+      ],
+      "properties": {
+        "fill_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "order_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "instrument_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "quote_currency": {
+          "$ref": "#/$defs/identifier"
+        },
+        "side": {
+          "enum": [
+            "buy",
+            "sell"
+          ]
+        },
+        "quantity": {
+          "$ref": "#/$defs/positiveDecimal"
+        },
+        "price": {
+          "$ref": "#/$defs/positiveDecimal"
+        },
+        "notional": {
+          "$ref": "#/$defs/positiveDecimal"
+        },
+        "fee": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "fee_components": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/calculatedFeeComponent"
+          }
+        },
+        "executed_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "slice_sequence": {
+          "$ref": "#/$defs/sequence"
+        }
+      }
+    },
+    "calculatedFeeComponent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "kind",
+        "currency",
+        "amount",
+        "quote_amount"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/identifier"
+        },
+        "kind": {
+          "enum": [
+            "fixed",
+            "notional_bps",
+            "per_unit",
+            "minimum_adjustment",
+            "maximum_adjustment"
+          ]
+        },
+        "currency": {
+          "$ref": "#/$defs/identifier"
+        },
+        "amount": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "quote_amount": {
+          "$ref": "#/$defs/signedDecimal"
+        }
+      }
+    },
+    "feeComponentAttribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "kind",
+        "currency",
+        "amount",
+        "quote_currency",
+        "quote_amount",
+        "base_amount"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/identifier"
+        },
+        "kind": {
+          "enum": [
+            "fixed",
+            "notional_bps",
+            "per_unit",
+            "minimum_adjustment",
+            "maximum_adjustment"
+          ]
+        },
+        "currency": {
+          "$ref": "#/$defs/identifier"
+        },
+        "amount": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "quote_currency": {
+          "$ref": "#/$defs/identifier"
+        },
+        "quote_amount": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "base_amount": {
+          "$ref": "#/$defs/signedDecimal"
+        }
+      }
+    },
+    "quantityThreshold": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "unit",
+        "value"
+      ],
+      "properties": {
+        "unit": {
+          "const": "quantity"
+        },
+        "value": {
+          "$ref": "#/$defs/positiveDecimal"
+        }
+      }
+    },
+    "moneyThreshold": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "unit",
+        "value"
+      ],
+      "properties": {
+        "unit": {
+          "const": "money"
+        },
+        "value": {
+          "$ref": "#/$defs/positiveDecimal"
+        }
+      }
+    },
+    "ratioThreshold": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "unit",
+        "value"
+      ],
+      "properties": {
+        "unit": {
+          "const": "ratio"
+        },
+        "value": {
+          "$ref": "#/$defs/positiveDecimal"
+        }
+      }
+    },
+    "basisPointsThreshold": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "unit",
+        "value"
+      ],
+      "properties": {
+        "unit": {
+          "const": "basis_points"
+        },
+        "value": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        }
+      }
+    },
+    "instrumentQuantityThreshold": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "instrument_id",
+        "unit",
+        "value"
+      ],
+      "properties": {
+        "instrument_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "unit": {
+          "const": "quantity"
+        },
+        "value": {
+          "$ref": "#/$defs/positiveDecimal"
+        }
+      }
+    },
+    "instrumentMoneyThreshold": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "instrument_id",
+        "unit",
+        "value"
+      ],
+      "properties": {
+        "instrument_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "unit": {
+          "const": "money"
+        },
+        "value": {
+          "$ref": "#/$defs/positiveDecimal"
+        }
+      }
+    },
+    "currencyMoneyThreshold": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["currency", "unit", "value"],
+      "properties": {
+        "currency": { "$ref": "#/$defs/identifier" },
+        "unit": { "const": "money" },
+        "value": { "$ref": "#/$defs/unsignedDecimal" }
+      }
+    },
+    "settlementPositionThreshold": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["instrument_id", "unit", "value"],
+      "properties": {
+        "instrument_id": { "$ref": "#/$defs/identifier" },
+        "unit": { "const": "quantity" },
+        "value": { "$ref": "#/$defs/unsignedDecimal" }
+      }
+    },
+    "instrumentBasisPointsThreshold": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "instrument_id",
+        "unit",
+        "value"
+      ],
+      "properties": {
+        "instrument_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "unit": {
+          "const": "basis_points"
+        },
+        "value": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        }
+      }
+    },
+    "instrumentShortingThreshold": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "instrument_id",
+        "value"
+      ],
+      "properties": {
+        "instrument_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "value": {
+          "const": false
+        }
+      }
+    },
+    "groupMoneyThreshold": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "group_id",
+        "unit",
+        "value"
+      ],
+      "properties": {
+        "group_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "unit": {
+          "const": "money"
+        },
+        "value": {
+          "$ref": "#/$defs/positiveDecimal"
+        }
+      }
+    },
+    "groupRatioThreshold": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "group_id",
+        "unit",
+        "value"
+      ],
+      "properties": {
+        "group_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "unit": {
+          "const": "ratio"
+        },
+        "value": {
+          "$ref": "#/$defs/positiveDecimal"
+        }
+      }
+    },
+    "fillClipReason": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "version",
+            "policy",
+            "threshold"
+          ],
+          "properties": {
+            "version": {
+              "const": "1"
+            },
+            "policy": {
+              "const": "max_order_quantity"
+            },
+            "threshold": {
+              "$ref": "#/$defs/quantityThreshold"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "version",
+            "policy",
+            "threshold"
+          ],
+          "properties": {
+            "version": {
+              "const": "1"
+            },
+            "policy": {
+              "const": "max_long_position"
+            },
+            "threshold": {
+              "$ref": "#/$defs/quantityThreshold"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "version",
+            "policy",
+            "threshold"
+          ],
+          "properties": {
+            "version": {
+              "const": "1"
+            },
+            "policy": {
+              "const": "max_short_position"
+            },
+            "threshold": {
+              "$ref": "#/$defs/quantityThreshold"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "version",
+            "policy",
+            "threshold"
+          ],
+          "properties": {
+            "version": {
+              "const": "1"
+            },
+            "policy": {
+              "const": "max_gross_exposure"
+            },
+            "threshold": {
+              "$ref": "#/$defs/moneyThreshold"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "version",
+            "policy",
+            "threshold"
+          ],
+          "properties": {
+            "version": {
+              "const": "1"
+            },
+            "policy": {
+              "const": "max_leverage"
+            },
+            "threshold": {
+              "$ref": "#/$defs/ratioThreshold"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "version",
+            "policy",
+            "threshold"
+          ],
+          "properties": {
+            "version": {
+              "const": "1"
+            },
+            "policy": {
+              "const": "initial_margin"
+            },
+            "threshold": {
+              "$ref": "#/$defs/basisPointsThreshold"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "version",
+            "policy",
+            "threshold"
+          ],
+          "properties": {
+            "version": {
+              "const": "1"
+            },
+            "policy": {
+              "const": "instrument_max_long_position"
+            },
+            "threshold": {
+              "$ref": "#/$defs/instrumentQuantityThreshold"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["version", "policy", "threshold"],
+          "properties": {
+            "version": { "const": "1" },
+            "policy": { "const": "settlement_cash_buying_power" },
+            "threshold": { "$ref": "#/$defs/currencyMoneyThreshold" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["version", "policy", "threshold"],
+          "properties": {
+            "version": { "const": "1" },
+            "policy": { "const": "settlement_position_availability" },
+            "threshold": { "$ref": "#/$defs/settlementPositionThreshold" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "version",
+            "policy",
+            "threshold"
+          ],
+          "properties": {
+            "version": {
+              "const": "1"
+            },
+            "policy": {
+              "const": "instrument_max_short_position"
+            },
+            "threshold": {
+              "$ref": "#/$defs/instrumentQuantityThreshold"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "version",
+            "policy",
+            "threshold"
+          ],
+          "properties": {
+            "version": {
+              "const": "1"
+            },
+            "policy": {
+              "const": "instrument_max_notional_exposure"
+            },
+            "threshold": {
+              "$ref": "#/$defs/instrumentMoneyThreshold"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "version",
+            "policy",
+            "threshold"
+          ],
+          "properties": {
+            "version": {
+              "const": "1"
+            },
+            "policy": {
+              "const": "instrument_shorting_disabled"
+            },
+            "threshold": {
+              "$ref": "#/$defs/instrumentShortingThreshold"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "version",
+            "policy",
+            "threshold"
+          ],
+          "properties": {
+            "version": {
+              "const": "1"
+            },
+            "policy": {
+              "const": "instrument_borrow_availability"
+            },
+            "threshold": {
+              "$ref": "#/$defs/instrumentQuantityThreshold"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "version",
+            "policy",
+            "threshold"
+          ],
+          "properties": {
+            "version": {
+              "const": "1"
+            },
+            "policy": {
+              "const": "instrument_initial_margin"
+            },
+            "threshold": {
+              "$ref": "#/$defs/instrumentBasisPointsThreshold"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "version",
+            "policy",
+            "threshold"
+          ],
+          "properties": {
+            "version": {
+              "const": "1"
+            },
+            "policy": {
+              "const": "group_max_gross_exposure"
+            },
+            "threshold": {
+              "$ref": "#/$defs/groupMoneyThreshold"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "version",
+            "policy",
+            "threshold"
+          ],
+          "properties": {
+            "version": {
+              "const": "1"
+            },
+            "policy": {
+              "const": "group_max_long_exposure"
+            },
+            "threshold": {
+              "$ref": "#/$defs/groupMoneyThreshold"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "version",
+            "policy",
+            "threshold"
+          ],
+          "properties": {
+            "version": {
+              "const": "1"
+            },
+            "policy": {
+              "const": "group_max_short_exposure"
+            },
+            "threshold": {
+              "$ref": "#/$defs/groupMoneyThreshold"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "version",
+            "policy",
+            "threshold"
+          ],
+          "properties": {
+            "version": {
+              "const": "1"
+            },
+            "policy": {
+              "const": "group_max_absolute_net_exposure"
+            },
+            "threshold": {
+              "$ref": "#/$defs/groupMoneyThreshold"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "version",
+            "policy",
+            "threshold"
+          ],
+          "properties": {
+            "version": {
+              "const": "1"
+            },
+            "policy": {
+              "const": "group_max_concentration"
+            },
+            "threshold": {
+              "$ref": "#/$defs/groupRatioThreshold"
+            }
+          }
+        }
+      ]
+    },
+    "fillClipped": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reason",
+        "order_id",
+        "instrument_id",
+        "proposed_quantity",
+        "permitted_quantity",
+        "price"
+      ],
+      "properties": {
+        "reason": {
+          "$ref": "#/$defs/fillClipReason"
+        },
+        "order_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "instrument_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "proposed_quantity": {
+          "$ref": "#/$defs/positiveDecimal"
+        },
+        "permitted_quantity": {
+          "$ref": "#/$defs/unsignedDecimal"
+        },
+        "price": {
+          "$ref": "#/$defs/positiveDecimal"
+        }
+      }
+    },
+    "borrowFee": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "instrument_id",
+        "quote_currency",
+        "short_quantity",
+        "reference_price",
+        "borrow_bps",
+        "period_start",
+        "period_end",
+        "fee"
+      ],
+      "properties": {
+        "instrument_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "quote_currency": {
+          "$ref": "#/$defs/identifier"
+        },
+        "short_quantity": {
+          "$ref": "#/$defs/positiveDecimal"
+        },
+        "reference_price": {
+          "$ref": "#/$defs/positiveDecimal"
+        },
+        "borrow_bps": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "period_start": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "period_end": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "fee": {
+          "$ref": "#/$defs/positiveDecimal"
+        }
+      }
+    },
+    "borrowCharge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "observation",
+        "quote_currency",
+        "short_quantity",
+        "reference_price",
+        "day_count",
+        "compounding",
+        "period_start",
+        "period_end",
+        "amount"
+      ],
+      "properties": {
+        "observation": {
+          "$ref": "https://github.com/fallblu/trading-engine/contracts/v15/scenario.schema.json#/$defs/borrowObservation"
+        },
+        "quote_currency": {
+          "$ref": "#/$defs/identifier"
+        },
+        "short_quantity": {
+          "$ref": "#/$defs/positiveDecimal"
+        },
+        "reference_price": {
+          "$ref": "#/$defs/positiveDecimal"
+        },
+        "day_count": {
+          "enum": [
+            "actual_365",
+            "actual_360"
+          ]
+        },
+        "compounding": {
+          "enum": [
+            "simple",
+            "daily"
+          ]
+        },
+        "period_start": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "period_end": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "amount": {
+          "$ref": "#/$defs/signedDecimal"
+        }
+      }
+    },
+    "borrowRecall": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "observation",
+        "short_quantity",
+        "close_out_quantity"
+      ],
+      "properties": {
+        "observation": {
+          "$ref": "https://github.com/fallblu/trading-engine/contracts/v15/scenario.schema.json#/$defs/borrowObservation"
+        },
+        "short_quantity": {
+          "$ref": "#/$defs/positiveDecimal"
+        },
+        "close_out_quantity": {
+          "$ref": "#/$defs/unsignedDecimal"
+        }
+      }
+    },
+    "cashInterest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "observation",
+        "opening_balance",
+        "applied_rate_bps",
+        "day_count",
+        "compounding",
+        "period_start",
+        "period_end",
+        "amount",
+        "closing_balance"
+      ],
+      "properties": {
+        "observation": {
+          "$ref": "https://github.com/fallblu/trading-engine/contracts/v15/scenario.schema.json#/$defs/cashRateObservation"
+        },
+        "opening_balance": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "applied_rate_bps": {
+          "type": "integer",
+          "minimum": -1000000,
+          "maximum": 1000000
+        },
+        "day_count": {
+          "enum": [
+            "actual_365",
+            "actual_360"
+          ]
+        },
+        "compounding": {
+          "enum": [
+            "simple",
+            "daily"
+          ]
+        },
+        "period_start": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "period_end": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "amount": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "closing_balance": {
+          "$ref": "#/$defs/signedDecimal"
+        }
+      }
+    },
+    "cashAttribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "currency",
+        "amount",
+        "fx_rate",
+        "base_value",
+        "interest",
+        "base_interest",
+        "settled_amount",
+        "unsettled_amount",
+        "base_settled_value",
+        "base_unsettled_value"
+      ],
+      "properties": {
+        "currency": {
+          "$ref": "#/$defs/identifier"
+        },
+        "amount": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "fx_rate": {
+          "$ref": "#/$defs/positiveDecimal"
+        },
+        "base_value": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "interest": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "base_interest": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "settled_amount": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "unsettled_amount": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "base_settled_value": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "base_unsettled_value": {
+          "$ref": "#/$defs/signedDecimal"
+        }
+      }
+    },
+    "positionAttribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "instrument_id",
+        "quote_currency",
+        "quantity",
+        "settled_quantity",
+        "unsettled_quantity",
+        "mark",
+        "fx_rate",
+        "market_value",
+        "base_market_value",
+        "cost_basis",
+        "base_cost_basis",
+        "realized_pnl",
+        "base_realized_pnl",
+        "unrealized_pnl",
+        "base_unrealized_pnl",
+        "dividend_pnl",
+        "base_dividend_pnl",
+        "execution_fees",
+        "base_execution_fees",
+        "borrow_fees",
+        "base_borrow_fees",
+        "total_fees",
+        "base_total_fees",
+        "execution_fee_components"
+      ],
+      "properties": {
+        "instrument_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "quote_currency": {
+          "$ref": "#/$defs/identifier"
+        },
+        "quantity": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "settled_quantity": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "unsettled_quantity": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "mark": {
+          "$ref": "#/$defs/positiveDecimal"
+        },
+        "fx_rate": {
+          "$ref": "#/$defs/positiveDecimal"
+        },
+        "market_value": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "base_market_value": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "cost_basis": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "base_cost_basis": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "realized_pnl": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "base_realized_pnl": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "unrealized_pnl": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "base_unrealized_pnl": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "dividend_pnl": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "base_dividend_pnl": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "execution_fees": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "base_execution_fees": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "borrow_fees": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "base_borrow_fees": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "total_fees": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "base_total_fees": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "execution_fee_components": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/feeComponentAttribution"
+          }
+        }
+      }
+    },
+    "margin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "initial_requirement",
+        "maintenance_requirement",
+        "initial_excess",
+        "maintenance_excess",
+        "margin_call"
+      ],
+      "properties": {
+        "initial_requirement": {
+          "$ref": "#/$defs/unsignedDecimal"
+        },
+        "maintenance_requirement": {
+          "$ref": "#/$defs/unsignedDecimal"
+        },
+        "initial_excess": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "maintenance_excess": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "margin_call": {
+          "type": "boolean"
+        }
+      }
+    },
+    "groupExposure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "group_id",
+        "gross_exposure",
+        "net_exposure",
+        "long_exposure",
+        "short_exposure",
+        "concentration"
+      ],
+      "properties": {
+        "group_id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "gross_exposure": {
+          "$ref": "#/$defs/unsignedDecimal"
+        },
+        "net_exposure": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "long_exposure": {
+          "$ref": "#/$defs/unsignedDecimal"
+        },
+        "short_exposure": {
+          "$ref": "#/$defs/unsignedDecimal"
+        },
+        "concentration": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/signedDecimal"
+            }
+          ]
+        }
+      }
+    },
+    "valuation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "base_currency",
+        "cash",
+        "settled_cash",
+        "unsettled_cash",
+        "net_market_value",
+        "long_market_value",
+        "short_market_value",
+        "gross_exposure",
+        "cost_basis",
+        "realized_pnl",
+        "unrealized_pnl",
+        "equity",
+        "dividend_pnl",
+        "execution_fees",
+        "borrow_fees",
+        "cash_interest",
+        "total_fees",
+        "cash_balances",
+        "positions",
+        "margin",
+        "group_exposures",
+        "execution_fee_components"
+      ],
+      "properties": {
+        "base_currency": {
+          "$ref": "#/$defs/identifier"
+        },
+        "cash": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "settled_cash": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "unsettled_cash": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "net_market_value": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "long_market_value": {
+          "$ref": "#/$defs/unsignedDecimal"
+        },
+        "short_market_value": {
+          "$ref": "#/$defs/unsignedDecimal"
+        },
+        "gross_exposure": {
+          "$ref": "#/$defs/unsignedDecimal"
+        },
+        "cost_basis": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "realized_pnl": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "unrealized_pnl": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "equity": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "dividend_pnl": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "execution_fees": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "borrow_fees": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "total_fees": {
+          "$ref": "#/$defs/signedDecimal"
+        },
+        "cash_balances": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/cashAttribution"
+          }
+        },
+        "positions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/positionAttribution"
+          }
+        },
+        "margin": {
+          "$ref": "#/$defs/margin"
+        },
+        "group_exposures": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/groupExposure"
+          }
+        },
+        "execution_fee_components": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/feeComponentAttribution"
+          }
+        },
+        "cash_interest": {
+          "$ref": "#/$defs/signedDecimal"
+        }
+      }
+    },
+    "intentRejected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reason"
+      ],
+      "properties": {
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "value"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      }
+    },
+    "runCompleted": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scenario_sha256",
+        "execution_model",
+        "valuation",
+        "order_counts"
+      ],
+      "properties": {
+        "scenario_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "execution_model": {
+          "enum": ["completed_bar_v1", "completed_bar_next_open_v1", "completed_bar_adverse_touch_v1", "quote_trade_v1", "order_book_v1"]
+        },
+        "valuation": {
+          "$ref": "#/$defs/valuation"
+        },
+        "order_counts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "total",
+            "active",
+            "filled",
+            "rejected",
+            "cancelled"
+          ],
+          "properties": {
+            "total": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "active": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "filled": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "rejected": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "cancelled": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      }
+    }
+  }
+}
