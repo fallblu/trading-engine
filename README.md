@@ -61,12 +61,14 @@ scenario slices and scheduled or external intents
   fee-component attribution
 - Deterministic event IDs, ordered causal references, and order-creation attribution
 - Contract-selected compiled execution modules with versioned model-owned configuration and
-  capability descriptors; v13 adds conservative bar models and v14 adds causal quote/trade replay
-  while freezing `completed_bar_v1`
+  capability descriptors; v13 adds conservative bar models, v14 adds causal quote/trade replay,
+  and v15 adds bounded level-two order-book replay while freezing `completed_bar_v1`
 - Tick-aligned fixed-spread and participation-impact execution costs with separate reference,
   spread, impact, and final-price audit attribution
 - Causally ordered quotes and aggressor-classified trades with displayed-liquidity limits,
   maker/taker attribution, and event-time fills
+- Bounded order-book snapshots and contiguous updates with price-time queue simulation,
+  multi-level depth consumption, partial fills, and locked-book support
 - Strict batch JSON and bounded-memory JSON Lines scenario parsing with JSON Schemas
 - Versioned synchronous JSON Lines strategy processes with per-request timeouts and strict
   lifecycle supervision
@@ -96,7 +98,7 @@ Validate the included scenario with an in-memory replay:
 
 ```sh
 opam exec -- dune exec trading-engine -- \
-  --input contracts/v14/fixtures/demo.scenario.json \
+  --input contracts/v15/fixtures/demo.scenario.json \
   --validate-only
 ```
 
@@ -104,7 +106,7 @@ Run it and create a journal:
 
 ```sh
 opam exec -- dune exec trading-engine -- \
-  --input contracts/v14/fixtures/demo.scenario.json \
+  --input contracts/v15/fixtures/demo.scenario.json \
   --journal demo.journal.jsonl
 ```
 
@@ -112,7 +114,7 @@ For larger histories, validate and replay the equivalent stream one slice at a t
 
 ```sh
 opam exec -- dune exec trading-engine -- \
-  --input contracts/v14/fixtures/demo.scenario.jsonl \
+  --input contracts/v15/fixtures/demo.scenario.jsonl \
   --input-format jsonl \
   --journal demo.journal.jsonl
 ```
@@ -121,7 +123,7 @@ Run an external strategy against an empty-schedule scenario:
 
 ```sh
 opam exec -- dune exec trading-engine -- \
-  --input contracts/strategy/v12/fixtures/external.scenario.json \
+  --input contracts/strategy/v13/fixtures/external.scenario.json \
   --journal external.journal.jsonl \
   --strategy-executable ./my-strategy \
   --strategy-arg=config.toml \
@@ -236,19 +238,19 @@ do not provide reducer snapshots or restart recovery.
 - [Diagnostic contract](docs/diagnostics.md)
 - [Scenario contract](docs/scenario.md)
 - [Contract conformance corpus](contracts/conformance/README.md)
-- [Current contract v14 and conformance fixtures](contracts/v14/README.md)
+- [Current contract v15 and conformance fixtures](contracts/v15/README.md)
 - [Frozen contract v2](contracts/v2/README.md)
 - [Historical contract v1](contracts/v1/README.md)
-- [Scenario JSON Schema](contracts/v14/scenario.schema.json)
-- [Scenario stream record JSON Schema](contracts/v14/scenario-stream.schema.json)
-- [Journal record JSON Schema](contracts/v14/journal.schema.json)
-- [External strategy protocol v12](contracts/strategy/v12/README.md)
+- [Scenario JSON Schema](contracts/v15/scenario.schema.json)
+- [Scenario stream record JSON Schema](contracts/v15/scenario-stream.schema.json)
+- [Journal record JSON Schema](contracts/v15/journal.schema.json)
+- [External strategy protocol v13](contracts/strategy/v13/README.md)
 - [Historical strategy protocol v3](contracts/strategy/v3/README.md)
 - [Historical strategy protocol v2](contracts/strategy/v2/README.md)
 - [Historical strategy protocol v1](contracts/strategy/v1/README.md)
 - [Persistra compatibility](docs/persistra.md)
-- [Strategy message JSON Schema](contracts/strategy/v12/message.schema.json)
-- [Strategy transcript JSON Schema](contracts/strategy/v12/transcript.schema.json)
+- [Strategy message JSON Schema](contracts/strategy/v13/message.schema.json)
+- [Strategy transcript JSON Schema](contracts/strategy/v13/transcript.schema.json)
 - [Execution model](docs/execution-model.md)
 - [OCaml coverage](docs/coverage.md)
 - [Continuous integration and portability matrix](docs/continuous-integration.md)

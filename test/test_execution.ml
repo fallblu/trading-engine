@@ -77,6 +77,69 @@ let quote_trade_execution ?(participation_bps = 10_000) () =
   let fees = conservative_execution () |> T.Execution.fee_schedules in
   T.Execution.create_v2 ~participation_bps ~fee_schedules:fees |> ok
 
+let book_level price_value quantity_value =
+  T.Order_book_event.level ~price:(price price_value)
+    ~quantity:(quantity quantity_value)
+  |> ok
+
+let book_snapshot ?(sequence = 1L) ?(second = 1)
+    ?(bids = [ book_level "99" "10" ]) ?(asks = [ book_level "101" "10" ]) () =
+  let event_at = market_event_time second in
+  T.Order_book_event.snapshot
+    ~instrument_id:(instrument_id "test-equity")
+    ~event_at ~available_at:event_at ~received_at:event_at
+    ~ingest_sequence:sequence ~book_sequence:sequence ~bids ~asks
+  |> ok
+
+let book_set ?(sequence = 2L) ?(second = 2) ?(side = T.Order_book_event.Bid)
+    ?(price_value = "99") ?(quantity_value = "5") () =
+  let event_at = market_event_time second in
+  T.Order_book_event.set
+    ~instrument_id:(instrument_id "test-equity")
+    ~event_at ~available_at:event_at ~received_at:event_at
+    ~ingest_sequence:sequence ~book_sequence:sequence ~side
+    ~price:(price price_value) ~quantity:(quantity quantity_value)
+  |> ok
+
+let book_delete ?(sequence = 2L) ?(second = 2) ?(side = T.Order_book_event.Bid)
+    ?(price_value = "99") () =
+  let event_at = market_event_time second in
+  T.Order_book_event.delete
+    ~instrument_id:(instrument_id "test-equity")
+    ~event_at ~available_at:event_at ~received_at:event_at
+    ~ingest_sequence:sequence ~book_sequence:sequence ~side
+    ~price:(price price_value)
+  |> ok
+
+let book_trade ?(sequence = 2L) ?(second = 2) ?(price_value = "99")
+    ?(quantity_value = "5") ?(aggressor_side = T.Market_event.Sell) () =
+  let event_at = market_event_time second in
+  T.Order_book_event.trade
+    ~instrument_id:(instrument_id "test-equity")
+    ~event_at ~available_at:event_at ~received_at:event_at
+    ~ingest_sequence:sequence ~book_sequence:sequence ~price:(price price_value)
+    ~quantity:(quantity quantity_value) ~aggressor_side
+  |> ok
+
+let order_book_slice events =
+  let base = market_slice 2L in
+  T.Market_slice.create_v15 ~slice_sequence:base.slice_sequence
+    ~start_at:base.start_at ~end_at:base.end_at ~available_at:base.available_at
+    ~received_at:base.received_at ~bars:base.bars ~fx_rates:base.fx_rates
+    ~corporate_actions:base.corporate_actions
+    ~borrow_observations:base.borrow_observations
+    ~cash_rate_observations:base.cash_rate_observations
+    ~settlement_failures:base.settlement_failures
+    ~lifecycle_events:base.lifecycle_events ~market_events:[]
+    ~order_book_events:events
+  |> ok
+
+let order_book_execution ?(max_depth_levels = 10) () =
+  let fees = conservative_execution () |> T.Execution.fee_schedules in
+  T.Execution.create_order_book ~participation_bps:10_000 ~fee_schedules:fees
+    ~max_depth_levels
+  |> ok
+
 let liquidity_name = function
   | T.Fee_schedule.Maker -> "maker"
   | Taker -> "taker"
@@ -237,6 +300,337 @@ let quote_trade_stop_and_event_boundaries () =
           ~instruments:[ instrument () ]
           ~oms
           (quote_trade_slice [ old_event ])))
+
+let order_book_walks_depth_and_rejects_inconsistent_updates () =
+  let oms, order = oms_with_order (request ()) in
+  let snapshot =
+    book_snapshot ~asks:[ book_level "101" "4"; book_level "102" "6" ] ()
+  in
+  let cursor =
+    T.Execution.start_slice_order_book (order_book_execution ())
+      ~instruments:[ instrument () ]
+      ~oms
+      (order_book_slice [ snapshot ])
+    |> ok
+  in
+  let first, advance =
+    match T.Execution.next cursor ~oms |> ok with
+    | T.Execution.Proposed (proposal, advance) -> (proposal, advance)
+    | _ -> Alcotest.fail "best ask did not produce a fill"
+  in
+  Alcotest.check quantity_testable "first level quantity" (quantity "4")
+    first.quantity;
+  Alcotest.check price_testable "best ask first" (price "101") first.price;
+  Alcotest.(check bool)
+    "over-consumption rejected" true
+    (Result.is_error (advance (quantity "5")));
+  Alcotest.(check bool)
+    "negative application rejected" true
+    (Result.is_error (advance (quantity "-1")));
+  Alcotest.(check bool)
+    "off-lot application rejected" true
+    (Result.is_error (advance (quantity "0.5")));
+  let cursor = advance first.quantity |> ok in
+  let applied =
+    fill ~quantity_value:"4" ~price_value:"101" ~executed_at:first.executed_at
+      order
+  in
+  let oms, _ = T.Oms.apply_fill oms applied |> ok in
+  (match T.Execution.next cursor ~oms |> ok with
+  | T.Execution.Proposed (second, _) ->
+      Alcotest.check quantity_testable "second level quantity" (quantity "6")
+        second.quantity;
+      Alcotest.check price_testable "second ask follows" (price "102")
+        second.price
+  | _ -> Alcotest.fail "second ask did not produce a fill");
+  let fok_oms, _ =
+    oms_with_order
+      (request_v8 ~kind:T.Order.Market ~time_in_force:T.Order.Fok ())
+  in
+  let fok_cursor =
+    T.Execution.start_slice_order_book (order_book_execution ())
+      ~instruments:[ instrument () ]
+      ~oms:fok_oms
+      (order_book_slice [ snapshot ])
+    |> ok
+  in
+  (match T.Execution.next fok_cursor ~oms:fok_oms |> ok with
+  | T.Execution.Proposed (proposal, _) ->
+      Alcotest.check quantity_testable "FOK sees total book depth"
+        (quantity "4") proposal.quantity
+  | _ -> Alcotest.fail "FOK ignored sufficient multi-level depth");
+  let rejected events depth =
+    Result.is_error
+      (T.Execution.start_slice_order_book
+         (order_book_execution ~max_depth_levels:depth ())
+         ~instruments:[ instrument () ]
+         ~oms (order_book_slice events))
+  in
+  Alcotest.(check bool)
+    "sequence gap rejected" true
+    (rejected [ book_snapshot (); book_set ~sequence:3L () ] 10);
+  Alcotest.(check bool)
+    "missing delete rejected" true
+    (rejected [ book_snapshot (); book_delete ~price_value:"98" () ] 10);
+  Alcotest.(check bool)
+    "ask delete is applied" true
+    (Result.is_ok
+       (T.Execution.start_slice_order_book (order_book_execution ())
+          ~instruments:[ instrument () ]
+          ~oms:T.Oms.empty
+          (order_book_slice
+             [
+               book_snapshot ();
+               book_delete ~side:T.Order_book_event.Ask ~price_value:"101" ();
+             ])));
+  Alcotest.(check bool)
+    "crossing update rejected" true
+    (rejected [ book_snapshot (); book_set ~price_value:"102" () ] 10);
+  Alcotest.(check bool)
+    "depth cap rejected" true
+    (rejected
+       [ book_snapshot ~bids:[ book_level "99" "1"; book_level "98" "1" ] () ]
+       1);
+  Alcotest.(check bool)
+    "update before snapshot rejected" true
+    (rejected [ book_set () ] 10);
+  Alcotest.(check bool)
+    "duplicate snapshot rejected" true
+    (rejected [ book_snapshot (); book_snapshot ~sequence:2L ~second:2 () ] 10);
+  Alcotest.(check bool)
+    "trade beyond displayed depth rejected" true
+    (rejected
+       [
+         book_snapshot ~bids:[ book_level "99" "2" ] ();
+         book_trade ~quantity_value:"3" ();
+       ]
+       10);
+  let sell_oms, _ = oms_with_order (request ~side:T.Order.Sell ()) in
+  let sell_cursor =
+    T.Execution.start_slice_order_book (order_book_execution ())
+      ~instruments:[ instrument () ]
+      ~oms:sell_oms
+      (order_book_slice
+         [ book_snapshot ~bids:[ book_level "99" "4"; book_level "98" "6" ] () ])
+    |> ok
+  in
+  (match T.Execution.next sell_cursor ~oms:sell_oms |> ok with
+  | T.Execution.Proposed (proposal, advance) -> (
+      Alcotest.check price_testable "sell walks best bid first" (price "99")
+        proposal.price;
+      let cursor = advance proposal.quantity |> ok in
+      let sell_order = T.Oms.find sell_oms proposal.order_id |> Option.get in
+      let applied =
+        fill ~quantity_value:"4" ~price_value:"99"
+          ~executed_at:proposal.executed_at sell_order
+      in
+      let sell_oms, _ = T.Oms.apply_fill sell_oms applied |> ok in
+      match T.Execution.next cursor ~oms:sell_oms |> ok with
+      | T.Execution.Proposed (next, _) ->
+          Alcotest.check price_testable "sell consumes next bid" (price "98")
+            next.price
+      | _ -> Alcotest.fail "second bid did not produce a sell fill")
+  | _ -> Alcotest.fail "best bid did not produce a sell fill");
+  let added_oms, _ =
+    oms_with_order (request ~kind:(T.Order.Limit (price "102")) ())
+  in
+  let added_cursor =
+    T.Execution.start_slice_order_book (order_book_execution ())
+      ~instruments:[ instrument () ]
+      ~oms:added_oms
+      (order_book_slice
+         [
+           book_snapshot ~asks:[ book_level "105" "10" ] ();
+           book_set ~side:T.Order_book_event.Ask ~price_value:"101"
+             ~quantity_value:"3" ();
+         ])
+    |> ok
+  in
+  (match T.Execution.next added_cursor ~oms:added_oms |> ok with
+  | T.Execution.Proposed (proposal, advance) -> (
+      Alcotest.check quantity_testable "added ask is bounded" (quantity "3")
+        proposal.quantity;
+      Alcotest.check price_testable "added ask becomes marketable" (price "101")
+        proposal.price;
+      let cursor = advance (quantity "2") |> ok in
+      let added_order = T.Oms.find added_oms proposal.order_id |> Option.get in
+      let applied =
+        fill ~quantity_value:"2" ~price_value:"101"
+          ~executed_at:proposal.executed_at added_order
+      in
+      let added_oms, _ = T.Oms.apply_fill added_oms applied |> ok in
+      match T.Execution.next cursor ~oms:added_oms |> ok with
+      | T.Execution.Proposed (remainder, _) ->
+          Alcotest.check quantity_testable "added ask remainder" (quantity "1")
+            remainder.quantity
+      | _ -> Alcotest.fail "added ask remainder did not execute")
+  | _ -> Alcotest.fail "added ask did not produce a fill");
+  let passive_sell_oms, _ =
+    oms_with_order
+      (request ~side:T.Order.Sell ~kind:(T.Order.Limit (price "101")) ())
+  in
+  let buy_trade_cursor =
+    T.Execution.start_slice_order_book (order_book_execution ())
+      ~instruments:[ instrument () ]
+      ~oms:passive_sell_oms
+      (order_book_slice
+         [
+           book_snapshot ~asks:[ book_level "101" "5" ] ();
+           book_trade ~aggressor_side:T.Market_event.Buy ~price_value:"101"
+             ~quantity_value:"2" ();
+         ])
+    |> ok
+  in
+  (match T.Execution.next buy_trade_cursor ~oms:passive_sell_oms |> ok with
+  | T.Execution.Finished _ -> ()
+  | _ -> Alcotest.fail "buy trade should remain behind displayed ask queue");
+  let unknown_trade_cursor =
+    T.Execution.start_slice_order_book (order_book_execution ())
+      ~instruments:[ instrument () ]
+      ~oms:T.Oms.empty
+      (order_book_slice
+         [
+           book_snapshot ();
+           book_trade ~aggressor_side:T.Market_event.Unknown
+             ~quantity_value:"100" ();
+         ])
+  in
+  Alcotest.(check bool)
+    "unknown trade does not consume book" true
+    (Result.is_ok unknown_trade_cursor);
+  let triggered_stop side trigger =
+    let oms, order =
+      oms_with_order
+        (request_v8 ~side
+           ~kind:(T.Order.Stop (price trigger))
+           ~time_in_force:T.Order.Gtc ())
+    in
+    let cursor =
+      T.Execution.start_slice_order_book (order_book_execution ())
+        ~instruments:[ instrument () ]
+        ~oms
+        (order_book_slice [ book_snapshot () ])
+      |> ok
+    in
+    match T.Execution.next cursor ~oms |> ok with
+    | T.Execution.Triggered (order_id, triggered_at, 2L, _) ->
+        Alcotest.(check string)
+          "order-book stop identity"
+          (T.Id.Order.to_string order.id)
+          (T.Id.Order.to_string order_id);
+        Alcotest.(check string)
+          "order-book stop event time" "2026-01-03T14:30:01.000000Z"
+          (T.Codec.ptime_to_string triggered_at)
+    | _ -> Alcotest.fail "order-book snapshot did not trigger stop"
+  in
+  triggered_stop T.Order.Buy "100";
+  triggered_stop T.Order.Sell "100";
+  let waiting_stop_oms, _ =
+    oms_with_order
+      (request_v8
+         ~kind:(T.Order.Stop (price "200"))
+         ~time_in_force:T.Order.Gtc ())
+  in
+  let waiting_stop_cursor =
+    T.Execution.start_slice_order_book (order_book_execution ())
+      ~instruments:[ instrument () ]
+      ~oms:waiting_stop_oms
+      (order_book_slice [ book_snapshot () ])
+    |> ok
+  in
+  (match T.Execution.next waiting_stop_cursor ~oms:waiting_stop_oms |> ok with
+  | T.Execution.Finished _ -> ()
+  | _ -> Alcotest.fail "untriggered order-book stop should remain dormant");
+  let shallow_fok_oms, _ =
+    oms_with_order
+      (request_v8 ~kind:T.Order.Market ~time_in_force:T.Order.Fok ())
+  in
+  let shallow_fok_cursor =
+    T.Execution.start_slice_order_book (order_book_execution ())
+      ~instruments:[ instrument () ]
+      ~oms:shallow_fok_oms
+      (order_book_slice [ book_snapshot ~asks:[ book_level "101" "3" ] () ])
+    |> ok
+  in
+  (match T.Execution.next shallow_fok_cursor ~oms:shallow_fok_oms |> ok with
+  | T.Execution.Finished _ -> ()
+  | _ -> Alcotest.fail "FOK should reject insufficient order-book depth");
+  Alcotest.(check bool)
+    "book model requires book configuration" true
+    (Result.is_error
+       (T.Execution.start_slice_order_book (quote_trade_execution ())
+          ~instruments:[ instrument () ]
+          ~oms:T.Oms.empty
+          (order_book_slice [ book_snapshot () ])));
+  Alcotest.(check bool)
+    "unknown book instrument rejected" true
+    (Result.is_error
+       (T.Execution.start_slice_order_book (order_book_execution ())
+          ~instruments:[ instrument ~id:"other" () ]
+          ~oms:T.Oms.empty
+          (order_book_slice [ book_snapshot () ])));
+  Alcotest.(check bool)
+    "snapshot coverage must be complete" true
+    (Result.is_error
+       (T.Execution.start_slice_order_book (order_book_execution ())
+          ~instruments:[ instrument (); instrument ~id:"other" () ]
+          ~oms:T.Oms.empty
+          (order_book_slice [ book_snapshot () ])));
+  Alcotest.(check bool)
+    "off-tick book level rejected" true
+    (Result.is_error
+       (T.Execution.start_slice_order_book (order_book_execution ())
+          ~instruments:[ instrument ~tick_size:"1" () ]
+          ~oms:T.Oms.empty
+          (order_book_slice
+             [
+               book_snapshot
+                 ~bids:[ book_level "99.5" "2" ]
+                 ~asks:[ book_level "101" "2" ]
+                 ();
+             ])));
+  Alcotest.(check bool)
+    "off-lot book level rejected" true
+    (Result.is_error
+       (T.Execution.start_slice_order_book (order_book_execution ())
+          ~instruments:[ instrument ~lot_size:"2" () ]
+          ~oms:T.Oms.empty
+          (order_book_slice
+             [
+               book_snapshot
+                 ~bids:[ book_level "99" "1" ]
+                 ~asks:[ book_level "101" "2" ]
+                 ();
+             ])));
+  let old_at = timestamp "2026-01-02T14:30:00Z" in
+  let old_snapshot =
+    T.Order_book_event.snapshot
+      ~instrument_id:(instrument_id "test-equity")
+      ~event_at:old_at ~available_at:old_at ~received_at:old_at
+      ~ingest_sequence:1L ~book_sequence:1L
+      ~bids:[ book_level "99" "1" ]
+      ~asks:[ book_level "101" "1" ]
+    |> ok
+  in
+  Alcotest.(check bool)
+    "book event outside slice rejected" true
+    (Result.is_error
+       (T.Execution.start_slice_order_book (order_book_execution ())
+          ~instruments:[ instrument () ]
+          ~oms:T.Oms.empty
+          (order_book_slice [ old_snapshot ])));
+  Alcotest.(check bool)
+    "order-book depth must be positive" true
+    (Result.is_error
+       (T.Execution.create_order_book ~participation_bps:10_000
+          ~fee_schedules:(T.Execution.fee_schedules (conservative_execution ()))
+          ~max_depth_levels:0));
+  Alcotest.(check bool)
+    "order-book depth is capped" true
+    (Result.is_error
+       (T.Execution.create_order_book ~participation_bps:10_000
+          ~fee_schedules:(T.Execution.fee_schedules (conservative_execution ()))
+          ~max_depth_levels:1025))
 
 let conservative_limit_models_diverge () =
   let engine = conservative_execution () in
@@ -869,6 +1263,8 @@ let tests =
       quote_trade_limits_fok_and_continuations;
     Alcotest.test_case "quote replay stops and boundaries" `Quick
       quote_trade_stop_and_event_boundaries;
+    Alcotest.test_case "order book walks depth and rejects inconsistent updates"
+      `Quick order_book_walks_depth_and_rejects_inconsistent_updates;
     Alcotest.test_case "conservative limit models diverge" `Quick
       conservative_limit_models_diverge;
     Alcotest.test_case "conservative costs are attributed" `Quick
