@@ -162,7 +162,7 @@ let engine_config_v8 ?(risk = risk ()) ?(venue_calendars = []) ?execution_model
     Option.value execution_model
       ~default:(T.Execution_model.find "completed_bar_v1" |> ok)
   in
-  T.Engine.config_v8 ~contract_version:T.Contract.version ~risk ~venue_calendars
+  T.Engine.config_v8 ~contract_version:"8" ~risk ~venue_calendars
     ~execution_model ~execution ~max_internal_events
   |> ok
 

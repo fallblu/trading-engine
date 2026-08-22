@@ -1,0 +1,16 @@
+(install
+ (section share)
+ (package trading_engine)
+ (files
+  (journal.schema.json as contracts/v9/journal.schema.json)
+  (scenario-stream.schema.json as contracts/v9/scenario-stream.schema.json)
+  (scenario.schema.json as contracts/v9/scenario.schema.json)
+  (fixtures/demo.journal.jsonl as contracts/v9/fixtures/demo.journal.jsonl)
+  (fixtures/demo.scenario.json as contracts/v9/fixtures/demo.scenario.json)
+  (fixtures/demo.scenario.jsonl as contracts/v9/fixtures/demo.scenario.jsonl)
+  (fixtures/fill-clipped.journal.jsonl
+   as
+   contracts/v9/fixtures/fill-clipped.journal.jsonl)
+  (fixtures/fill-clipped.scenario.json
+   as
+   contracts/v9/fixtures/fill-clipped.scenario.json)))

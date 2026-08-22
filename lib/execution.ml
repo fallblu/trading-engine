@@ -1,10 +1,16 @@
-type t = { participation_bps : int; fixed_fee : Scalar.Money.t; fee_bps : int }
+type fee_configuration =
+  | Legacy of { fixed_fee : Scalar.Money.t; fee_bps : int }
+  | Schedules of Fee_schedule.t Id.Instrument.Map.t
+
+type t = { participation_bps : int; fee_configuration : fee_configuration }
 
 type proposed_fill = {
   order_id : Id.Order.t;
   quantity : Scalar.Quantity.t;
   price : Scalar.Price.t;
   fee : Scalar.Money.t;
+  fee_components : Fee_schedule.calculated_component list;
+  liquidity : Fee_schedule.liquidity;
   executed_at : Ptime.t;
 }
 
@@ -32,30 +38,86 @@ let create ~participation_bps ~fixed_fee ~fee_bps =
     Error "fixed fee must be nonnegative"
   else if fee_bps < 0 || fee_bps > 10_000 then
     Error "fee basis points must be between 0 and 10000"
-  else Ok { participation_bps; fixed_fee; fee_bps }
+  else
+    Ok { participation_bps; fee_configuration = Legacy { fixed_fee; fee_bps } }
+
+let create_v2 ~participation_bps ~fee_schedules =
+  if participation_bps < 0 || participation_bps > 10_000 then
+    Error "participation basis points must be between 0 and 10000"
+  else
+    let add result schedule =
+      let ( let* ) result function_ =
+        match result with
+        | Ok value -> function_ value
+        | Error _ as error -> error
+      in
+      let* schedules = result in
+      let instrument_id = Fee_schedule.instrument_id schedule in
+      if Id.Instrument.Map.mem instrument_id schedules then
+        Error "fee schedules must have unique instrument IDs"
+      else Ok (Id.Instrument.Map.add instrument_id schedule schedules)
+    in
+    Result.map
+      (fun schedules ->
+        { participation_bps; fee_configuration = Schedules schedules })
+      (List.fold_left add (Ok Id.Instrument.Map.empty) fee_schedules)
 
 let participation_bps state = state.participation_bps
-let fixed_fee state = state.fixed_fee
-let fee_bps state = state.fee_bps
+
+let fixed_fee state =
+  match state.fee_configuration with
+  | Legacy { fixed_fee; _ } -> fixed_fee
+  | Schedules _ -> Scalar.Money.zero
+
+let fee_bps state =
+  match state.fee_configuration with
+  | Legacy { fee_bps; _ } -> fee_bps
+  | Schedules _ -> 0
+
+let fee_schedules state =
+  match state.fee_configuration with
+  | Legacy _ -> []
+  | Schedules schedules -> Id.Instrument.Map.bindings schedules |> List.map snd
+
+let calculate_fee state ~instrument ~notional ~quantity ~liquidity ~fx_rates =
+  match state.fee_configuration with
+  | Legacy { fixed_fee; fee_bps } ->
+      let ( let* ) result function_ =
+        match result with
+        | Ok value -> function_ value
+        | Error _ as error -> error
+      in
+      let* fee = Scalar.Money.fee ~fixed:fixed_fee ~bps:fee_bps ~notional in
+      Ok ([], fee)
+  | Schedules schedules -> (
+      match Id.Instrument.Map.find_opt instrument.Instrument.id schedules with
+      | None -> Error "execution instrument has no configured fee schedule"
+      | Some schedule ->
+          Fee_schedule.calculate schedule
+            ~quote_currency:instrument.quote_currency ~notional ~quantity
+            ~liquidity ~fx_rates)
 
 let execution_price order market_slice bar =
   match Order.effective_kind order with
   | None -> None
   | Some Order.Market ->
-      Some (bar.Bar.open_price, market_slice.Market_slice.start_at)
+      Some
+        ( bar.Bar.open_price,
+          market_slice.Market_slice.start_at,
+          Fee_schedule.Taker )
   | Some (Order.Limit limit) -> (
       match order.request.side with
       | Order.Buy ->
           if Scalar.Price.compare bar.open_price limit <= 0 then
-            Some (bar.open_price, market_slice.start_at)
+            Some (bar.open_price, market_slice.start_at, Fee_schedule.Taker)
           else if Scalar.Price.compare bar.low_price limit <= 0 then
-            Some (limit, market_slice.end_at)
+            Some (limit, market_slice.end_at, Fee_schedule.Maker)
           else None
       | Order.Sell ->
           if Scalar.Price.compare bar.open_price limit >= 0 then
-            Some (bar.open_price, market_slice.start_at)
+            Some (bar.open_price, market_slice.start_at, Fee_schedule.Taker)
           else if Scalar.Price.compare bar.high_price limit >= 0 then
-            Some (limit, market_slice.end_at)
+            Some (limit, market_slice.end_at, Fee_schedule.Maker)
           else None)
   | Some (Order.Stop _ | Order.Stop_limit _) -> None
 
@@ -218,7 +280,7 @@ let start_slice state ~instruments ~oms (market_slice : Market_slice.t) =
           | None ->
               let (Cursor next) = make_cursor capacities remaining in
               next current_oms
-          | Some (price, executed_at) ->
+          | Some (price, executed_at, liquidity) ->
               let quantity =
                 available_quantity capacity (Order.remaining_quantity order)
               in
@@ -233,12 +295,23 @@ let start_slice state ~instruments ~oms (market_slice : Market_slice.t) =
                 next current_oms
               else
                 let* notional = Scalar.Money.notional price quantity in
-                let* fee =
-                  Scalar.Money.fee ~fixed:state.fixed_fee ~bps:state.fee_bps
-                    ~notional
+                let* fee_components, fee =
+                  calculate_fee state ~instrument ~notional ~quantity ~liquidity
+                    ~fx_rates:
+                      (List.map
+                         (fun mark -> (mark.Market_slice.currency, mark.rate))
+                         market_slice.fx_rates)
                 in
                 let proposed =
-                  { order_id = order.id; quantity; price; fee; executed_at }
+                  {
+                    order_id = order.id;
+                    quantity;
+                    price;
+                    fee;
+                    fee_components;
+                    liquidity;
+                    executed_at;
+                  }
                 in
                 let continue applied_quantity =
                   if

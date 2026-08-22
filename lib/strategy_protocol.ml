@@ -99,7 +99,9 @@ let group_kind_to_string = function
   | Risk.Custom -> "custom"
 
 let nullable render = Option.fold ~none:`Null ~some:render
-let modern_protocol protocol_version = List.mem protocol_version [ "6"; "5" ]
+
+let modern_protocol protocol_version =
+  List.mem protocol_version [ "7"; "6"; "5" ]
 
 let instrument_policy_to_yojson (policy : Risk.instrument_policy) =
   `Assoc
@@ -161,7 +163,62 @@ let risk_to_yojson ~protocol_version risk =
       ]
 
 let execution_to_yojson ~protocol_version model execution =
-  if modern_protocol protocol_version then
+  let fee_component_to_yojson component =
+    let value =
+      match Fee_schedule.component_basis component with
+      | Fee_schedule.Fixed value | Fee_schedule.Per_unit value -> money value
+      | Fee_schedule.Notional_bps value -> `Int value
+    in
+    `Assoc
+      [
+        ("name", string (Fee_schedule.component_name component));
+        ("currency", string (Fee_schedule.component_currency component));
+        ( "kind",
+          string
+            (Fee_schedule.basis_kind (Fee_schedule.component_basis component))
+        );
+        ("value", value);
+        ( "rounding",
+          string
+            (Fee_schedule.rounding_to_string
+               (Fee_schedule.component_rounding component)) );
+        ( "applies_to",
+          string
+            (Fee_schedule.applicability_to_string
+               (Fee_schedule.component_applicability component)) );
+      ]
+  in
+  let fee_schedule_to_yojson schedule =
+    `Assoc
+      [
+        ("schedule_id", string (Fee_schedule.schedule_id schedule));
+        ("instrument_id", instrument_id (Fee_schedule.instrument_id schedule));
+        ( "settlement_currency",
+          string (Fee_schedule.settlement_currency schedule) );
+        ("minimum", nullable money (Fee_schedule.minimum schedule));
+        ("maximum", nullable money (Fee_schedule.maximum schedule));
+        ( "components",
+          `List
+            (List.map fee_component_to_yojson
+               (Fee_schedule.components schedule)) );
+      ]
+  in
+  if String.equal protocol_version "7" then
+    `Assoc
+      [
+        ("model", string (Execution_model.name model));
+        ( "configuration",
+          `Assoc
+            [
+              ("version", string "2");
+              ("participation_bps", `Int (Execution.participation_bps execution));
+              ( "fee_schedules",
+                `List
+                  (List.map fee_schedule_to_yojson
+                     (Execution.fee_schedules execution)) );
+            ] );
+      ]
+  else if modern_protocol protocol_version then
     `Assoc
       [
         ("model", string (Execution_model.name model));
@@ -229,7 +286,7 @@ let initialize_message ~sequence:message_sequence initialization =
     ]
   in
   let fields =
-    if String.equal protocol_version version then
+    if List.mem protocol_version [ "7"; "6" ] then
       let initial_portfolio =
         Option.fold ~none:`Null ~some:Codec.initial_portfolio_to_yojson
           initialization.initial_portfolio
@@ -350,7 +407,7 @@ let context_to_yojson ~protocol_version context =
       ( "working_orders",
         `List
           (List.map
-             (if String.equal protocol_version version then
+             (if List.mem protocol_version [ "7"; "6" ] then
                 Codec.order_to_yojson_v8
               else Codec.order_to_yojson)
              working_orders) );
@@ -367,14 +424,18 @@ let event_to_yojson ~protocol_version = function
   | Strategy.Fill_received fill ->
       `Assoc
         [
-          ("type", string "fill_received"); ("fill", Codec.fill_to_yojson fill);
+          ("type", string "fill_received");
+          ( "fill",
+            if String.equal protocol_version "7" then
+              Codec.fill_to_yojson_v9 fill
+            else Codec.fill_to_yojson fill );
         ]
   | Strategy.Order_updated order ->
       `Assoc
         [
           ("type", string "order_updated");
           ( "order",
-            if String.equal protocol_version version then
+            if List.mem protocol_version [ "7"; "6" ] then
               Codec.order_to_yojson_v8 order
             else Codec.order_to_yojson order );
         ]
@@ -462,7 +523,9 @@ let parse_intents_payload ~protocol_version json =
           let* intent =
             Scenario.intent_of_yojson
               ~contract_version:
-                (if String.equal protocol_version version then "8" else "7")
+                (if String.equal protocol_version "7" then "9"
+                 else if String.equal protocol_version "6" then "8"
+                 else "7")
               value
             |> Result.map_error Diagnostic.to_human
           in
