@@ -26,6 +26,9 @@ Run the complete local gate before committing:
 make check
 ```
 
+The gate includes the fixed protocol-fuzzing smoke corpus. For longer deterministic
+campaigns and reproduction controls, see [Protocol fuzzing](docs/fuzzing.md).
+
 The gate formats a copy check, builds every target, and runs all tests. Keep commits small,
 coherent, and working. Use subject-only conventional commit messages such as
 `feat: implement deterministic order matching`.

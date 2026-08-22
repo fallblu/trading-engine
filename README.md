@@ -218,5 +218,6 @@ do not provide reducer snapshots or restart recovery.
 - [Strategy transcript JSON Schema](contracts/strategy/v3/transcript.schema.json)
 - [Execution model](docs/execution-model.md)
 - [Performance](docs/performance.md)
+- [Protocol fuzzing](docs/fuzzing.md)
 - [Persistra integration](docs/persistra.md)
 - [Contributing](CONTRIBUTING.md)
