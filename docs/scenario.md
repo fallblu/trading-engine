@@ -4,8 +4,8 @@ A replay scenario uses either one strict JSON object or a strict JSON Lines stre
 weights, quantities, money, and sequences are canonical JSON strings. Counts and basis points are
 JSON integers. Unknown, missing, duplicate, noncanonical, and non-finite values fail parsing.
 
-Use [the v8 demo](../contracts/v8/fixtures/demo.scenario.json) as the canonical complete example.
-The [scenario JSON Schema](../contracts/v8/scenario.schema.json) provides structural validation.
+Use [the v9 demo](../contracts/v9/fixtures/demo.scenario.json) as the canonical complete example.
+The [scenario JSON Schema](../contracts/v9/scenario.schema.json) provides structural validation.
 The engine parser also enforces cross-field and cross-record invariants. Diagnostics identify the
 failed field or array item. Stream diagnostics additionally retain the record line and sequence.
 
@@ -32,8 +32,8 @@ The batch object and stream header share one domain-construction path and the sa
 checks. Stream items reuse the batch slice and intent validators directly; no synthetic batch
 scenario is constructed.
 
-The [stream record JSON Schema](../contracts/v8/scenario-stream.schema.json) validates each line,
-and [the v8 stream fixture](../contracts/v8/fixtures/demo.scenario.jsonl) is the canonical example.
+The [stream record JSON Schema](../contracts/v9/scenario-stream.schema.json) validates each line,
+and [the v9 stream fixture](../contracts/v9/fixtures/demo.scenario.jsonl) is the canonical example.
 The engine validates the entire stream before creating a journal. It then replays one record at a
 time without retaining prior slices, scheduled batches, or audit events. Reducer state still
 retains current account, order, target, and latest-bar state required by execution semantics.
@@ -42,7 +42,7 @@ retains current account, order, target, and latest-bar state required by executi
 
 | Field | Meaning |
 |---|---|
-| `contract_version` | Required string identifying this file contract; v7 is `"7"` |
+| `contract_version` | Required string identifying this file contract; v9 is `"9"` |
 | `metadata` | Required arbitrary JSON object preserved for provenance and ignored by execution |
 | `run_id` | Stable identity used in generated IDs |
 | `base_currency` | Reporting currency used for aggregate risk and valuation |
@@ -110,17 +110,23 @@ they may overlap and can constrain gross, long, short, absolute net, and gross-t
 concentration exposure. Admission and fill clipping include working-order reservations. Every
 applicable group is enforced, with group identity providing deterministic tie ordering.
 
-Contract v7 execution contains a stable `model` and a model-owned `configuration`. For
-`completed_bar_v1`, configuration version `"1"` contains:
+Contract v9 execution contains a stable `model` and a model-owned `configuration`. For
+`completed_bar_v1`, configuration version `"2"` contains:
 
 - `version`, the strict model-configuration contract version
 - `participation_bps`, from 0 through 10,000
-- `fixed_fee`, a nonnegative money string
-- `fee_bps`, from 0 through 10,000
+- `fee_schedules`, exactly one schedule per instrument. Each schedule has a stable ID, instrument,
+  settlement currency, nullable minimum and maximum, and one or more named components.
+
+Each component declares `currency`, `kind` (`fixed`, `notional_bps`, or `per_unit`), a signed
+`value`, `rounding` (`up`, `down`, or `nearest`), and `applies_to` (`any`, `maker`, or `taker`).
+Signed values permit rebates. Minimums and maximums are nonnegative and apply per fill after the
+component values are converted into the settlement currency.
 
 The engine advertises each model's scenario and configuration versions, required fields, supported
 order types, data requirements, and limits through `--capabilities.execution_model_contracts`. The
-v3 and v4 scenario contracts preserve their flat execution object unchanged; v5 remains frozen.
+v8 and earlier contracts retain completed-bar configuration version `"1"`; v3 and v4 preserve
+their flat execution object unchanged.
 
 ## Schedule and intents
 
@@ -214,7 +220,7 @@ than the next slice `start_at`.
 
 ## Audit journal
 
-The [journal JSON Schema](../contracts/v8/journal.schema.json) validates each JSON Lines record.
+The [journal JSON Schema](../contracts/v9/journal.schema.json) validates each JSON Lines record.
 Every record contains `contract_version`, `engine_sequence`, deterministic `event_id`, ordered
 `causation_ids`, `run_id`, `recorded_at`, `event_type`, and an event-specific `payload`. Causal
 references are unique prior event IDs from the same run. The version is repeated on every record

@@ -23,7 +23,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_EXECUTABLE = ROOT / "_build/default/bin/main.exe"
 DEFAULT_BASELINE = ROOT / "bench/baselines/linux-x86_64.json"
-FIXTURE = ROOT / "contracts/v8/fixtures/demo.scenario.json"
+FIXTURE = ROOT / "contracts/v9/fixtures/demo.scenario.json"
 STRATEGY = ROOT / "bench/latency_strategy.py"
 SUMMARY_PATTERN = re.compile(
     r"\baudits=(?P<audits>[0-9]+).*\bactive=(?P<active>[0-9]+)"

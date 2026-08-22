@@ -114,15 +114,15 @@ let capabilities_describe_execution_contracts () =
     | _ -> Alcotest.fail (name ^ " must be an array")
   in
   Alcotest.(check (list string))
-    "configuration versions" [ "1" ]
+    "configuration versions" [ "2"; "1" ]
     (strings "configuration_versions");
   Alcotest.(check (list string))
     "scenario contracts"
-    [ "8"; "7"; "6"; "5"; "4"; "3" ]
+    [ "9"; "8"; "7"; "6"; "5"; "4"; "3" ]
     (strings "scenario_contract_versions");
   Alcotest.(check (list string))
     "required fields"
-    [ "version"; "participation_bps"; "fixed_fee"; "fee_bps" ]
+    [ "version"; "participation_bps"; "fee_schedules" ]
     (strings "required_fields");
   Alcotest.(check (list string))
     "order types"

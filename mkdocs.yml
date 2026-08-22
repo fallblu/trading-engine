@@ -29,14 +29,14 @@ nav:
       - Diagnostics:
           - Current v1: contracts/diagnostic/v1/README.md
       - Scenario and journal:
-          - Current v8: contracts/v8/README.md
+          - Current v9: contracts/v9/README.md
           - Transitional v5: contracts/v5/README.md
           - Transitional v4: contracts/v4/README.md
           - Transitional v3: contracts/v3/README.md
           - Frozen v2: contracts/v2/README.md
           - Historical v1: contracts/v1/README.md
       - External strategy:
-          - Current v6: contracts/strategy/v6/README.md
+          - Current v7: contracts/strategy/v7/README.md
           - Historical v3: contracts/strategy/v3/README.md
           - Historical v2: contracts/strategy/v2/README.md
           - Historical v1: contracts/strategy/v1/README.md

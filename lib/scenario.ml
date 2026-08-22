@@ -550,7 +550,7 @@ let parse_v7_risk base_currency instruments json =
     ~max_gross_exposure ~max_leverage ~short_borrow_bps
 
 let parse_risk ~contract_version base_currency instruments json =
-  if List.mem contract_version [ "8"; "7" ] then
+  if List.mem contract_version [ "9"; "8"; "7" ] then
     parse_v7_risk base_currency instruments json
   else parse_legacy_risk base_currency instruments json
 
@@ -564,6 +564,118 @@ let parse_execution_values fields =
   let* fee_json = field fields "fee_bps" in
   let* fee_bps = integer ~name:"fee_bps" fee_json in
   Execution.create ~participation_bps ~fixed_fee ~fee_bps
+
+let parse_fee_component json =
+  let* fields =
+    object_fields ~name:"fee component"
+      ~expected:
+        [ "name"; "currency"; "kind"; "value"; "rounding"; "applies_to" ]
+      json
+  in
+  let* name_json = field fields "name" in
+  let* name = string ~name:"fee component name" name_json in
+  let* currency_json = field fields "currency" in
+  let* currency = string ~name:"fee component currency" currency_json in
+  let* kind_json = field fields "kind" in
+  let* kind = string ~name:"fee component kind" kind_json in
+  let* value = field fields "value" in
+  let* basis =
+    match kind with
+    | "fixed" ->
+        Result.map
+          (fun value -> Fee_schedule.Fixed value)
+          (parse_money ~name:"fixed fee value" value)
+    | "notional_bps" ->
+        Result.map
+          (fun value -> Fee_schedule.Notional_bps value)
+          (integer ~name:"notional fee basis points" value)
+    | "per_unit" ->
+        Result.map
+          (fun value -> Fee_schedule.Per_unit value)
+          (parse_money ~name:"per-unit fee value" value)
+    | value -> Error (Printf.sprintf "unsupported fee component kind %S" value)
+  in
+  let* rounding_json = field fields "rounding" in
+  let* rounding_name = string ~name:"fee rounding" rounding_json in
+  let* rounding = Fee_schedule.rounding_of_string rounding_name in
+  let* applicability_json = field fields "applies_to" in
+  let* applicability_name =
+    string ~name:"fee applicability" applicability_json
+  in
+  let* applicability =
+    Fee_schedule.applicability_of_string applicability_name
+  in
+  Fee_schedule.create_component ~name ~currency ~basis ~rounding ~applicability
+
+let parse_optional_money ~name = function
+  | `Null -> Ok None
+  | json -> Result.map Option.some (parse_money ~name json)
+
+let parse_fee_schedule instrument_ids json =
+  let* fields =
+    object_fields ~name:"fee schedule"
+      ~expected:
+        [
+          "schedule_id";
+          "instrument_id";
+          "settlement_currency";
+          "minimum";
+          "maximum";
+          "components";
+        ]
+      json
+  in
+  let* schedule_id_json = field fields "schedule_id" in
+  let* schedule_id = string ~name:"fee schedule ID" schedule_id_json in
+  let* instrument_id_json = field fields "instrument_id" in
+  let* instrument_id =
+    parse_id Id.Instrument.of_string ~name:"fee schedule instrument_id"
+      instrument_id_json
+  in
+  let* () =
+    if Id.Instrument.Set.mem instrument_id instrument_ids then Ok ()
+    else Error "fee schedule refers to an unknown instrument"
+  in
+  let* settlement_currency_json = field fields "settlement_currency" in
+  let* settlement_currency =
+    string ~name:"fee settlement currency" settlement_currency_json
+  in
+  let* minimum_json = field fields "minimum" in
+  let* minimum = parse_optional_money ~name:"fee minimum" minimum_json in
+  let* maximum_json = field fields "maximum" in
+  let* maximum = parse_optional_money ~name:"fee maximum" maximum_json in
+  let* components_value = field fields "components" in
+  let* components_json = list ~name:"fee components" components_value in
+  let* components = map_list parse_fee_component components_json in
+  Fee_schedule.create ~schedule_id ~instrument_id ~settlement_currency ~minimum
+    ~maximum ~components
+
+let parse_execution_v2 instruments fields =
+  let* participation_json = field fields "participation_bps" in
+  let* participation_bps =
+    integer ~name:"participation_bps" participation_json
+  in
+  let instrument_ids =
+    List.fold_left
+      (fun ids instrument -> Id.Instrument.Set.add instrument.Instrument.id ids)
+      Id.Instrument.Set.empty instruments
+  in
+  let* schedules_value = field fields "fee_schedules" in
+  let* schedules_json = list ~name:"fee_schedules" schedules_value in
+  let* schedules =
+    map_list (parse_fee_schedule instrument_ids) schedules_json
+  in
+  let scheduled =
+    List.map Fee_schedule.instrument_id schedules
+    |> List.sort_uniq Id.Instrument.compare
+  in
+  let expected = Id.Instrument.Set.elements instrument_ids in
+  let* () =
+    if scheduled = expected then Ok ()
+    else
+      Error "fee schedules must cover every configured instrument exactly once"
+  in
+  Execution.create_v2 ~participation_bps ~fee_schedules:schedules
 
 let parse_legacy_execution ~contract_version json =
   let* fields =
@@ -586,7 +698,7 @@ let parse_legacy_execution ~contract_version json =
   let* execution = parse_execution_values fields in
   Ok (execution_model, execution)
 
-let parse_versioned_execution ~contract_version json =
+let parse_versioned_execution ~contract_version ~instruments json =
   let* fields =
     object_fields ~name:"execution" ~expected:[ "model"; "configuration" ] json
   in
@@ -603,28 +715,35 @@ let parse_versioned_execution ~contract_version json =
            contract_version)
   in
   let* configuration_json = field fields "configuration" in
-  let expected =
-    (Execution_model.configuration_contract execution_model).required_fields
+  let* loose_fields =
+    match configuration_json with
+    | `Assoc fields -> Ok fields
+    | _ -> Error (model_name ^ " execution configuration must be a JSON object")
   in
+  let* version_json = field loose_fields "version" in
+  let* version = string ~name:"execution configuration version" version_json in
+  let* expected = Execution_model.required_fields execution_model version in
   let* configuration =
     object_fields
       ~name:(model_name ^ " execution configuration")
       ~expected configuration_json
   in
-  let* version_json = field configuration "version" in
-  let* version = string ~name:"execution configuration version" version_json in
   if not (Execution_model.supports_configuration execution_model version) then
     Error
       (Printf.sprintf
          "unsupported execution configuration version %S for model %S" version
          model_name)
   else
-    let* execution = parse_execution_values configuration in
+    let* execution =
+      if String.equal version "2" then
+        parse_execution_v2 instruments configuration
+      else parse_execution_values configuration
+    in
     Ok (execution_model, execution)
 
-let parse_execution ~contract_version json =
-  if List.mem contract_version [ "8"; "7"; "6"; "5" ] then
-    parse_versioned_execution ~contract_version json
+let parse_execution ~contract_version ~instruments json =
+  if List.mem contract_version [ "9"; "8"; "7"; "6"; "5" ] then
+    parse_versioned_execution ~contract_version ~instruments json
   else parse_legacy_execution ~contract_version json
 
 let parse_side json =
@@ -672,7 +791,7 @@ let parse_portfolio_intent ~name ~parse_target make json =
   Ok (make targets)
 
 let parse_submit_intent ~contract_version json =
-  let versioned = String.equal contract_version "8" in
+  let versioned = List.mem contract_version [ "9"; "8" ] in
   let* fields =
     object_fields ~name:"submit_order intent"
       ~expected:
@@ -1063,7 +1182,7 @@ let construct_header ~root ~contract_path ~contract_version
       |> at (child root "base_currency")
     in
     let* initial_cash, initial_portfolio =
-      if List.mem contract_version [ "8"; "7"; "6" ] then
+      if List.mem contract_version [ "9"; "8"; "7"; "6" ] then
         let* portfolio =
           parse_initial_portfolio ~base_currency shape.initial_state
           |> at (child root "initial_portfolio")
@@ -1120,7 +1239,7 @@ let construct_header ~root ~contract_path ~contract_version
             ~instruments ~risk portfolio
     in
     let* execution_model, execution =
-      parse_execution ~contract_version shape.execution
+      parse_execution ~contract_version ~instruments shape.execution
       |> at (child root "execution")
     in
     let header : stream_header =

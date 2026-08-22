@@ -48,7 +48,7 @@ let validate_venue_calendars ~root catalog venue_calendars =
 let header ~root ~contract_version ~base_currency ~initial_cash ~instruments
     ~venue_calendars ~max_internal_events =
   let* () =
-    if List.mem contract_version [ "8"; "7"; "6" ] then Ok ()
+    if List.mem contract_version [ "9"; "8"; "7"; "6" ] then Ok ()
     else
       Account.create ~base_currency ~initial_cash
       |> Result.map (fun _ -> ())
@@ -66,7 +66,7 @@ let header ~root ~contract_version ~base_currency ~initial_cash ~instruments
       fail ~json_path:(child root "instruments") "instrument IDs must be unique"
     else
       let* () =
-        if List.mem contract_version [ "8"; "7"; "6"; "5" ] then
+        if List.mem contract_version [ "9"; "8"; "7"; "6"; "5" ] then
           validate_venue_calendars ~root catalog venue_calendars
         else Ok ()
       in
@@ -84,7 +84,7 @@ let header ~root ~contract_version ~base_currency ~initial_cash ~instruments
         fail
           ~json_path:
             (child root
-               (if List.mem contract_version [ "8"; "7"; "6" ] then
+               (if List.mem contract_version [ "9"; "8"; "7"; "6" ] then
                   "initial_portfolio.cash"
                 else "initial_cash"))
           "initial cash must contain every scenario currency exactly once"
@@ -107,9 +107,14 @@ let initial_portfolio ~root ~currencies ~catalog ~instruments ~risk initial =
   if List.sort String.compare cash_currencies <> expected_currencies then
     fail ~json_path:(child path "cash")
       "initial cash must contain every scenario currency exactly once"
-  else if List.sort String.compare fx_currencies <> expected_currencies then
+  else if
+    not
+      (List.for_all
+         (fun currency -> List.mem currency fx_currencies)
+         expected_currencies)
+  then
     fail ~json_path:(child path "fx_rates")
-      "initial FX rates must contain every scenario currency exactly once"
+      "initial FX rates must contain every scenario currency"
   else
     let instrument_map =
       List.fold_left
@@ -358,7 +363,7 @@ let validate_slices_at ~paths ~base_currency ~currencies ~instruments slices =
         if not (Id.Instrument.Set.equal catalog ids) then
           fail ~json_path:(child root "bars")
             "each market slice must contain every configured instrument"
-        else if not (String_set.equal expected_currencies fx_currencies) then
+        else if not (String_set.subset expected_currencies fx_currencies) then
           fail ~json_path:(child root "fx_rates")
             "each market slice must contain every scenario currency FX rate"
         else if
