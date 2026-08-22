@@ -82,3 +82,11 @@ compare_journal \
   v11-fill-clipped \
   contracts/v11/fixtures/fill-clipped.scenario.json \
   contracts/v11/fixtures/fill-clipped.journal.jsonl
+compare_journal \
+  v12-demo \
+  contracts/v12/fixtures/demo.scenario.json \
+  contracts/v12/fixtures/demo.journal.jsonl
+compare_journal \
+  v12-fill-clipped \
+  contracts/v12/fixtures/fill-clipped.scenario.json \
+  contracts/v12/fixtures/fill-clipped.journal.jsonl

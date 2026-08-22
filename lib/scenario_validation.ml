@@ -48,7 +48,8 @@ let validate_venue_calendars ~root catalog venue_calendars =
 let header ~root ~contract_version ~base_currency ~initial_cash ~instruments
     ~venue_calendars ~max_internal_events =
   let* () =
-    if List.mem contract_version [ "11"; "10"; "9"; "8"; "7"; "6" ] then Ok ()
+    if List.mem contract_version [ "12"; "11"; "10"; "9"; "8"; "7"; "6" ] then
+      Ok ()
     else
       Account.create ~base_currency ~initial_cash
       |> Result.map (fun _ -> ())
@@ -66,7 +67,9 @@ let header ~root ~contract_version ~base_currency ~initial_cash ~instruments
       fail ~json_path:(child root "instruments") "instrument IDs must be unique"
     else
       let* () =
-        if List.mem contract_version [ "11"; "10"; "9"; "8"; "7"; "6"; "5" ]
+        if
+          List.mem contract_version
+            [ "12"; "11"; "10"; "9"; "8"; "7"; "6"; "5" ]
         then validate_venue_calendars ~root catalog venue_calendars
         else Ok ()
       in
@@ -84,7 +87,9 @@ let header ~root ~contract_version ~base_currency ~initial_cash ~instruments
         fail
           ~json_path:
             (child root
-               (if List.mem contract_version [ "11"; "10"; "9"; "8"; "7"; "6" ]
+               (if
+                  List.mem contract_version
+                    [ "12"; "11"; "10"; "9"; "8"; "7"; "6" ]
                 then "initial_portfolio.cash"
                 else "initial_cash"))
           "initial cash must contain every scenario currency exactly once"
@@ -327,14 +332,33 @@ let validate_slices_at ~paths ~base_currency ~currencies ~instruments slices =
           List.for_all
             (fun action ->
               Id.Instrument.Set.mem action.Corporate_action.instrument_id
-                catalog)
+                catalog
+              &&
+              match action.kind with
+              | Corporate_action.Distribution { destination_instrument_id; _ }
+                ->
+                  Id.Instrument.Set.mem destination_instrument_id catalog
+              | Split _ | Cash_dividend _ -> true)
             market_slice.corporate_actions
         in
+        let lifecycle_valid =
+          List.for_all
+            (fun (event : Instrument_lifecycle.event) ->
+              Id.Instrument.Set.mem event.instrument_id catalog)
+            market_slice.lifecycle_events
+        in
         let duplicate_action =
+          let current_ids =
+            List.map
+              (fun action -> action.Corporate_action.id)
+              market_slice.corporate_actions
+            @ List.map
+                (fun (event : Instrument_lifecycle.event) -> event.id)
+                market_slice.lifecycle_events
+          in
           List.find_opt
-            (fun action ->
-              Id.Corporate_action.Set.mem action.Corporate_action.id action_ids)
-            market_slice.corporate_actions
+            (fun id -> Id.Corporate_action.Set.mem id action_ids)
+            current_ids
         in
         let bars_aligned =
           List.for_all
@@ -378,6 +402,10 @@ let validate_slices_at ~paths ~base_currency ~currencies ~instruments slices =
           fail
             ~json_path:(child root "corporate_actions")
             "corporate action refers to an unknown instrument"
+        else if not lifecycle_valid then
+          fail
+            ~json_path:(child root "lifecycle_events")
+            "lifecycle event refers to an unknown instrument"
         else if Option.is_some duplicate_action then
           fail
             ~json_path:(child root "corporate_actions")
@@ -415,6 +443,11 @@ let validate_slices_at ~paths ~base_currency ~currencies ~instruments slices =
               (fun ids action ->
                 Id.Corporate_action.Set.add action.Corporate_action.id ids)
               action_ids market_slice.corporate_actions
+            |> fun ids ->
+            List.fold_left
+              (fun ids (event : Instrument_lifecycle.event) ->
+                Id.Corporate_action.Set.add event.id ids)
+              ids market_slice.lifecycle_events
           in
           validate (index + 1) (Some market_slice.slice_sequence)
             (Some market_slice.end_at) (Some market_slice.received_at)
@@ -516,6 +549,17 @@ let stream_item ~root ~base_currency ~instruments ~risk ~previous_slice
             "corporate action IDs must be unique across the scenario stream"
         else Ok (Id.Corporate_action.Set.add action.id ids))
       (Ok prior_action_ids) market_slice.corporate_actions
+  in
+  let* action_ids =
+    List.fold_left
+      (fun result (event : Instrument_lifecycle.event) ->
+        let* ids = result in
+        if Id.Corporate_action.Set.mem event.id ids then
+          fail
+            ~json_path:(child current_slice_path "lifecycle_events")
+            "action and lifecycle IDs must be unique across the scenario stream"
+        else Ok (Id.Corporate_action.Set.add event.id ids))
+      (Ok action_ids) market_slice.lifecycle_events
   in
   let currencies =
     base_currency

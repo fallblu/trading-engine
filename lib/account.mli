@@ -127,6 +127,33 @@ val apply_cash_dividend :
   amount_per_unit:Scalar.Money.t ->
   (t, string) result
 
+type distribution_result = {
+  source_quantity : Scalar.Quantity.t;
+  destination_quantity : Scalar.Quantity.t;
+  fractional_quantity : Scalar.Quantity.t;
+  allocated_basis : Scalar.Money.t;
+  fractional_basis : Scalar.Money.t;
+  cash_in_lieu : Scalar.Money.t;
+}
+
+val apply_distribution :
+  t ->
+  source_instrument_id:Id.Instrument.t ->
+  destination_instrument_id:Id.Instrument.t ->
+  destination_lot_size:Scalar.Quantity.t ->
+  numerator:int64 ->
+  denominator:int64 ->
+  basis_allocation_bps:int ->
+  fractional_policy:Corporate_action.fractional_policy ->
+  (t * distribution_result, string) result
+
+val cash_out_position :
+  t ->
+  instrument_id:Id.Instrument.t ->
+  currency:string ->
+  price:Scalar.Price.t ->
+  (t * Scalar.Quantity.t * Scalar.Money.t, string) result
+
 val apply_borrow_fee :
   t ->
   instrument_id:Id.Instrument.t ->

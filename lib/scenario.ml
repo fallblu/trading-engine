@@ -554,7 +554,7 @@ let parse_v7_risk base_currency instruments json =
     ~max_gross_exposure ~max_leverage ~short_borrow_bps
 
 let parse_risk ~contract_version base_currency instruments json =
-  if List.mem contract_version [ "11"; "10"; "9"; "8"; "7" ] then
+  if List.mem contract_version [ "12"; "11"; "10"; "9"; "8"; "7" ] then
     parse_v7_risk base_currency instruments json
   else parse_legacy_risk base_currency instruments json
 
@@ -746,8 +746,8 @@ let parse_versioned_execution ~contract_version ~instruments json =
     Ok (execution_model, execution)
 
 let parse_execution ~contract_version ~instruments json =
-  if List.mem contract_version [ "11"; "10"; "9"; "8"; "7"; "6"; "5" ] then
-    parse_versioned_execution ~contract_version ~instruments json
+  if List.mem contract_version [ "12"; "11"; "10"; "9"; "8"; "7"; "6"; "5" ]
+  then parse_versioned_execution ~contract_version ~instruments json
   else parse_legacy_execution ~contract_version json
 
 let parse_side json =
@@ -795,7 +795,7 @@ let parse_portfolio_intent ~name ~parse_target make json =
   Ok (make targets)
 
 let parse_submit_intent ~contract_version json =
-  let versioned = List.mem contract_version [ "11"; "10"; "9"; "8" ] in
+  let versioned = List.mem contract_version [ "12"; "11"; "10"; "9"; "8" ] in
   let* fields =
     object_fields ~name:"submit_order intent"
       ~expected:
@@ -1115,7 +1115,197 @@ let parse_corporate_action json =
       let* amount_json = field fields "amount_per_unit" in
       let* amount_per_unit = parse_money ~name:"amount_per_unit" amount_json in
       Corporate_action.cash_dividend ~id ~instrument_id ~amount_per_unit
+  | ("stock_dividend" | "rights" | "spin_off") as distribution_name ->
+      let* () =
+        object_fields ~name:"distribution corporate action"
+          ~expected:
+            [
+              "type";
+              "action_id";
+              "instrument_id";
+              "destination_instrument_id";
+              "numerator";
+              "denominator";
+              "basis_allocation_bps";
+              "fractional_policy";
+            ]
+          json
+        |> Result.map (fun _ -> ())
+      in
+      let* destination_json = field fields "destination_instrument_id" in
+      let* destination_instrument_id =
+        parse_id Id.Instrument.of_string ~name:"destination_instrument_id"
+          destination_json
+      in
+      let* numerator =
+        Result.bind (field fields "numerator")
+          (parse_int64 ~name:"distribution numerator")
+      in
+      let* denominator =
+        Result.bind
+          (field fields "denominator")
+          (parse_int64 ~name:"distribution denominator")
+      in
+      let* basis_allocation_bps =
+        Result.bind
+          (field fields "basis_allocation_bps")
+          (integer ~name:"basis_allocation_bps")
+      in
+      let* fractional_json = field fields "fractional_policy" in
+      let* fractional_fields =
+        match fractional_json with
+        | `Assoc fields -> Ok fields
+        | _ -> Error "fractional_policy must be a JSON object"
+      in
+      let* policy_name =
+        Result.bind
+          (field fractional_fields "policy")
+          (string ~name:"fractional policy")
+      in
+      let* fractional_policy =
+        match policy_name with
+        | "reject" ->
+            object_fields ~name:"reject fractional policy"
+              ~expected:[ "policy" ] fractional_json
+            |> Result.map (fun _ -> Corporate_action.Reject_fractional)
+        | "cash_in_lieu" ->
+            let* () =
+              object_fields ~name:"cash-in-lieu fractional policy"
+                ~expected:[ "policy"; "price"; "currency" ]
+                fractional_json
+              |> Result.map (fun _ -> ())
+            in
+            let* price =
+              Result.bind
+                (field fractional_fields "price")
+                (parse_price ~name:"cash-in-lieu price")
+            in
+            let* currency =
+              Result.bind
+                (field fractional_fields "currency")
+                (string ~name:"cash-in-lieu currency")
+            in
+            Ok (Corporate_action.Cash_in_lieu { price; currency })
+        | _ -> Error "fractional policy must be reject or cash_in_lieu"
+      in
+      let distribution_type =
+        match distribution_name with
+        | "stock_dividend" -> Corporate_action.Stock_dividend
+        | "rights" -> Rights
+        | "spin_off" -> Spin_off
+        | _ -> assert false
+      in
+      Corporate_action.distribution ~id ~instrument_id ~distribution_type
+        ~destination_instrument_id ~numerator ~denominator ~basis_allocation_bps
+        ~fractional_policy
   | _ -> Error "unsupported corporate action type"
+
+let parse_terminal_policy json =
+  let* fields =
+    match json with
+    | `Assoc fields -> Ok fields
+    | _ -> Error "terminal_policy must be a JSON object"
+  in
+  let* policy =
+    Result.bind (field fields "policy") (string ~name:"terminal policy")
+  in
+  match policy with
+  | "hold" ->
+      object_fields ~name:"hold terminal policy" ~expected:[ "policy" ] json
+      |> Result.map (fun _ -> Instrument_lifecycle.Hold)
+  | "cash_out" ->
+      let* () =
+        object_fields ~name:"cash-out terminal policy"
+          ~expected:[ "policy"; "price"; "currency" ]
+          json
+        |> Result.map (fun _ -> ())
+      in
+      let* price =
+        Result.bind (field fields "price") (parse_price ~name:"terminal price")
+      in
+      let* currency =
+        Result.bind (field fields "currency") (string ~name:"terminal currency")
+      in
+      Ok (Instrument_lifecycle.Cash_out { price; currency })
+  | _ -> Error "terminal policy must be hold or cash_out"
+
+let parse_lifecycle_event json =
+  let* fields =
+    match json with
+    | `Assoc fields -> Ok fields
+    | _ -> Error "lifecycle event must be a JSON object"
+  in
+  let* kind_name =
+    Result.bind (field fields "type") (string ~name:"lifecycle event type")
+  in
+  let* id =
+    Result.bind (field fields "event_id")
+      (parse_id Id.Corporate_action.of_string ~name:"event_id")
+  in
+  let* instrument_id =
+    Result.bind
+      (field fields "instrument_id")
+      (parse_id Id.Instrument.of_string ~name:"instrument_id")
+  in
+  let* kind =
+    match kind_name with
+    | "halt" ->
+        let* () =
+          object_fields ~name:"halt lifecycle event"
+            ~expected:[ "type"; "event_id"; "instrument_id"; "reason" ]
+            json
+          |> Result.map (fun _ -> ())
+        in
+        Result.bind (field fields "reason") (string ~name:"halt reason")
+        |> Result.map (fun reason -> Instrument_lifecycle.Halt { reason })
+    | "resume" ->
+        object_fields ~name:"resume lifecycle event"
+          ~expected:[ "type"; "event_id"; "instrument_id" ]
+          json
+        |> Result.map (fun _ -> Instrument_lifecycle.Resume)
+    | "identifier_change" ->
+        let* () =
+          object_fields ~name:"identifier-change lifecycle event"
+            ~expected:
+              [
+                "type";
+                "event_id";
+                "instrument_id";
+                "symbol";
+                "provider";
+                "provider_instrument_id";
+              ]
+            json
+          |> Result.map (fun _ -> ())
+        in
+        let text name = Result.bind (field fields name) (string ~name) in
+        let* symbol = text "symbol" in
+        let* provider = text "provider" in
+        let* provider_instrument_id = text "provider_instrument_id" in
+        Ok
+          (Instrument_lifecycle.Identifier_change
+             { symbol; provider; provider_instrument_id })
+    | "expiration" | "delisting" ->
+        let delisting = String.equal kind_name "delisting" in
+        let expected =
+          [ "type"; "event_id"; "instrument_id"; "terminal_policy" ]
+          @ if delisting then [ "reason" ] else []
+        in
+        let* () =
+          object_fields ~name:"terminal lifecycle event" ~expected json
+          |> Result.map (fun _ -> ())
+        in
+        let* terminal_policy =
+          Result.bind (field fields "terminal_policy") parse_terminal_policy
+        in
+        if delisting then
+          Result.bind (field fields "reason") (string ~name:"delisting reason")
+          |> Result.map (fun reason ->
+              Instrument_lifecycle.Delisting { terminal_policy; reason })
+        else Ok (Instrument_lifecycle.Expiration { terminal_policy })
+    | _ -> Error "unsupported lifecycle event type"
+  in
+  Instrument_lifecycle.create_event ~id ~instrument_id ~kind
 
 let parse_financing json =
   let* fields =
@@ -1342,12 +1532,16 @@ let parse_cash_rate_observation json =
 
 let parse_slice ~contract_version json =
   let financing_fields =
-    if List.mem contract_version [ "11"; "10" ] then
+    if List.mem contract_version [ "12"; "11"; "10" ] then
       [ "borrow_observations"; "cash_rate_observations" ]
     else []
   in
   let settlement_fields =
-    if String.equal contract_version "11" then [ "settlement_failures" ] else []
+    if List.mem contract_version [ "12"; "11" ] then [ "settlement_failures" ]
+    else []
+  in
+  let lifecycle_fields =
+    if String.equal contract_version "12" then [ "lifecycle_events" ] else []
   in
   let* fields =
     object_fields ~name:"market slice"
@@ -1362,7 +1556,7 @@ let parse_slice ~contract_version json =
            "fx_rates";
            "corporate_actions";
          ]
-        @ financing_fields @ settlement_fields)
+        @ financing_fields @ settlement_fields @ lifecycle_fields)
       json
   in
   let* sequence_json = field fields "slice_sequence" in
@@ -1384,7 +1578,7 @@ let parse_slice ~contract_version json =
   let* actions_json = field fields "corporate_actions" in
   let* actions_json = list ~name:"corporate_actions" actions_json in
   let* corporate_actions = map_list parse_corporate_action actions_json in
-  if List.mem contract_version [ "11"; "10" ] then
+  if List.mem contract_version [ "12"; "11"; "10" ] then
     let* borrow_json =
       Result.bind
         (field fields "borrow_observations")
@@ -1399,7 +1593,7 @@ let parse_slice ~contract_version json =
     let* cash_rate_observations =
       map_list parse_cash_rate_observation cash_json
     in
-    if String.equal contract_version "11" then
+    if List.mem contract_version [ "12"; "11" ] then
       let* failures_json =
         Result.bind
           (field fields "settlement_failures")
@@ -1408,9 +1602,20 @@ let parse_slice ~contract_version json =
       let* settlement_failures =
         map_list parse_settlement_failure failures_json
       in
-      Market_slice.create_v11 ~slice_sequence ~start_at ~end_at ~available_at
-        ~received_at ~bars ~fx_rates ~corporate_actions ~borrow_observations
-        ~cash_rate_observations ~settlement_failures
+      if String.equal contract_version "12" then
+        let* lifecycle_json =
+          Result.bind
+            (field fields "lifecycle_events")
+            (list ~name:"lifecycle_events")
+        in
+        let* lifecycle_events = map_list parse_lifecycle_event lifecycle_json in
+        Market_slice.create_v12 ~slice_sequence ~start_at ~end_at ~available_at
+          ~received_at ~bars ~fx_rates ~corporate_actions ~borrow_observations
+          ~cash_rate_observations ~settlement_failures ~lifecycle_events
+      else
+        Market_slice.create_v11 ~slice_sequence ~start_at ~end_at ~available_at
+          ~received_at ~bars ~fx_rates ~corporate_actions ~borrow_observations
+          ~cash_rate_observations ~settlement_failures
     else
       Market_slice.create_v10 ~slice_sequence ~start_at ~end_at ~available_at
         ~received_at ~bars ~fx_rates ~corporate_actions ~borrow_observations
@@ -1450,7 +1655,7 @@ let construct_header ~root ~contract_path ~contract_version
       |> at (child root "base_currency")
     in
     let* initial_cash, initial_portfolio =
-      if List.mem contract_version [ "11"; "10"; "9"; "8"; "7"; "6" ] then
+      if List.mem contract_version [ "12"; "11"; "10"; "9"; "8"; "7"; "6" ] then
         let* portfolio =
           parse_initial_portfolio ~base_currency shape.initial_state
           |> at (child root "initial_portfolio")
@@ -1512,21 +1717,22 @@ let construct_header ~root ~contract_path ~contract_version
     in
     let* financing =
       match (contract_version, shape.financing) with
-      | ("11" | "10"), Some json ->
+      | ("12" | "11" | "10"), Some json ->
           parse_financing json |> at (child root "financing")
-      | ("11" | "10"), None ->
+      | ("12" | "11" | "10"), None ->
           Error "missing financing policy" |> at (child root "financing")
       | _, _ -> Ok Financing.legacy_policy
     in
     let financing =
-      if List.mem contract_version [ "11"; "10" ] then Some financing else None
+      if List.mem contract_version [ "12"; "11"; "10" ] then Some financing
+      else None
     in
     let* settlement =
       match (contract_version, shape.settlement) with
-      | "11", Some json ->
+      | ("12" | "11"), Some json ->
           let* policy = parse_settlement json |> at (child root "settlement") in
           Ok (Some policy)
-      | "11", None ->
+      | ("12" | "11"), None ->
           Error "missing settlement policy" |> at (child root "settlement")
       | _, _ -> Ok None
     in

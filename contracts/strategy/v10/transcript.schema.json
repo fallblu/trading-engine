@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/fallblu/trading-engine/contracts/strategy/v10/transcript.schema.json",
+  "title": "Trading Engine external strategy protocol v10 transcript record",
+  "description": "One accepted exchange or rejected-response diagnostic retained from a supervised stdio strategy session.",
+  "oneOf": [
+    { "$ref": "#/$defs/exchange" },
+    { "$ref": "#/$defs/rejectedResponse" }
+  ],
+  "$defs": {
+    "canonicalSequence": {
+      "type": "string",
+      "pattern": "^[1-9][0-9]*$"
+    },
+    "exchange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["strategy_protocol_version", "transcript_sequence", "direction", "message"],
+      "properties": {
+        "strategy_protocol_version": { "const": "10" },
+        "transcript_sequence": { "$ref": "#/$defs/canonicalSequence" },
+        "direction": {
+          "enum": ["engine_to_strategy", "strategy_to_engine"]
+        },
+        "message": {
+          "$ref": "https://github.com/fallblu/trading-engine/contracts/strategy/v10/message.schema.json"
+        }
+      }
+    },
+    "rejectedResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "strategy_diagnostic_version",
+        "transcript_sequence",
+        "record_type",
+        "expected_strategy_sequence",
+        "diagnostic",
+        "evidence"
+      ],
+      "properties": {
+        "strategy_diagnostic_version": { "const": "1" },
+        "transcript_sequence": { "$ref": "#/$defs/canonicalSequence" },
+        "record_type": { "const": "rejected_strategy_response" },
+        "expected_strategy_sequence": { "$ref": "#/$defs/canonicalSequence" },
+        "diagnostic": { "$ref": "#/$defs/diagnostic" },
+        "evidence": { "$ref": "#/$defs/evidence" }
+      }
+    },
+    "diagnostic": {
+      "allOf": [
+        {
+          "$ref": "https://github.com/fallblu/trading-engine/contracts/diagnostic/v1/diagnostic.schema.json"
+        },
+        {
+          "properties": {
+            "code": { "enum": ["strategy.protocol", "resource.limit"] },
+            "phase": { "const": "strategy" }
+          }
+        }
+      ]
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["encoding", "prefix", "observed_bytes", "truncated"],
+      "properties": {
+        "encoding": { "const": "hex" },
+        "prefix": {
+          "type": "string",
+          "pattern": "^(?:[0-9a-f]{2}){0,256}$"
+        },
+        "observed_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1048577
+        },
+        "truncated": { "type": "boolean" }
+      }
+    }
+  }
+}

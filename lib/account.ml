@@ -469,6 +469,175 @@ let apply_cash_dividend (state : t) ~instrument_id ~quote_currency
         positions = update_position state.positions instrument_id updated;
       }
 
+type distribution_result = {
+  source_quantity : Scalar.Quantity.t;
+  destination_quantity : Scalar.Quantity.t;
+  fractional_quantity : Scalar.Quantity.t;
+  allocated_basis : Scalar.Money.t;
+  fractional_basis : Scalar.Money.t;
+  cash_in_lieu : Scalar.Money.t;
+}
+
+let money_bps_toward_zero value bps =
+  let numerator =
+    Z.mul (Z.of_int64 (Scalar.Money.to_micros value)) (Z.of_int bps)
+  in
+  let result = Z.div numerator (Z.of_int 10_000) in
+  if Z.fits_int64 result then Ok (Scalar.Money.of_micros (Z.to_int64 result))
+  else Error "distribution basis allocation overflow"
+
+let apply_distribution (state : t) ~source_instrument_id
+    ~destination_instrument_id ~destination_lot_size ~numerator ~denominator
+    ~basis_allocation_bps ~fractional_policy =
+  let source = position state source_instrument_id in
+  let destination = position state destination_instrument_id in
+  let same_instrument =
+    Id.Instrument.equal source_instrument_id destination_instrument_id
+  in
+  let* () =
+    if
+      (not same_instrument)
+      && (not (Scalar.Quantity.is_zero source.quantity))
+      && (not (Scalar.Quantity.is_zero destination.quantity))
+      && Scalar.Quantity.is_positive source.quantity
+         <> Scalar.Quantity.is_positive destination.quantity
+    then Error "distribution cannot cross an opposite destination position"
+    else Ok ()
+  in
+  let* entitlement =
+    Scalar.Quantity.scale_ratio_exact source.quantity ~numerator ~denominator
+  in
+  let* delivered =
+    Scalar.Quantity.round_toward_zero_to_multiple entitlement
+      ~multiple:destination_lot_size
+  in
+  let* fractional = Scalar.Quantity.subtract entitlement delivered in
+  let has_fractional = not (Scalar.Quantity.is_zero fractional) in
+  let* cash_in_lieu =
+    match (has_fractional, fractional_policy) with
+    | false, _ -> Ok Scalar.Money.zero
+    | true, Corporate_action.Reject_fractional ->
+        Error "distribution produces a fractional entitlement"
+    | true, Cash_in_lieu { price; _ } -> Scalar.Money.notional price fractional
+  in
+  let* allocated_basis =
+    money_bps_toward_zero source.cost_basis basis_allocation_bps
+  in
+  let* source_cost_basis =
+    Scalar.Money.subtract source.cost_basis allocated_basis
+  in
+  let* absolute_entitlement = Scalar.Quantity.absolute entitlement in
+  let* absolute_delivered = Scalar.Quantity.absolute delivered in
+  let* delivered_basis =
+    if Scalar.Quantity.is_zero absolute_entitlement then Ok Scalar.Money.zero
+    else
+      Scalar.Money.proportion_toward_zero allocated_basis
+        ~numerator:absolute_delivered ~denominator:absolute_entitlement
+  in
+  let* fractional_basis =
+    Scalar.Money.subtract allocated_basis delivered_basis
+  in
+  let* source_realized =
+    if has_fractional then
+      let* delta = Scalar.Money.subtract cash_in_lieu fractional_basis in
+      Scalar.Money.add source.realized_pnl delta
+    else Ok source.realized_pnl
+  in
+  let* destination_quantity =
+    Scalar.Quantity.add destination.quantity delivered
+  in
+  let* destination_basis =
+    Scalar.Money.add destination.cost_basis delivered_basis
+  in
+  let positions =
+    if same_instrument then
+      update_position state.positions source_instrument_id
+        {
+          source with
+          quantity = destination_quantity;
+          cost_basis = destination_basis;
+          realized_pnl = source_realized;
+        }
+    else
+      update_position state.positions source_instrument_id
+        {
+          source with
+          cost_basis = source_cost_basis;
+          realized_pnl = source_realized;
+        }
+      |> fun positions ->
+      update_position positions destination_instrument_id
+        {
+          destination with
+          quantity = destination_quantity;
+          cost_basis = destination_basis;
+        }
+  in
+  let settled_source = settled_position_quantity state source_instrument_id in
+  let* settled_entitlement =
+    Scalar.Quantity.scale_ratio_exact settled_source ~numerator ~denominator
+  in
+  let* settled_delivered =
+    Scalar.Quantity.round_toward_zero_to_multiple settled_entitlement
+      ~multiple:destination_lot_size
+  in
+  let settled_destination =
+    settled_position_quantity state destination_instrument_id
+  in
+  let* settled_destination =
+    Scalar.Quantity.add settled_destination settled_delivered
+  in
+  let settled_positions =
+    if Scalar.Quantity.is_zero settled_destination then
+      Id.Instrument.Map.remove destination_instrument_id state.settled_positions
+    else
+      Id.Instrument.Map.add destination_instrument_id settled_destination
+        state.settled_positions
+  in
+  let state = { state with positions; settled_positions } in
+  let* state =
+    match fractional_policy with
+    | Corporate_action.Cash_in_lieu { currency; _ } when has_fractional ->
+        let* state = adjust_cash state currency cash_in_lieu in
+        adjust_settled_cash state currency cash_in_lieu
+    | Reject_fractional | Cash_in_lieu _ -> Ok state
+  in
+  Ok
+    ( state,
+      {
+        source_quantity = source.quantity;
+        destination_quantity = delivered;
+        fractional_quantity = fractional;
+        allocated_basis;
+        fractional_basis;
+        cash_in_lieu;
+      } )
+
+let cash_out_position (state : t) ~instrument_id ~currency ~price =
+  let current = position state instrument_id in
+  let* proceeds = Scalar.Money.notional price current.quantity in
+  let* state = adjust_cash state currency proceeds in
+  let* state = adjust_settled_cash state currency proceeds in
+  let* realized_delta = Scalar.Money.subtract proceeds current.cost_basis in
+  let* realized_pnl = Scalar.Money.add current.realized_pnl realized_delta in
+  let updated =
+    {
+      current with
+      quantity = Scalar.Quantity.zero;
+      cost_basis = Scalar.Money.zero;
+      realized_pnl;
+    }
+  in
+  Ok
+    ( {
+        state with
+        positions = update_position state.positions instrument_id updated;
+        settled_positions =
+          Id.Instrument.Map.remove instrument_id state.settled_positions;
+      },
+      current.quantity,
+      proceeds )
+
 let apply_borrow_fee (state : t) ~instrument_id ~quote_currency ~fee =
   let current = position state instrument_id in
   if not (Scalar.Quantity.is_negative current.quantity) then
