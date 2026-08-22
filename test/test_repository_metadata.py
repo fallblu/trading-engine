@@ -37,6 +37,35 @@ class RepositoryMetadataTest(unittest.TestCase):
             ],
         )
         self.assertEqual(len(profile["topics"]), len(set(profile["topics"])))
+        self.assertFalse(profile["allow_merge_commit"])
+        self.assertTrue(profile["allow_rebase_merge"])
+        self.assertFalse(profile["allow_squash_merge"])
+        self.assertTrue(profile["delete_branch_on_merge"])
+
+    def test_main_branch_protection_matches_integration_policy(self) -> None:
+        manifest = json.loads((GITHUB / "branch-protection.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(set(manifest["branches"]), {"main"})
+        policy = manifest["branches"]["main"]
+        self.assertEqual(
+            policy["required_status_checks"],
+            {"strict": True, "contexts": ["check", "persistra-compatibility"]},
+        )
+        self.assertEqual(
+            policy["required_pull_request_reviews"],
+            {
+                "dismiss_stale_reviews": False,
+                "require_code_owner_reviews": False,
+                "required_approving_review_count": 0,
+                "require_last_push_approval": False,
+            },
+        )
+        self.assertTrue(policy["enforce_admins"])
+        self.assertTrue(policy["required_conversation_resolution"])
+        self.assertTrue(policy["required_linear_history"])
+        self.assertFalse(policy["allow_force_pushes"])
+        self.assertFalse(policy["allow_deletions"])
+        self.assertIsNone(policy["restrictions"])
 
     def test_label_manifest_covers_stable_planning_dimensions(self) -> None:
         labels = json.loads((GITHUB / "labels.json").read_text(encoding="utf-8"))

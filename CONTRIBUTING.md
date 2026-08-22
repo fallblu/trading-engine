@@ -53,6 +53,19 @@ The gate formats a copy check, builds every target, and runs all tests. Keep com
 coherent, and working. Use subject-only conventional commit messages such as
 `feat: implement deterministic order matching`.
 
+## Git workflow
+
+Create feature branches from `develop` and open pull requests back into `develop`. Use
+rebase-and-merge so every coherent commit remains visible; do not use squash or merge commits.
+GitHub deletes merged head branches automatically, so verify that the branch is gone afterward.
+
+Promotion to `main` also uses a pull request and rebase merge. The protected branch requires a head
+that is current with `main`, resolved review conversations, and successful `check` and
+`persistra-compatibility` jobs. It blocks force pushes and branch deletion and applies to
+administrators without a bypass. The rule requires no approval while the repository has one
+maintainer, avoiding a self-review deadlock. See [Repository governance](docs/repository-governance.md)
+for the complete policy.
+
 Do not add secrets, provider credentials, or customer account data to fixtures or journals.
 Report suspected vulnerabilities through the private channel in the
 [security policy](.github/SECURITY.md), not through a public issue.
