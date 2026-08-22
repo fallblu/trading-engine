@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Add structured issue and pull-request intake, reviewed planning-label and repository metadata,
+  explicit compatibility guarantees, a pinned required Persistra baseline, and a manual
+  nonrequired latest-head signal.
+
 ## 1.0.0 — 2026-08-21
 
 - Release the deterministic completed-bar execution engine with exact checked arithmetic,

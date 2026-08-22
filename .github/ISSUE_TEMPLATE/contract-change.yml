@@ -1,0 +1,64 @@
+name: Contract change
+description: Propose a versioned scenario, journal, diagnostic, capability, or strategy change.
+title: "feat: evolve contract "
+labels: ["enhancement", "component: contracts"]
+assignees: []
+body:
+  - type: dropdown
+    id: family
+    attributes:
+      label: Contract family
+      options:
+        - Scenario and journal
+        - Scenario stream
+        - Capabilities
+        - Diagnostics
+        - External strategy protocol and transcript
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Affected versions
+      placeholder: current v4; frozen v1-v3 unchanged
+    validations:
+      required: true
+  - type: dropdown
+    id: compatibility
+    attributes:
+      label: Compatibility class
+      options:
+        - Additive within the current version
+        - New version required
+        - Clarification with no wire-format change
+        - Not yet known
+    validations:
+      required: true
+  - type: textarea
+    id: invariant
+    attributes:
+      label: Semantic invariant
+      description: State the runtime rule and what JSON Schema can and cannot enforce.
+    validations:
+      required: true
+  - type: textarea
+    id: wire-change
+    attributes:
+      label: Wire-format change
+      description: Show the smallest representative before-and-after records.
+    validations:
+      required: true
+  - type: textarea
+    id: migration
+    attributes:
+      label: Compatibility and migration
+      description: Explain frozen artifacts, parser behavior, and producer/consumer updates.
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: Conformance evidence
+      description: List schemas, canonical fixtures, negative fixtures, and differential tests.
+    validations:
+      required: true
