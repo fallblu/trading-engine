@@ -175,7 +175,11 @@ let validate_bar_prices instrument bar =
   else Ok ()
 
 let compare_execution_order left right =
-  let origin_rank = function Order.Margin_liquidation -> 0 | _ -> 1 in
+  let origin_rank = function
+    | Order.Margin_liquidation -> 0
+    | Order.Borrow_recall -> 1
+    | Order.Direct | Order.Target_rebalance -> 2
+  in
   let origin =
     Int.compare
       (origin_rank left.Order.request.origin)

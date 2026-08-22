@@ -133,6 +133,14 @@ let fill_limit_to_yojson = function
       ( "instrument_shorting_disabled",
         `Assoc [ ("instrument_id", instrument_id id); ("value", `Bool false) ]
       )
+  | Risk.Instrument_borrow_availability (id, value) ->
+      ( "instrument_borrow_availability",
+        `Assoc
+          [
+            ("instrument_id", instrument_id id);
+            ("unit", string "quantity");
+            ("value", quantity value);
+          ] )
   | Risk.Instrument_initial_margin (id, value) ->
       ( "instrument_initial_margin",
         `Assoc
@@ -218,7 +226,26 @@ let corporate_action_to_yojson action =
         ((("type", string "cash_dividend") :: common)
         @ [ ("amount_per_unit", money amount_per_unit) ])
 
-let market_slice_to_yojson market_slice =
+let borrow_observation_to_yojson observation =
+  `Assoc
+    [
+      ("instrument_id", instrument_id observation.Financing.instrument_id);
+      ("effective_at", timestamp observation.effective_at);
+      ("available_quantity", quantity observation.available_quantity);
+      ("annual_rate_bps", `Int observation.annual_rate_bps);
+      ("recalled", `Bool observation.recalled);
+    ]
+
+let cash_rate_observation_to_yojson observation =
+  `Assoc
+    [
+      ("currency", string observation.Financing.currency);
+      ("effective_at", timestamp observation.effective_at);
+      ("credit_rate_bps", `Int observation.credit_rate_bps);
+      ("debit_rate_bps", `Int observation.debit_rate_bps);
+    ]
+
+let versioned_market_slice_to_yojson ~contract_version market_slice =
   `Assoc
     [
       ("slice_sequence", int64 market_slice.Market_slice.slice_sequence);
@@ -233,6 +260,27 @@ let market_slice_to_yojson market_slice =
           (List.map corporate_action_to_yojson market_slice.corporate_actions)
       );
     ]
+  |> function
+  | `Assoc fields when String.equal contract_version "10" ->
+      `Assoc
+        (fields
+        @ [
+            ( "borrow_observations",
+              `List
+                (List.map borrow_observation_to_yojson
+                   market_slice.Market_slice.borrow_observations) );
+            ( "cash_rate_observations",
+              `List
+                (List.map cash_rate_observation_to_yojson
+                   market_slice.Market_slice.cash_rate_observations) );
+          ])
+  | json -> json
+
+let market_slice_to_yojson market_slice =
+  versioned_market_slice_to_yojson ~contract_version:"9" market_slice
+
+let market_slice_to_yojson_v10 market_slice =
+  versioned_market_slice_to_yojson ~contract_version:"10" market_slice
 
 let request_fields request =
   let kind, limit_price =
@@ -337,7 +385,7 @@ let order_to_yojson_v8 order =
       ])
 
 let versioned_order_to_yojson ~contract_version order =
-  if List.mem contract_version [ "9"; "8" ] then order_to_yojson_v8 order
+  if List.mem contract_version [ "10"; "9"; "8" ] then order_to_yojson_v8 order
   else order_to_yojson order
 
 let fill_to_yojson fill =
@@ -479,6 +527,17 @@ let cash_attribution_to_yojson cash =
       ("base_value", money cash.base_value);
     ]
 
+let cash_attribution_to_yojson_v10 cash =
+  match cash_attribution_to_yojson cash with
+  | `Assoc fields ->
+      `Assoc
+        (fields
+        @ [
+            ("interest", money cash.Account.interest);
+            ("base_interest", money cash.base_interest);
+          ])
+  | _ -> assert false
+
 let account_valuation_to_yojson ?(contract_version = "8") valuation =
   `Assoc
     [
@@ -497,17 +556,31 @@ let account_valuation_to_yojson ?(contract_version = "8") valuation =
       ("borrow_fees", money valuation.borrow_fees);
       ("total_fees", money valuation.total_fees);
       ( "cash_balances",
-        `List (List.map cash_attribution_to_yojson valuation.cash_balances) );
+        `List
+          (List.map
+             (if String.equal contract_version "10" then
+                cash_attribution_to_yojson_v10
+              else cash_attribution_to_yojson)
+             valuation.cash_balances) );
       ( "positions",
         `List
           (List.map
-             (if String.equal contract_version "9" then
-                position_attribution_to_yojson_v9
+             (if
+                String.equal contract_version "9"
+                || String.equal contract_version "10"
+              then position_attribution_to_yojson_v9
               else position_attribution_to_yojson)
              valuation.positions) );
     ]
   |> function
-  | `Assoc fields when String.equal contract_version "9" ->
+  | `Assoc fields
+    when String.equal contract_version "9" || String.equal contract_version "10"
+    ->
+      let financing =
+        if String.equal contract_version "10" then
+          [ ("cash_interest", money valuation.Account.cash_interest) ]
+        else []
+      in
       `Assoc
         (fields
         @ [
@@ -515,7 +588,8 @@ let account_valuation_to_yojson ?(contract_version = "8") valuation =
               `List
                 (List.map execution_fee_component_attribution_to_yojson
                    valuation.Account.execution_fee_components) );
-          ])
+          ]
+        @ financing)
   | json -> json
 
 let margin_to_yojson margin =
@@ -547,7 +621,7 @@ let valuation_to_yojson ~contract_version valuation =
   | `Assoc fields ->
       let fields = fields @ [ ("margin", margin_to_yojson valuation.margin) ] in
       let fields =
-        if List.mem contract_version [ "9"; "8" ] then
+        if List.mem contract_version [ "10"; "9"; "8" ] then
           fields
           @ [
               ( "group_exposures",
@@ -594,7 +668,7 @@ let payload_to_yojson ~contract_version = function
           ("valuation", valuation_to_yojson ~contract_version valuation);
         ]
   | Audit.Market_slice_received market_slice ->
-      market_slice_to_yojson market_slice
+      versioned_market_slice_to_yojson ~contract_version market_slice
   | Audit.Target_portfolio_requested { basis; targets } ->
       `Assoc
         [
@@ -632,7 +706,8 @@ let payload_to_yojson ~contract_version = function
           ("action_id", string (Id.Corporate_action.to_string action_id));
         ]
   | Audit.Fill_applied fill ->
-      if String.equal contract_version "9" then fill_to_yojson_v9 fill
+      if String.equal contract_version "9" || String.equal contract_version "10"
+      then fill_to_yojson_v9 fill
       else fill_to_yojson fill
   | Audit.Margin_limited
       {
@@ -696,6 +771,62 @@ let payload_to_yojson ~contract_version = function
           ("period_start", timestamp period_start);
           ("period_end", timestamp period_end);
           ("fee", money fee);
+        ]
+  | Audit.Borrow_charge_applied
+      {
+        observation;
+        quote_currency;
+        short_quantity;
+        reference_price;
+        day_count;
+        compounding;
+        period_start;
+        period_end;
+        amount;
+      } ->
+      `Assoc
+        [
+          ("observation", borrow_observation_to_yojson observation);
+          ("quote_currency", string quote_currency);
+          ("short_quantity", quantity short_quantity);
+          ("reference_price", price reference_price);
+          ("day_count", string (Financing.day_count_to_string day_count));
+          ("compounding", string (Financing.compounding_to_string compounding));
+          ("period_start", timestamp period_start);
+          ("period_end", timestamp period_end);
+          ("amount", money amount);
+        ]
+  | Audit.Borrow_recall_received
+      { observation; short_quantity; close_out_quantity } ->
+      `Assoc
+        [
+          ("observation", borrow_observation_to_yojson observation);
+          ("short_quantity", quantity short_quantity);
+          ("close_out_quantity", quantity close_out_quantity);
+        ]
+  | Audit.Cash_interest_applied
+      {
+        observation;
+        opening_balance;
+        applied_rate_bps;
+        day_count;
+        compounding;
+        period_start;
+        period_end;
+        amount;
+        closing_balance;
+      } ->
+      `Assoc
+        [
+          ("observation", cash_rate_observation_to_yojson observation);
+          ("opening_balance", money opening_balance);
+          ("applied_rate_bps", `Int applied_rate_bps);
+          ("day_count", string (Financing.day_count_to_string day_count));
+          ("compounding", string (Financing.compounding_to_string compounding));
+          ("period_start", timestamp period_start);
+          ("period_end", timestamp period_end);
+          ("amount", money amount);
+          ("closing_balance", money closing_balance);
         ]
   | Audit.Margin_call_triggered valuation | Audit.Margin_restored valuation ->
       valuation_to_yojson ~contract_version valuation

@@ -34,6 +34,8 @@ type cash_attribution = private {
   amount : Scalar.Money.t;
   fx_rate : Scalar.Price.t;
   base_value : Scalar.Money.t;
+  interest : Scalar.Money.t;
+  base_interest : Scalar.Money.t;
 }
 
 type position_attribution = private {
@@ -77,6 +79,7 @@ type valuation = private {
   dividend_pnl : Scalar.Money.t;
   execution_fees : Scalar.Money.t;
   borrow_fees : Scalar.Money.t;
+  cash_interest : Scalar.Money.t;
   total_fees : Scalar.Money.t;
   cash_balances : cash_attribution list;
   positions : position_attribution list;
@@ -118,6 +121,9 @@ val apply_borrow_fee :
   quote_currency:string ->
   fee:Scalar.Money.t ->
   (t, string) result
+
+val apply_cash_interest :
+  t -> currency:string -> interest:Scalar.Money.t -> (t, string) result
 
 val value :
   t ->

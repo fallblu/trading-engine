@@ -1,14 +1,17 @@
+module Currency_map = Map.Make (String)
+
 type config = {
   contract_version : string;
   risk : Risk.t;
   venue_calendars : Venue_calendar.t list;
   execution_model : Execution_model.t;
   execution : Execution.t;
+  financing : Financing.policy option;
   max_internal_events : int;
 }
 
 let make_config ~venue_calendars ~contract_version ~risk ~execution_model
-    ~execution ~max_internal_events =
+    ~execution ~financing ~max_internal_events =
   if not (Contract.is_supported contract_version) then
     Error "engine contract version is unsupported"
   else if max_internal_events <= 0 then
@@ -25,18 +28,24 @@ let make_config ~venue_calendars ~contract_version ~risk ~execution_model
         venue_calendars;
         execution_model;
         execution;
+        financing;
         max_internal_events;
       }
 
 let config ~contract_version ~risk ~execution_model ~execution
     ~max_internal_events =
   make_config ~venue_calendars:[] ~contract_version ~risk ~execution_model
-    ~execution ~max_internal_events
+    ~execution ~financing:None ~max_internal_events
 
 let config_v8 ~contract_version ~risk ~venue_calendars ~execution_model
     ~execution ~max_internal_events =
   make_config ~venue_calendars ~contract_version ~risk ~execution_model
-    ~execution ~max_internal_events
+    ~execution ~financing:None ~max_internal_events
+
+let config_v10 ~contract_version ~risk ~venue_calendars ~execution_model
+    ~execution ~financing ~max_internal_events =
+  make_config ~venue_calendars ~contract_version ~risk ~execution_model
+    ~execution ~financing:(Some financing) ~max_internal_events
 
 let valid_sha256 value =
   String.length value = 64
@@ -66,6 +75,8 @@ module Interactive = struct
     latest_bars : Bar.t Id.Instrument.Map.t;
     latest_marks : Scalar.Price.t Id.Instrument.Map.t;
     latest_fx_rates : (string * Scalar.Price.t) list;
+    latest_borrow : Financing.borrow_observation Id.Instrument.Map.t;
+    latest_cash_rates : Financing.cash_rate_observation Currency_map.t;
     initial_portfolio : Initial_portfolio.t option;
     applied_action_ids : Id.Corporate_action.Set.t;
     desired_targets : desired_targets option;
@@ -127,6 +138,8 @@ module Interactive = struct
         latest_bars = Id.Instrument.Map.empty;
         latest_marks;
         latest_fx_rates;
+        latest_borrow = Id.Instrument.Map.empty;
+        latest_cash_rates = Currency_map.empty;
         initial_portfolio;
         applied_action_ids = Id.Corporate_action.Set.empty;
         desired_targets = None;
@@ -374,6 +387,48 @@ module Interactive = struct
               let marks =
                 Id.Instrument.Map.bindings reduction.state.latest_marks
               in
+              let* () =
+                match
+                  ( reduction.state.config.financing,
+                    request.Order.side,
+                    Account.position_quantity reduction.state.account
+                      request.instrument_id )
+                with
+                | Some policy, Order.Sell, position
+                  when policy.Financing.locate_policy = Financing.Reject_order
+                       && not (Scalar.Quantity.is_positive position) ->
+                    let available =
+                      match
+                        Id.Instrument.Map.find_opt request.instrument_id
+                          reduction.state.latest_borrow
+                      with
+                      | Some observation when not observation.Financing.recalled
+                        ->
+                          observation.available_quantity
+                      | None | Some _ -> Scalar.Quantity.zero
+                    in
+                    let* located = Scalar.Quantity.absolute position in
+                    let* reserved =
+                      Oms.active_for_instrument reduction.state.oms
+                        request.instrument_id
+                      |> List.fold_left
+                           (fun result order ->
+                             let* total = result in
+                             if order.Order.request.side = Order.Sell then
+                               Scalar.Quantity.add total
+                                 (Order.remaining_quantity order)
+                             else Ok total)
+                           (Ok Scalar.Quantity.zero)
+                    in
+                    let* requested = Scalar.Quantity.add located reserved in
+                    let* requested =
+                      Scalar.Quantity.add requested request.quantity
+                    in
+                    if Scalar.Quantity.compare requested available > 0 then
+                      Error "order exceeds effective borrow availability"
+                    else Ok ()
+                | _ -> Ok ()
+              in
               Risk.check reduction.state.config.risk
                 ~account:reduction.state.account ~oms:reduction.state.oms ~marks
                 ~fx_rates:reduction.state.latest_fx_rates request
@@ -428,6 +483,38 @@ module Interactive = struct
                         Ok
                           (enqueue reduction
                              [ order_pending; rejection_pending ])))))
+
+  let submit_recall_order reduction market_slice instrument quantity =
+    let* request =
+      Order.request_v8 ~instrument_id:instrument.Instrument.id ~side:Order.Buy
+        ~quantity ~kind:Order.Market ~time_in_force:Order.Ioc
+        ~origin:Order.Borrow_recall
+    in
+    let id = order_id reduction.state in
+    let* state = increment_order_number reduction.state in
+    let reduction = { reduction with state } in
+    let* order_sequence = next_sequence reduction.state.engine_sequence in
+    let created_event_id =
+      Audit.event_id ~run_id:reduction.state.run_id
+        ~engine_sequence:order_sequence
+    in
+    let eligible_after_slice_sequence =
+      Int64.pred market_slice.Market_slice.slice_sequence
+    in
+    let* oms, order =
+      Oms.accept reduction.state.oms ~id ~created_event_id
+        ~accepted_sequence:order_sequence ~created_at:market_slice.start_at
+        ~eligible_after_slice_sequence request
+    in
+    let reduction = { reduction with state = { reduction.state with oms } } in
+    let* reduction, event_id =
+      emit_with_id reduction (Audit.Order_accepted order)
+    in
+    let* pending =
+      notification reduction ~causation_ids:[ event_id ]
+        (Strategy.Order_updated order)
+    in
+    Ok (enqueue reduction [ pending ])
 
   let cancel_order reduction ~reason order_id =
     match Oms.cancel reduction.state.oms order_id with
@@ -676,7 +763,7 @@ module Interactive = struct
       if Z.fits_int64 fee then Ok (Scalar.Money.of_micros (Z.to_int64 fee))
       else Error "short borrow fee overflow"
 
-  let apply_borrow_fees reduction market_slice =
+  let apply_legacy_borrow_fees reduction market_slice =
     let span =
       Ptime.diff market_slice.Market_slice.end_at market_slice.start_at
     in
@@ -727,6 +814,201 @@ module Interactive = struct
                  }))
       (Ok reduction)
       (configured_instruments reduction.state)
+
+  let apply_observed_borrow_fees reduction market_slice policy =
+    let span =
+      Ptime.diff market_slice.Market_slice.end_at market_slice.start_at
+    in
+    List.fold_left
+      (fun result instrument ->
+        let* reduction = result in
+        let quantity =
+          Account.position_quantity reduction.state.account
+            instrument.Instrument.id
+        in
+        if not (Scalar.Quantity.is_negative quantity) then Ok reduction
+        else
+          match
+            Id.Instrument.Map.find_opt instrument.id
+              reduction.state.latest_borrow
+          with
+          | None -> (
+              match policy.Financing.borrow_missing_data with
+              | Financing.Zero -> Ok reduction
+              | Financing.Reject ->
+                  Error
+                    (Format.asprintf
+                       "open short has no effective borrow observation for %a"
+                       Id.Instrument.pp instrument.id))
+          | Some observation ->
+              let* short_quantity = Scalar.Quantity.absolute quantity in
+              let* bar =
+                match Market_slice.bar market_slice instrument.id with
+                | Some value -> Ok value
+                | None -> Error "short position has no market slice bar"
+              in
+              let* notional =
+                Scalar.Money.notional bar.open_price short_quantity
+              in
+              let* amount =
+                Financing.accrue policy ~principal:notional
+                  ~annual_rate_bps:observation.annual_rate_bps span
+              in
+              if Scalar.Money.equal amount Scalar.Money.zero then Ok reduction
+              else
+                let* account =
+                  Account.apply_borrow_fee reduction.state.account
+                    ~instrument_id:instrument.id
+                    ~quote_currency:instrument.quote_currency ~fee:amount
+                in
+                let reduction =
+                  { reduction with state = { reduction.state with account } }
+                in
+                emit
+                  (with_causes reduction
+                     (Option.to_list reduction.slice_event_id))
+                  (Audit.Borrow_charge_applied
+                     {
+                       observation;
+                       quote_currency = instrument.quote_currency;
+                       short_quantity;
+                       reference_price = bar.open_price;
+                       day_count = policy.day_count;
+                       compounding = policy.compounding;
+                       period_start = market_slice.start_at;
+                       period_end = market_slice.end_at;
+                       amount;
+                     }))
+      (Ok reduction)
+      (configured_instruments reduction.state)
+
+  let apply_cash_interest reduction market_slice policy =
+    let span =
+      Ptime.diff market_slice.Market_slice.end_at market_slice.start_at
+    in
+    List.fold_left
+      (fun result (currency, opening_balance) ->
+        let* reduction = result in
+        if Scalar.Money.equal opening_balance Scalar.Money.zero then
+          Ok reduction
+        else
+          match
+            Currency_map.find_opt currency reduction.state.latest_cash_rates
+          with
+          | None -> (
+              match policy.Financing.cash_missing_data with
+              | Financing.Zero -> Ok reduction
+              | Financing.Reject ->
+                  Error
+                    ("nonzero cash balance has no effective rate for currency "
+                   ^ currency))
+          | Some observation ->
+              let debit =
+                Scalar.Money.compare opening_balance Scalar.Money.zero < 0
+              in
+              let applied_rate_bps =
+                if debit then observation.debit_rate_bps
+                else observation.credit_rate_bps
+              in
+              let* principal =
+                if debit then Scalar.Money.negate opening_balance
+                else Ok opening_balance
+              in
+              let* accrued =
+                Financing.accrue policy ~principal
+                  ~annual_rate_bps:applied_rate_bps span
+              in
+              let* amount =
+                if debit then Scalar.Money.negate accrued else Ok accrued
+              in
+              if Scalar.Money.equal amount Scalar.Money.zero then Ok reduction
+              else
+                let* account =
+                  Account.apply_cash_interest reduction.state.account ~currency
+                    ~interest:amount
+                in
+                let* closing_balance =
+                  match Account.cash account currency with
+                  | Some value -> Ok value
+                  | None -> Error "cash interest removed its currency ledger"
+                in
+                let reduction =
+                  { reduction with state = { reduction.state with account } }
+                in
+                emit
+                  (with_causes reduction
+                     (Option.to_list reduction.slice_event_id))
+                  (Audit.Cash_interest_applied
+                     {
+                       observation;
+                       opening_balance;
+                       applied_rate_bps;
+                       day_count = policy.day_count;
+                       compounding = policy.compounding;
+                       period_start = market_slice.start_at;
+                       period_end = market_slice.end_at;
+                       amount;
+                       closing_balance;
+                     }))
+      (Ok reduction)
+      (Account.cash_balances reduction.state.account)
+
+  let process_borrow_recalls reduction market_slice policy =
+    List.fold_left
+      (fun result instrument ->
+        let* reduction = result in
+        match
+          Id.Instrument.Map.find_opt instrument.Instrument.id
+            reduction.state.latest_borrow
+        with
+        | None | Some { Financing.recalled = false; _ } -> Ok reduction
+        | Some observation ->
+            let quantity =
+              Account.position_quantity reduction.state.account instrument.id
+            in
+            if not (Scalar.Quantity.is_negative quantity) then Ok reduction
+            else
+              let* short_quantity = Scalar.Quantity.absolute quantity in
+              let close_out_quantity =
+                match policy.Financing.recall_policy with
+                | Financing.Reject_new_shorts -> Scalar.Quantity.zero
+                | Financing.Close_out -> short_quantity
+              in
+              let* reduction, recall_event_id =
+                emit_with_id
+                  (with_causes reduction
+                     (Option.to_list reduction.slice_event_id))
+                  (Audit.Borrow_recall_received
+                     { observation; short_quantity; close_out_quantity })
+              in
+              let active_sells =
+                Oms.active_for_instrument reduction.state.oms instrument.id
+                |> List.filter_map (fun order ->
+                    if order.Order.request.side = Order.Sell then Some order.id
+                    else None)
+              in
+              let* reduction =
+                cancel_orders
+                  (with_causes reduction [ recall_event_id ])
+                  ~reason:Audit.Borrow_recall active_sells
+              in
+              if Scalar.Quantity.is_zero close_out_quantity then Ok reduction
+              else
+                submit_recall_order
+                  (with_causes reduction [ recall_event_id ])
+                  market_slice instrument close_out_quantity)
+      (Ok reduction)
+      (configured_instruments reduction.state)
+
+  let apply_financing reduction market_slice =
+    match reduction.state.config.financing with
+    | None -> apply_legacy_borrow_fees reduction market_slice
+    | Some policy ->
+        let* reduction = process_borrow_recalls reduction market_slice policy in
+        let* reduction =
+          apply_observed_borrow_fees reduction market_slice policy
+        in
+        apply_cash_interest reduction market_slice policy
 
   let validate_target_ids state ids =
     let expected =
@@ -983,6 +1265,36 @@ module Interactive = struct
                (Id.Corporate_action.Set.mem action.id state.applied_action_ids))
         market_slice.corporate_actions
     in
+    let borrow_observations_valid =
+      List.for_all
+        (fun (observation : Financing.borrow_observation) ->
+          Option.is_some
+            (Risk.instrument state.config.risk observation.instrument_id)
+          && Ptime.compare observation.effective_at market_slice.start_at <= 0
+          &&
+          match
+            Id.Instrument.Map.find_opt observation.instrument_id
+              state.latest_borrow
+          with
+          | None -> true
+          | Some previous ->
+              Ptime.compare observation.effective_at previous.effective_at > 0)
+        market_slice.borrow_observations
+    in
+    let cash_observations_valid =
+      List.for_all
+        (fun (observation : Financing.cash_rate_observation) ->
+          List.mem observation.currency expected_currencies
+          && Ptime.compare observation.effective_at market_slice.start_at <= 0
+          &&
+          match
+            Currency_map.find_opt observation.currency state.latest_cash_rates
+          with
+          | None -> true
+          | Some previous ->
+              Ptime.compare observation.effective_at previous.effective_at > 0)
+        market_slice.cash_rate_observations
+    in
     if List.length ids <> List.length actual || actual <> expected then
       Error "market slice must contain each configured instrument exactly once"
     else if
@@ -1000,6 +1312,10 @@ module Interactive = struct
     then Error "market slice base-currency FX rate must equal one"
     else if not actions_valid then
       Error "corporate action is unknown or was already applied"
+    else if not borrow_observations_valid then
+      Error "borrow observations must be known and advance effective time"
+    else if not cash_observations_valid then
+      Error "cash rate observations must be known and advance effective time"
     else
       match state.last_slice_sequence with
       | Some sequence
@@ -1095,8 +1411,47 @@ module Interactive = struct
       | Some value -> Ok value
       | None -> Error "fill instrument has no risk policy"
     in
+    let* borrow_constraint =
+      match (state.config.financing, order.Order.request.side) with
+      | Some policy, Order.Sell
+        when not (Scalar.Quantity.is_positive before_position) ->
+          let available =
+            match
+              Id.Instrument.Map.find_opt instrument.id state.latest_borrow
+            with
+            | None -> Scalar.Quantity.zero
+            | Some observation when observation.Financing.recalled ->
+                Scalar.Quantity.zero
+            | Some observation -> observation.available_quantity
+          in
+          let* located = Scalar.Quantity.absolute before_position in
+          let remaining =
+            match Scalar.Quantity.subtract available located with
+            | Ok value -> value
+            | Error _ -> Scalar.Quantity.zero
+          in
+          let limit =
+            Risk.Instrument_borrow_availability (instrument.id, remaining)
+          in
+          Ok
+            (Some
+               ( remaining,
+                 limit,
+                 match policy.Financing.locate_policy with
+                 | Financing.Reject_order -> true
+                 | Financing.Clip_fill -> false ))
+      | _ -> Ok None
+    in
     let quantity_limit =
-      Scalar.Quantity.minimum proposed.quantity policy_order_limit
+      let risk_limit =
+        Scalar.Quantity.minimum proposed.quantity policy_order_limit
+      in
+      match borrow_constraint with
+      | None -> risk_limit
+      | Some (available, _, reject) ->
+          if reject && Scalar.Quantity.compare proposed.quantity available > 0
+          then Scalar.Quantity.zero
+          else Scalar.Quantity.minimum risk_limit available
     in
     let requested_lots =
       Int64.div (Scalar.Quantity.to_micros quantity_limit) lot_value
@@ -1121,7 +1476,11 @@ module Interactive = struct
     let* limit =
       if not clipped then Ok None
       else if Int64.equal lots requested_lots then
-        Ok (Some (Risk.Maximum_order_quantity policy_order_limit))
+        match borrow_constraint with
+        | Some (available, limit, _)
+          when Scalar.Quantity.compare proposed.quantity available > 0 ->
+            Ok (Some limit)
+        | _ -> Ok (Some (Risk.Maximum_order_quantity policy_order_limit))
       else
         let next_lots = Int64.succ lots in
         let next_quantity =
@@ -1553,6 +1912,19 @@ module Interactive = struct
             Id.Instrument.Map.add bar.Bar.instrument_id bar.close_price marks)
           state.latest_marks market_slice.bars
       in
+      let latest_borrow =
+        List.fold_left
+          (fun observations (observation : Financing.borrow_observation) ->
+            Id.Instrument.Map.add observation.instrument_id observation
+              observations)
+          state.latest_borrow market_slice.borrow_observations
+      in
+      let latest_cash_rates =
+        List.fold_left
+          (fun observations (observation : Financing.cash_rate_observation) ->
+            Currency_map.add observation.currency observation observations)
+          state.latest_cash_rates market_slice.cash_rate_observations
+      in
       let reduction =
         {
           state;
@@ -1578,6 +1950,8 @@ module Interactive = struct
               market_slice.fx_rates;
           latest_bars;
           latest_marks;
+          latest_borrow;
+          latest_cash_rates;
           applied_action_ids;
         }
       in
@@ -1602,7 +1976,7 @@ module Interactive = struct
   end
 
   module Borrow_phase = struct
-    let run market_slice reduction = apply_borrow_fees reduction market_slice
+    let run market_slice reduction = apply_financing reduction market_slice
   end
 
   module Notifications_phase = struct

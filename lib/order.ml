@@ -16,7 +16,7 @@ type time_in_force =
   | Day of { venue_id : Id.Venue.t; calendar_id : Id.Venue_calendar.t }
   | Gtd of Ptime.t
 
-type origin = Direct | Target_rebalance | Margin_liquidation
+type origin = Direct | Target_rebalance | Margin_liquidation | Borrow_recall
 
 type request = {
   instrument_id : Id.Instrument.t;
@@ -273,6 +273,7 @@ let origin_to_string = function
   | Direct -> "direct"
   | Target_rebalance -> "target_rebalance"
   | Margin_liquidation -> "margin_liquidation"
+  | Borrow_recall -> "borrow_recall"
 
 let status_to_string = function
   | Working -> "working"

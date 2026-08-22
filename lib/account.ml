@@ -33,6 +33,8 @@ type cash_attribution = {
   amount : Scalar.Money.t;
   fx_rate : Scalar.Price.t;
   base_value : Scalar.Money.t;
+  interest : Scalar.Money.t;
+  base_interest : Scalar.Money.t;
 }
 
 type position_attribution = {
@@ -64,6 +66,7 @@ type t = {
   base_currency : string;
   initial_cash : Scalar.Money.t Currency_map.t;
   cash : Scalar.Money.t Currency_map.t;
+  cash_interest : Scalar.Money.t Currency_map.t;
   positions : position Id.Instrument.Map.t;
 }
 
@@ -81,6 +84,7 @@ type valuation = {
   dividend_pnl : Scalar.Money.t;
   execution_fees : Scalar.Money.t;
   borrow_fees : Scalar.Money.t;
+  cash_interest : Scalar.Money.t;
   total_fees : Scalar.Money.t;
   cash_balances : cash_attribution list;
   positions : position_attribution list;
@@ -134,6 +138,7 @@ let create ~base_currency ~initial_cash =
           base_currency;
           initial_cash = balances;
           cash = balances;
+          cash_interest = Currency_map.map (fun _ -> Scalar.Money.zero) balances;
           positions = Id.Instrument.Map.empty;
         }
 
@@ -165,6 +170,7 @@ let of_initial_portfolio (initial : Initial_portfolio.t) =
       base_currency = initial.base_currency;
       initial_cash = cash;
       cash;
+      cash_interest = Currency_map.map (fun _ -> Scalar.Money.zero) cash;
       positions;
     }
 
@@ -387,8 +393,8 @@ let apply_borrow_fee (state : t) ~instrument_id ~quote_currency ~fee =
   let current = position state instrument_id in
   if not (Scalar.Quantity.is_negative current.quantity) then
     Error "borrow fees require an open short position"
-  else if Scalar.Money.compare fee Scalar.Money.zero <= 0 then
-    Error "borrow fee must be positive"
+  else if Scalar.Money.equal fee Scalar.Money.zero then
+    Error "borrow fee must be nonzero"
   else
     let* cash_delta = Scalar.Money.negate fee in
     let* state = adjust_cash state quote_currency cash_delta in
@@ -399,6 +405,22 @@ let apply_borrow_fee (state : t) ~instrument_id ~quote_currency ~fee =
       {
         state with
         positions = update_position state.positions instrument_id updated;
+      }
+
+let apply_cash_interest (state : t) ~currency ~interest =
+  if Scalar.Money.equal interest Scalar.Money.zero then Ok state
+  else
+    let* state = adjust_cash state currency interest in
+    let current =
+      Option.value
+        (Currency_map.find_opt currency state.cash_interest)
+        ~default:Scalar.Money.zero
+    in
+    let* total = Scalar.Money.add current interest in
+    Ok
+      {
+        state with
+        cash_interest = Currency_map.add currency total state.cash_interest;
       }
 
 let value (state : t) ~instruments ~marks ~fx_rates =
@@ -430,7 +452,13 @@ let value (state : t) ~instruments ~marks ~fx_rates =
   let cash_attribution (currency, amount) =
     let* fx_rate = fx currency in
     let* base_value = Scalar.Money.convert amount ~rate:fx_rate in
-    Ok { currency; amount; fx_rate; base_value }
+    let interest =
+      Option.value
+        (Currency_map.find_opt currency state.cash_interest)
+        ~default:Scalar.Money.zero
+    in
+    let* base_interest = Scalar.Money.convert interest ~rate:fx_rate in
+    Ok { currency; amount; fx_rate; base_value; interest; base_interest }
   in
   let* cash_balances =
     Currency_map.bindings state.cash
@@ -584,6 +612,13 @@ let value (state : t) ~instruments ~marks ~fx_rates =
         add total item.base_value)
       (Ok Scalar.Money.zero) cash_balances
   in
+  let* cash_interest =
+    List.fold_left
+      (fun result item ->
+        let* total = result in
+        add total item.base_interest)
+      (Ok Scalar.Money.zero) cash_balances
+  in
   let accumulate result item =
     let* ( net_market_value,
            long_market_value,
@@ -650,6 +685,7 @@ let value (state : t) ~instruments ~marks ~fx_rates =
            Scalar.Money.zero ))
       positions
   in
+  let* realized_pnl = add realized_pnl cash_interest in
   let* gross_exposure = add long_market_value short_market_value in
   let* equity = add cash net_market_value in
   let add_attribution (components : execution_fee_component_attribution list)
@@ -696,6 +732,7 @@ let value (state : t) ~instruments ~marks ~fx_rates =
       dividend_pnl;
       execution_fees;
       borrow_fees;
+      cash_interest;
       total_fees;
       cash_balances;
       positions;
