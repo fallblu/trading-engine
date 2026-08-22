@@ -629,6 +629,85 @@
           "format": "jsonl"
         }
       ]
+    },
+    {
+      "name": "scenario-v10",
+      "schema": "v10/scenario.schema.json",
+      "version_field": "contract_version",
+      "version": "10",
+      "sources": [
+        {
+          "path": "v10/fixtures/demo.scenario.json",
+          "format": "json"
+        },
+        {
+          "path": "v10/fixtures/fill-clipped.scenario.json",
+          "format": "json"
+        },
+        {
+          "path": "strategy/v8/fixtures/external.scenario.json",
+          "format": "json"
+        }
+      ]
+    },
+    {
+      "name": "scenario-stream-v10",
+      "schema": "v10/scenario-stream.schema.json",
+      "version_field": "contract_version",
+      "version": "10",
+      "sources": [
+        {
+          "path": "v10/fixtures/demo.scenario.jsonl",
+          "format": "jsonl"
+        },
+        {
+          "path": "strategy/v8/fixtures/external.scenario.jsonl",
+          "format": "jsonl"
+        }
+      ]
+    },
+    {
+      "name": "journal-v10",
+      "schema": "v10/journal.schema.json",
+      "version_field": "contract_version",
+      "version": "10",
+      "sources": [
+        {
+          "path": "v10/fixtures/demo.journal.jsonl",
+          "format": "jsonl"
+        },
+        {
+          "path": "v10/fixtures/fill-clipped.journal.jsonl",
+          "format": "jsonl"
+        }
+      ]
+    },
+    {
+      "name": "strategy-message-v8",
+      "schema": "strategy/v8/message.schema.json",
+      "version_field": "strategy_protocol_version",
+      "version": "8",
+      "sources": [
+        {
+          "path": "strategy/v8/fixtures/external.strategy.jsonl",
+          "format": "jsonl",
+          "extract": [
+            "message"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "strategy-transcript-v8",
+      "schema": "strategy/v8/transcript.schema.json",
+      "version_field": "strategy_protocol_version",
+      "version": "8",
+      "sources": [
+        {
+          "path": "strategy/v8/fixtures/external.strategy.jsonl",
+          "format": "jsonl"
+        }
+      ]
     }
   ]
 }

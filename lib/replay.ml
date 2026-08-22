@@ -68,15 +68,26 @@ let add_audit_count count events =
     Error (replay "audit event count is exhausted")
   else Ok (Int64.add count added)
 
+let engine_config ~contract_version ~risk ~venue_calendars ~execution_model
+    ~execution ~financing ~max_internal_events =
+  match financing with
+  | None ->
+      Engine.config_v8 ~contract_version ~risk ~venue_calendars ~execution_model
+        ~execution ~max_internal_events
+  | Some financing ->
+      Engine.config_v10 ~contract_version ~risk ~venue_calendars
+        ~execution_model ~execution ~financing ~max_internal_events
+
 let run ~scenario_sha256 ?journal_path ?(durability = Artifact_writer.Buffered)
     scenario =
   let* strategy_state =
     Scripted_strategy.create scenario.Scenario.schedule |> reducer_result
   in
   let* config =
-    Engine.config_v8 ~contract_version:scenario.contract_version
+    engine_config ~contract_version:scenario.contract_version
       ~risk:scenario.risk ~venue_calendars:scenario.venue_calendars
       ~execution_model:scenario.execution_model ~execution:scenario.execution
+      ~financing:scenario.financing
       ~max_internal_events:scenario.max_internal_events
     |> reducer_result
   in
@@ -153,10 +164,10 @@ let run_stream_pass ~scenario_sha256 ~journal channel =
       | Error _ as error -> error
       | Ok strategy_state -> (
           match
-            Engine.config_v8 ~contract_version:header.contract_version
+            engine_config ~contract_version:header.contract_version
               ~risk:header.Scenario.risk ~venue_calendars:header.venue_calendars
               ~execution_model:header.execution_model
-              ~execution:header.execution
+              ~execution:header.execution ~financing:header.financing
               ~max_internal_events:header.max_internal_events
             |> reducer_result
           with

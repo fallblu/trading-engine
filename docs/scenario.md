@@ -4,8 +4,8 @@ A replay scenario uses either one strict JSON object or a strict JSON Lines stre
 weights, quantities, money, and sequences are canonical JSON strings. Counts and basis points are
 JSON integers. Unknown, missing, duplicate, noncanonical, and non-finite values fail parsing.
 
-Use [the v9 demo](../contracts/v9/fixtures/demo.scenario.json) as the canonical complete example.
-The [scenario JSON Schema](../contracts/v9/scenario.schema.json) provides structural validation.
+Use [the v10 demo](../contracts/v10/fixtures/demo.scenario.json) as the canonical complete example.
+The [scenario JSON Schema](../contracts/v10/scenario.schema.json) provides structural validation.
 The engine parser also enforces cross-field and cross-record invariants. Diagnostics identify the
 failed field or array item. Stream diagnostics additionally retain the record line and sequence.
 
@@ -32,8 +32,8 @@ The batch object and stream header share one domain-construction path and the sa
 checks. Stream items reuse the batch slice and intent validators directly; no synthetic batch
 scenario is constructed.
 
-The [stream record JSON Schema](../contracts/v9/scenario-stream.schema.json) validates each line,
-and [the v9 stream fixture](../contracts/v9/fixtures/demo.scenario.jsonl) is the canonical example.
+The [stream record JSON Schema](../contracts/v10/scenario-stream.schema.json) validates each line,
+and [the v10 stream fixture](../contracts/v10/fixtures/demo.scenario.jsonl) is the canonical example.
 The engine validates the entire stream before creating a journal. It then replays one record at a
 time without retaining prior slices, scheduled batches, or audit events. Reducer state still
 retains current account, order, target, and latest-bar state required by execution semantics.
@@ -42,7 +42,7 @@ retains current account, order, target, and latest-bar state required by executi
 
 | Field | Meaning |
 |---|---|
-| `contract_version` | Required string identifying this file contract; v9 is `"9"` |
+| `contract_version` | Required string identifying this file contract; v10 is `"10"` |
 | `metadata` | Required arbitrary JSON object preserved for provenance and ignored by execution |
 | `run_id` | Stable identity used in generated IDs |
 | `base_currency` | Reporting currency used for aggregate risk and valuation |
@@ -51,6 +51,7 @@ retains current account, order, target, and latest-bar state required by executi
 | `venue_calendars` | Immutable venue/session policies covering every configured instrument |
 | `risk` | Signed position, exposure, leverage, margin, and borrow policy |
 | `execution` | Capacity and fee configuration |
+| `financing` | Borrow/cash day-count, compounding, locate, recall, and missing-data policies |
 | `max_internal_events` | Positive reducer feedback cap, at most 100,000 |
 | `schedule` | Intents emitted after named slices, at most 4,096 per batch |
 | `slices` | Complete synchronized market observations |
@@ -110,7 +111,7 @@ they may overlap and can constrain gross, long, short, absolute net, and gross-t
 concentration exposure. Admission and fill clipping include working-order reservations. Every
 applicable group is enforced, with group identity providing deterministic tie ordering.
 
-Contract v9 execution contains a stable `model` and a model-owned `configuration`. For
+Contract v10 execution contains a stable `model` and a model-owned `configuration`. For
 `completed_bar_v1`, configuration version `"2"` contains:
 
 - `version`, the strict model-configuration contract version
@@ -168,7 +169,7 @@ checks run during parsing; position and outstanding-order checks run in the redu
 ## Market slices
 
 Each slice has common timing, one bar per configured instrument, a complete set of currency-to-base
-FX marks, and zero or more corporate actions:
+FX marks, zero or more corporate actions, and effective-time borrow and cash-rate observations:
 
 Timestamps use `YYYY-MM-DD[Tt]HH:MM:SS`, optional one-to-six fractional-second digits, and either
 `Z`/`z` or a colonized numeric offset such as `-05:00`. Seconds range from `00` through `59`.
@@ -194,7 +195,13 @@ Audit timestamps use the same boundary.
   "fx_rates": [
     { "currency": "USD", "rate": "1" }
   ],
-  "corporate_actions": []
+  "corporate_actions": [],
+  "borrow_observations": [
+    { "instrument_id": "asset-a", "effective_at": "2026-01-02T14:30:00Z", "available_quantity": "1000", "annual_rate_bps": 100, "recalled": false }
+  ],
+  "cash_rate_observations": [
+    { "currency": "USD", "effective_at": "2026-01-02T14:30:00Z", "credit_rate_bps": 100, "debit_rate_bps": 200 }
+  ]
 }
 ```
 
@@ -205,6 +212,13 @@ availability does not precede end, and receipt does not precede availability. OH
 their usual range relationships. Volume may be fractional but must align to the instrument lot.
 Each slice supplies exactly one positive FX rate for every scenario currency, and the
 base-currency rate is exactly one.
+
+Financing observations are unique per instrument or currency within a slice, effective no later
+than the slice start, and strictly advance the effective time for their key across slices. A recall
+has zero available quantity. The latest observation remains active until replaced. The top-level
+`financing` object selects `actual_365` or `actual_360`, `simple` or `daily`, `reject` or `zero`
+missing-data handling, `reject_order` or `clip_fill` locate behavior, and
+`reject_new_shorts` or `close_out` recall behavior.
 
 Supported corporate actions are exact-ratio `split` and per-unit `cash_dividend` records. Action
 IDs are unique across the scenario. Actions are applied in canonical ID order before borrow fees
@@ -220,7 +234,7 @@ than the next slice `start_at`.
 
 ## Audit journal
 
-The [journal JSON Schema](../contracts/v9/journal.schema.json) validates each JSON Lines record.
+The [journal JSON Schema](../contracts/v10/journal.schema.json) validates each JSON Lines record.
 Every record contains `contract_version`, `engine_sequence`, deterministic `event_id`, ordered
 `causation_ids`, `run_id`, `recorded_at`, `event_type`, and an event-specific `payload`. Causal
 references are unique prior event IDs from the same run. The version is repeated on every record
@@ -235,11 +249,13 @@ basis, original weight when applicable, computed quantity, and sizing reference 
 `eligible_after_slice_sequence`; fills use `slice_sequence`. `fill_clipped` records the proposed
 fill and the greatest lot-aligned permitted quantity. Its reason taxonomy version `1` names one of
 `max_order_quantity`, `max_long_position`, `max_short_position`, `max_gross_exposure`,
-`max_leverage`, or `initial_margin` and carries a quantity, money, ratio, or basis-points threshold.
+`max_leverage`, `initial_margin`, or `instrument_borrow_availability` and carries a quantity, money,
+ratio, or basis-points threshold.
 Each order snapshot retains both creation and latest-update event IDs.
 
-The journal also records split/dividend application, split-driven order adjustments, short borrow
-fees, margin calls, liquidation-origin orders, and restoration. Every valuation contains complete
+The journal also records split/dividend application, split-driven order adjustments, observed
+borrow charges, recalls and close-outs, cash-interest entries, margin calls, liquidation-origin
+orders, and restoration. Every valuation contains complete
 per-currency cash attribution, signed per-instrument native and base-currency attribution, long,
 short, net, and gross exposure, execution and borrow fees, and its initial/maintenance margin
 snapshot. Those rows reconcile exactly to the aggregate valuation.

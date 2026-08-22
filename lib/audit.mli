@@ -9,6 +9,7 @@ type cancellation_reason =
   | Day_expired
   | Gtd_expired
   | Margin_call
+  | Borrow_recall
 
 type target_basis = Weights | Quantities
 
@@ -77,6 +78,33 @@ type event =
       period_start : Ptime.t;
       period_end : Ptime.t;
       fee : Scalar.Money.t;
+    }
+  | Borrow_charge_applied of {
+      observation : Financing.borrow_observation;
+      quote_currency : string;
+      short_quantity : Scalar.Quantity.t;
+      reference_price : Scalar.Price.t;
+      day_count : Financing.day_count;
+      compounding : Financing.compounding;
+      period_start : Ptime.t;
+      period_end : Ptime.t;
+      amount : Scalar.Money.t;
+    }
+  | Borrow_recall_received of {
+      observation : Financing.borrow_observation;
+      short_quantity : Scalar.Quantity.t;
+      close_out_quantity : Scalar.Quantity.t;
+    }
+  | Cash_interest_applied of {
+      observation : Financing.cash_rate_observation;
+      opening_balance : Scalar.Money.t;
+      applied_rate_bps : int;
+      day_count : Financing.day_count;
+      compounding : Financing.compounding;
+      period_start : Ptime.t;
+      period_end : Ptime.t;
+      amount : Scalar.Money.t;
+      closing_balance : Scalar.Money.t;
     }
   | Margin_call_triggered of valuation
   | Margin_restored of valuation

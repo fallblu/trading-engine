@@ -71,6 +71,7 @@ type fill_limit =
   | Instrument_maximum_short_position of Id.Instrument.t * Scalar.Quantity.t
   | Instrument_maximum_notional of Id.Instrument.t * Scalar.Money.t
   | Instrument_shorting_disabled of Id.Instrument.t
+  | Instrument_borrow_availability of Id.Instrument.t * Scalar.Quantity.t
   | Instrument_initial_margin of Id.Instrument.t * int
   | Group_maximum_gross of Id.Risk_group.t * Scalar.Money.t
   | Group_maximum_long of Id.Risk_group.t * Scalar.Money.t

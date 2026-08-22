@@ -66,3 +66,11 @@ compare_journal \
   v9-fill-clipped \
   contracts/v9/fixtures/fill-clipped.scenario.json \
   contracts/v9/fixtures/fill-clipped.journal.jsonl
+compare_journal \
+  v10-demo \
+  contracts/v10/fixtures/demo.scenario.json \
+  contracts/v10/fixtures/demo.journal.jsonl
+compare_journal \
+  v10-fill-clipped \
+  contracts/v10/fixtures/fill-clipped.scenario.json \
+  contracts/v10/fixtures/fill-clipped.journal.jsonl
