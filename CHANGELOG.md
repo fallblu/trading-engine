@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add conservative next-open and adverse-touch completed-bar execution models with strict fixed
+  spread and linear participation-impact configuration, explicit missing-volume policy,
+  tick-aligned prices, and separate price-component audit attribution.
+- Publish scenario/journal contract v13 and external strategy protocol v11 while preserving v12
+  and protocol v10 as frozen compatibility contracts.
+
 - Add exact stock-dividend, rights, and spin-off distributions with explicit basis allocation,
   fractional rejection or cash-in-lieu policy, destination currency validation, target adjustment,
   and complete journal attribution.

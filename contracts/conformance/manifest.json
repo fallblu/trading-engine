@@ -806,6 +806,55 @@
       "sources": [
         { "path": "strategy/v10/fixtures/external.strategy.jsonl", "format": "jsonl" }
       ]
+    },
+    {
+      "name": "scenario-v13",
+      "schema": "v13/scenario.schema.json",
+      "version_field": "contract_version",
+      "version": "13",
+      "sources": [
+        { "path": "v13/fixtures/demo.scenario.json", "format": "json" },
+        { "path": "v13/fixtures/fill-clipped.scenario.json", "format": "json" },
+        { "path": "strategy/v11/fixtures/external.scenario.json", "format": "json" }
+      ]
+    },
+    {
+      "name": "scenario-stream-v13",
+      "schema": "v13/scenario-stream.schema.json",
+      "version_field": "contract_version",
+      "version": "13",
+      "sources": [
+        { "path": "v13/fixtures/demo.scenario.jsonl", "format": "jsonl" },
+        { "path": "strategy/v11/fixtures/external.scenario.jsonl", "format": "jsonl" }
+      ]
+    },
+    {
+      "name": "journal-v13",
+      "schema": "v13/journal.schema.json",
+      "version_field": "contract_version",
+      "version": "13",
+      "sources": [
+        { "path": "v13/fixtures/demo.journal.jsonl", "format": "jsonl" },
+        { "path": "v13/fixtures/fill-clipped.journal.jsonl", "format": "jsonl" }
+      ]
+    },
+    {
+      "name": "strategy-message-v11",
+      "schema": "strategy/v11/message.schema.json",
+      "version_field": "strategy_protocol_version",
+      "version": "11",
+      "sources": [
+        { "path": "strategy/v11/fixtures/external.strategy.jsonl", "format": "jsonl", "extract": ["message"] }
+      ]
+    },
+    {
+      "name": "strategy-transcript-v11",
+      "schema": "strategy/v11/transcript.schema.json",
+      "version_field": "strategy_protocol_version",
+      "version": "11",
+      "sources": [
+        { "path": "strategy/v11/fixtures/external.strategy.jsonl", "format": "jsonl" }
+      ]
     }
   ]
 }

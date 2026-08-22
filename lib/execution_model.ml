@@ -27,9 +27,26 @@ module Completed_bar_v1 = struct
   let start_slice = Execution.start_slice
 end
 
+module Completed_bar_next_open_v1 = struct
+  let name = "completed_bar_next_open_v1"
+  let start_slice = Execution.start_slice_next_open
+end
+
+module Completed_bar_adverse_touch_v1 = struct
+  let name = "completed_bar_adverse_touch_v1"
+  let start_slice = Execution.start_slice_adverse_touch
+end
+
 let of_module model = model
 let name (module Model : S) = Model.name
-let builtins : t list = [ (module Completed_bar_v1) ]
+
+let builtins : t list =
+  [
+    (module Completed_bar_v1);
+    (module Completed_bar_next_open_v1);
+    (module Completed_bar_adverse_touch_v1);
+  ]
+
 let supported = List.map name builtins
 
 let completed_bar_v1_contract =
@@ -37,7 +54,7 @@ let completed_bar_v1_contract =
     version = "2";
     previous_versions = [ "1" ];
     scenario_contract_versions =
-      [ "12"; "11"; "10"; "9"; "8"; "7"; "6"; "5"; "4"; "3" ];
+      [ "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6"; "5"; "4"; "3" ];
     required_fields = [ "version"; "participation_bps"; "fee_schedules" ];
     legacy_required_fields =
       [ "version"; "participation_bps"; "fixed_fee"; "fee_bps" ];
@@ -54,9 +71,40 @@ let completed_bar_v1_contract =
         ];
   }
 
+let conservative_contract =
+  {
+    version = "1";
+    previous_versions = [];
+    scenario_contract_versions = [ "13" ];
+    required_fields =
+      [
+        "version";
+        "participation_bps";
+        "fee_schedules";
+        "spread_model";
+        "impact_model";
+      ];
+    legacy_required_fields = [];
+    supported_order_types = [ "market"; "limit"; "stop"; "stop_limit" ];
+    data_requirements =
+      [ "completed_ohlcv_bars"; "bar_volume_for_linear_impact" ];
+    limits =
+      `Assoc
+        [
+          ( "participation_bps",
+            `Assoc [ ("minimum", `Int 0); ("maximum", `Int 10_000) ] );
+          ( "half_spread_bps",
+            `Assoc [ ("minimum", `Int 0); ("maximum", `Int 10_000) ] );
+          ( "impact_coefficient_bps",
+            `Assoc [ ("minimum", `Int 0); ("maximum", `Int 10_000) ] );
+        ];
+  }
+
 let configuration_contract model =
   match name model with
   | "completed_bar_v1" -> completed_bar_v1_contract
+  | "completed_bar_next_open_v1" | "completed_bar_adverse_touch_v1" ->
+      conservative_contract
   | unsupported ->
       invalid_arg
         (Printf.sprintf "execution model %S has no configuration contract"
@@ -98,10 +146,11 @@ let capabilities_to_yojson () =
              ("required_fields", strings contract.required_fields);
              ( "configuration_required_fields",
                `Assoc
-                 [
-                   (contract.version, strings contract.required_fields);
-                   ("1", strings contract.legacy_required_fields);
-                 ] );
+                 ((contract.version, strings contract.required_fields)
+                 :: List.map
+                      (fun version ->
+                        (version, strings contract.legacy_required_fields))
+                      contract.previous_versions) );
              ("supported_order_types", strings contract.supported_order_types);
              ("data_requirements", strings contract.data_requirements);
              ("limits", contract.limits);
