@@ -52,6 +52,16 @@
       "rule": "structural"
     },
     {
+      "name": "scenario-unsupported-execution-configuration",
+      "artifact": "scenario-v5",
+      "kind": "scenario",
+      "source": "v5/fixtures/demo.scenario.json",
+      "mutations": [{"op": "replace", "path": ["execution", "configuration", "version"], "value": "2"}],
+      "schema_expectation": "reject",
+      "runtime_expectation": "reject",
+      "rule": "structural"
+    },
+    {
       "name": "scenario-duplicate-instrument",
       "artifact": "scenario-v5",
       "kind": "scenario",

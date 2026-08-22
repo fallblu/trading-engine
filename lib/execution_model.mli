@@ -19,10 +19,23 @@ end
 
 type t
 
+type configuration_contract = private {
+  version : string;
+  scenario_contract_versions : string list;
+  required_fields : string list;
+  supported_order_types : string list;
+  data_requirements : string list;
+  limits : Yojson.Safe.t;
+}
+
 val of_module : (module S) -> t
 val name : t -> string
 val find : string -> (t, string) result
 val supported : string list
+val configuration_contract : t -> configuration_contract
+val supports_configuration : t -> string -> bool
+val supports_contract : t -> string -> bool
+val capabilities_to_yojson : unit -> Yojson.Safe.t
 
 val start_slice :
   t ->

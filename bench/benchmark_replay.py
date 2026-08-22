@@ -199,9 +199,12 @@ def build_scenario(case: BenchmarkCase) -> dict[str, object]:
             },
             "execution": {
                 "model": "completed_bar_v1",
-                "participation_bps": 10000,
-                "fixed_fee": "0",
-                "fee_bps": 0,
+                "configuration": {
+                    "version": "1",
+                    "participation_bps": 10000,
+                    "fixed_fee": "0",
+                    "fee_bps": 0,
+                },
             },
             "max_internal_events": max(1000, case.active_order_count * 4 + 16),
             "schedule": schedule,

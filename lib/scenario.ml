@@ -363,15 +363,7 @@ let parse_risk base_currency instruments json =
     ~max_short_position ~max_gross_exposure ~max_leverage ~initial_margin_bps
     ~maintenance_margin_bps ~short_borrow_bps
 
-let parse_execution json =
-  let* fields =
-    object_fields ~name:"execution"
-      ~expected:[ "model"; "participation_bps"; "fixed_fee"; "fee_bps" ]
-      json
-  in
-  let* model_json = field fields "model" in
-  let* model_name = string ~name:"execution model" model_json in
-  let* execution_model = Execution_model.find model_name in
+let parse_execution_values fields =
   let* participation_json = field fields "participation_bps" in
   let* participation_bps =
     integer ~name:"participation_bps" participation_json
@@ -380,8 +372,69 @@ let parse_execution json =
   let* fixed_fee = parse_money ~name:"fixed_fee" fixed_json in
   let* fee_json = field fields "fee_bps" in
   let* fee_bps = integer ~name:"fee_bps" fee_json in
-  let* execution = Execution.create ~participation_bps ~fixed_fee ~fee_bps in
+  Execution.create ~participation_bps ~fixed_fee ~fee_bps
+
+let parse_legacy_execution ~contract_version json =
+  let* fields =
+    object_fields ~name:"execution"
+      ~expected:[ "model"; "participation_bps"; "fixed_fee"; "fee_bps" ]
+      json
+  in
+  let* model_json = field fields "model" in
+  let* model_name = string ~name:"execution model" model_json in
+  let* execution_model = Execution_model.find model_name in
+  let* () =
+    if Execution_model.supports_contract execution_model contract_version then
+      Ok ()
+    else
+      Error
+        (Printf.sprintf
+           "execution model %S does not support scenario contract %S" model_name
+           contract_version)
+  in
+  let* execution = parse_execution_values fields in
   Ok (execution_model, execution)
+
+let parse_versioned_execution ~contract_version json =
+  let* fields =
+    object_fields ~name:"execution" ~expected:[ "model"; "configuration" ] json
+  in
+  let* model_json = field fields "model" in
+  let* model_name = string ~name:"execution model" model_json in
+  let* execution_model = Execution_model.find model_name in
+  let* () =
+    if Execution_model.supports_contract execution_model contract_version then
+      Ok ()
+    else
+      Error
+        (Printf.sprintf
+           "execution model %S does not support scenario contract %S" model_name
+           contract_version)
+  in
+  let* configuration_json = field fields "configuration" in
+  let expected =
+    (Execution_model.configuration_contract execution_model).required_fields
+  in
+  let* configuration =
+    object_fields
+      ~name:(model_name ^ " execution configuration")
+      ~expected configuration_json
+  in
+  let* version_json = field configuration "version" in
+  let* version = string ~name:"execution configuration version" version_json in
+  if not (Execution_model.supports_configuration execution_model version) then
+    Error
+      (Printf.sprintf
+         "unsupported execution configuration version %S for model %S" version
+         model_name)
+  else
+    let* execution = parse_execution_values configuration in
+    Ok (execution_model, execution)
+
+let parse_execution ~contract_version json =
+  if String.equal contract_version "5" then
+    parse_versioned_execution ~contract_version json
+  else parse_legacy_execution ~contract_version json
 
 let parse_side json =
   let* value = string ~name:"side" json in
@@ -719,7 +772,8 @@ let construct_header ~root ~contract_path ~contract_version
       parse_risk base_currency instruments shape.risk |> at (child root "risk")
     in
     let* execution_model, execution =
-      parse_execution shape.execution |> at (child root "execution")
+      parse_execution ~contract_version shape.execution
+      |> at (child root "execution")
     in
     let header : stream_header =
       {

@@ -16,6 +16,7 @@ let capabilities_to_yojson () =
       ("scenario_formats", strings [ "json"; "jsonl" ]);
       ("journal_formats", strings [ "jsonl" ]);
       ("execution_models", strings Execution_model.supported);
+      ("execution_model_contracts", Execution_model.capabilities_to_yojson ());
       ("strategy_protocol_versions", strings [ strategy_protocol_version ]);
       ("resource_limits", Resource_limits.to_yojson ());
     ]

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Publish strict versioned configuration and machine-readable capabilities for each compiled
+  execution model.
 - Add contract v5 venue calendars with explicit venue and calendar identities, regular and
   extended trading phases, holidays, early closes, and reducer-independent clock resolution.
 - Protect `main` with required integration checks and a no-bypass review policy, and make rebase

@@ -2,13 +2,13 @@
   1.0.0
 
   $ ../bin/main.exe --capabilities
-  {"engine_version":"1.0.0","scenario_contract_versions":["5","4","3"],"journal_contract_versions":["5","4","3"],"scenario_formats":["json","jsonl"],"journal_formats":["jsonl"],"execution_models":["completed_bar_v1"],"strategy_protocol_versions":["3"],"resource_limits":{"version":"1","scenario_record_bytes":1048576,"strategy_message_bytes":1048576,"internal_events":100000,"catalog_instruments":4096,"intents_per_batch":4096,"artifact_record_bytes":2097152}}
+  {"engine_version":"1.0.0","scenario_contract_versions":["5","4","3"],"journal_contract_versions":["5","4","3"],"scenario_formats":["json","jsonl"],"journal_formats":["jsonl"],"execution_models":["completed_bar_v1"],"execution_model_contracts":[{"name":"completed_bar_v1","configuration_versions":["1"],"scenario_contract_versions":["5","4","3"],"required_fields":["version","participation_bps","fixed_fee","fee_bps"],"supported_order_types":["market","limit"],"data_requirements":["completed_ohlcv_bars"],"limits":{"participation_bps":{"minimum":0,"maximum":10000},"fee_bps":{"minimum":0,"maximum":10000},"fixed_fee":{"minimum":"0","unit":"money"}}}],"strategy_protocol_versions":["3"],"resource_limits":{"version":"1","scenario_record_bytes":1048576,"strategy_message_bytes":1048576,"internal_events":100000,"catalog_instruments":4096,"intents_per_batch":4096,"artifact_record_bytes":2097152}}
 
   $ ../bin/main.exe --validate-only --input ../contracts/v5/fixtures/demo.scenario.json
-  valid run=demo instruments=1 schedule=2 slices=4 scenario_sha256=4ec24403fa1f8725edcc399c608ad0bbaca5c17981e32c8e44f7347a4dd65b85
+  valid run=demo instruments=1 schedule=2 slices=4 scenario_sha256=b800732e40c20c06605c6a1352d3482a3f41fc7ae4b07594860a1c3f153a655c
 
   $ ../bin/main.exe --validate-only --input-format jsonl --input ../contracts/v5/fixtures/demo.scenario.jsonl
-  valid run=demo instruments=1 schedule=2 slices=4 scenario_sha256=793deb0f4bbf6f4192c283534e031da05a8c02071021f523ef6523763bc1904b
+  valid run=demo instruments=1 schedule=2 slices=4 scenario_sha256=ba51f0f956d90fcaf57ed905e58d89fbc707d050f54ba1334b0a8d0dbb32856d
 
   $ ../bin/main.exe --input-format jsonl --input ../contracts/v5/fixtures/demo.scenario.jsonl --journal streamed.journal.jsonl --durable-artifacts
   run=demo audits=20 orders=3 active=0 filled=2 rejected=0

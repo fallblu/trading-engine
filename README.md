@@ -54,7 +54,8 @@ scenario slices and scheduled or external intents
 - Signed average-cost accounting, realized and unrealized P&L, and equity reconciliation
 - Per-currency cash and per-instrument quantity, mark, value, basis, P&L, and fee attribution
 - Deterministic event IDs, ordered causal references, and order-creation attribution
-- Contract-selected compiled execution modules; v3 currently exposes `completed_bar_v1`
+- Contract-selected compiled execution modules with versioned model-owned configuration and
+  capability descriptors; v5 currently exposes `completed_bar_v1`
 - Strict batch JSON and bounded-memory JSON Lines scenario parsing with JSON Schemas
 - Versioned synchronous JSON Lines strategy processes with per-request timeouts and strict
   lifecycle supervision
