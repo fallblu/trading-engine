@@ -34,15 +34,23 @@ def expect_invalid(validator: Draft202012Validator, instance: object) -> None:
 
 
 def main() -> None:
-    if len(sys.argv) != 6:
+    if len(sys.argv) != 7:
         raise SystemExit(
             "usage: validate_strategy_schema.py SCENARIO_SCHEMA JOURNAL_SCHEMA "
-            "MESSAGE_SCHEMA TRANSCRIPT_SCHEMA TRANSCRIPT"
+            "DIAGNOSTIC_SCHEMA MESSAGE_SCHEMA TRANSCRIPT_SCHEMA TRANSCRIPT"
         )
-    scenario_path, journal_path, message_path, transcript_path, fixture_path = map(
-        Path, sys.argv[1:]
-    )
-    schemas = [load(path) for path in (scenario_path, journal_path, message_path)]
+    (
+        scenario_path,
+        journal_path,
+        diagnostic_path,
+        message_path,
+        transcript_path,
+        fixture_path,
+    ) = map(Path, sys.argv[1:])
+    schemas = [
+        load(path)
+        for path in (scenario_path, journal_path, diagnostic_path, message_path)
+    ]
     transcript_schema = load(transcript_path)
     for schema in [*schemas, transcript_schema]:
         Draft202012Validator.check_schema(schema)

@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/fallblu/trading-engine/contracts/diagnostic/v1/diagnostic.schema.json",
+  "title": "Trading Engine diagnostic contract v1",
+  "description": "One stable machine-readable process or file boundary failure.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["diagnostic_version", "code", "phase", "message", "context", "cause"],
+  "properties": {
+    "diagnostic_version": { "const": "1" },
+    "code": {
+      "enum": [
+        "cli.invalid_arguments",
+        "input.io",
+        "scenario.invalid_json",
+        "scenario.invalid",
+        "scenario.unsupported_contract",
+        "scenario_stream.invalid",
+        "scenario_stream.changed",
+        "resource.limit",
+        "replay.failed",
+        "reducer.failed",
+        "strategy.invalid_configuration",
+        "strategy.protocol",
+        "strategy.timeout",
+        "strategy.process",
+        "strategy.exit",
+        "artifact.exists",
+        "artifact.io",
+        "artifact.state"
+      ]
+    },
+    "phase": {
+      "enum": ["cli", "input", "validation", "replay", "reducer", "strategy", "artifact"]
+    },
+    "message": { "type": "string", "minLength": 1 },
+    "context": { "$ref": "#/$defs/context" },
+    "cause": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/cause" }
+      ]
+    }
+  },
+  "$defs": {
+    "canonicalSequence": {
+      "type": "string",
+      "pattern": "^[1-9][0-9]*$"
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "json_path": { "type": "string", "minLength": 1 },
+        "line": { "type": "integer", "minimum": 1 },
+        "sequence": { "$ref": "#/$defs/canonicalSequence" },
+        "event_id": { "type": "string", "minLength": 1 },
+        "order_id": { "type": "string", "minLength": 1 },
+        "causation_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "cause": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "message"],
+      "properties": {
+        "kind": { "type": "string", "minLength": 1 },
+        "message": { "type": "string" },
+        "operation": { "type": "string", "minLength": 1 },
+        "target": { "type": "string" }
+      }
+    }
+  }
+}
