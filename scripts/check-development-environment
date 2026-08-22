@@ -27,18 +27,18 @@ if [ "$actual_switch" != "$local_switch" ]; then
   fail "opam selected '$actual_switch' instead of '$local_switch'"
 fi
 
-if ! opam repository list --switch "$repository_root" --short 2>/dev/null \
+if ! opam repository list --switch "$repository_root" --short --color never 2>/dev/null \
   | grep -Fqx "$coverage_repository_name"; then
   fail "the checksummed OCaml coverage package repository is not registered"
 fi
 coverage_repository_actual=$(
-  opam repository list --switch "$repository_root" 2>/dev/null \
+  opam repository list --switch "$repository_root" --color never 2>/dev/null \
     | awk '$2 == "trading-engine-coverage" { print $3 }'
 )
 if [ "$coverage_repository_actual" != "$coverage_repository_url" ]; then
   fail "the OCaml coverage package repository has an unexpected source"
 fi
-if opam pin list --switch "$repository_root" --short 2>/dev/null \
+if opam pin list --switch "$repository_root" --short --color never 2>/dev/null \
   | grep -Fqx "bisect_ppx"; then
   fail "bisect_ppx must resolve from the checksummed package repository"
 fi
