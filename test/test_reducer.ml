@@ -756,6 +756,36 @@ let interactive_reducer_matches_scripted_strategy () =
     "completed slice cannot accept strategy intents"
     (T.Engine.Interactive.resume completed_progress [] |> error)
 
+let explicit_phase_order_is_stable () =
+  let dividend =
+    T.Corporate_action.cash_dividend
+      ~id:(T.Id.Corporate_action.of_string_exn "phase-dividend")
+      ~instrument_id:(instrument_id "test-equity")
+      ~amount_per_unit:(money "1")
+    |> ok
+  in
+  let metric =
+    T.Strategy.Emit_metric { name = "phase.boundary"; value = "reached" }
+  in
+  let state = runner [ (1L, [ target "2" ]); (2L, [ metric; target "0" ]) ] in
+  let state, _ = Runner.process_slice state (market_slice 1L) |> ok in
+  let _, events =
+    Runner.process_slice state (market_slice ~corporate_actions:[ dividend ] 2L)
+    |> ok
+  in
+  Alcotest.(check (list string))
+    "actions, matching, notifications, targets, and valuation stay ordered"
+    [
+      "market_slice_received";
+      "cash_dividend_applied";
+      "fill_applied";
+      "metric_emitted";
+      "target_portfolio_requested";
+      "order_accepted";
+      "valuation";
+    ]
+    (event_names events)
+
 let tests =
   [
     Alcotest.test_case "market target retries after partial fill" `Quick
@@ -796,4 +826,6 @@ let tests =
       `Quick callbacks_use_current_slice_and_apply_responses_before_matching;
     Alcotest.test_case "interactive reducer matches scripted strategy" `Quick
       interactive_reducer_matches_scripted_strategy;
+    Alcotest.test_case "explicit phase order is stable" `Quick
+      explicit_phase_order_is_stable;
   ]
