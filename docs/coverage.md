@@ -16,9 +16,10 @@ Run the gate from a bootstrapped development environment:
 make coverage
 ```
 
-The command cleans Dune's generated build tree, recreates `_coverage/`, and writes three views of
-the same run. Cleaning first ensures every test executable and cram invocation contributes fresh
-instrumentation data:
+The command recreates the isolated `_build-coverage/` and `_coverage/` directories, then writes
+three views of the same run. A fresh isolated build ensures every test executable and cram
+invocation contributes new instrumentation data without changing the normal `_build/` tree or
+source-root editor artifacts:
 
 - `summary.txt` lists every production module and the project-wide instrumented-point result.
 - `html/index.html` highlights expression and control-flow points, making unvisited match arms,
