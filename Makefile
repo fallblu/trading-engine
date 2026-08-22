@@ -1,6 +1,6 @@
 export PATH := $(CURDIR)/.venv-schema/bin:$(PATH)
 
-.PHONY: bootstrap environment-check build test fuzz-smoke fuzz fmt-check check
+.PHONY: bootstrap environment-check build test coverage fuzz-smoke fuzz fmt-check check
 
 FUZZ_SEED ?= 20260821
 FUZZ_CASES ?= 10000
@@ -16,6 +16,9 @@ build:
 
 test:
 	opam exec -- dune runtest
+
+coverage: environment-check
+	@./scripts/check-ocaml-coverage
 
 fuzz-smoke:
 	opam exec -- dune exec test/fuzz_protocol.exe -- --seed 20260821 --cases 256
