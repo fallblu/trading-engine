@@ -66,7 +66,22 @@ let completed_bar_v1_contract =
     version = "2";
     previous_versions = [ "1" ];
     scenario_contract_versions =
-      [ "15"; "14"; "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6"; "5"; "4"; "3" ];
+      [
+        "16";
+        "15";
+        "14";
+        "13";
+        "12";
+        "11";
+        "10";
+        "9";
+        "8";
+        "7";
+        "6";
+        "5";
+        "4";
+        "3";
+      ];
     required_fields = [ "version"; "participation_bps"; "fee_schedules" ];
     legacy_required_fields =
       [ "version"; "participation_bps"; "fixed_fee"; "fee_bps" ];
@@ -87,7 +102,7 @@ let conservative_contract =
   {
     version = "1";
     previous_versions = [];
-    scenario_contract_versions = [ "15"; "14"; "13" ];
+    scenario_contract_versions = [ "16"; "15"; "14"; "13" ];
     required_fields =
       [
         "version";
@@ -116,7 +131,7 @@ let quote_trade_contract =
   {
     version = "1";
     previous_versions = [];
-    scenario_contract_versions = [ "15"; "14" ];
+    scenario_contract_versions = [ "16"; "15"; "14" ];
     required_fields = [ "version"; "participation_bps"; "fee_schedules" ];
     legacy_required_fields = [];
     supported_order_types = [ "market"; "limit"; "stop"; "stop_limit" ];
@@ -138,7 +153,7 @@ let order_book_contract =
   {
     version = "1";
     previous_versions = [];
-    scenario_contract_versions = [ "15" ];
+    scenario_contract_versions = [ "16"; "15" ];
     required_fields =
       [ "version"; "participation_bps"; "fee_schedules"; "max_depth_levels" ];
     legacy_required_fields = [];

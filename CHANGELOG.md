@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Publish scenario/journal contract v16 and strategy protocol v14 with typed, dimensioned strategy
+  metrics while retaining string-only metric compatibility through v15 and protocol v13.
+
 - Add bounded level-two order-book replay with fresh snapshots, contiguous absolute updates,
   multi-level marketable depth, deterministic passive queue position, and locked-book support.
 - Publish scenario/journal contract v15 and external strategy protocol v13 while preserving v14
