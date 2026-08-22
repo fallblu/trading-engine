@@ -70,7 +70,7 @@ jobs:
         with:
           ocaml-compiler: "5.5.0"
       - working-directory: trading-engine
-        run: opam install . --deps-only --with-test --locked
+        run: make bootstrap
       - working-directory: trading-engine
         run: make build
       - working-directory: persistra
