@@ -48,6 +48,36 @@ let initialize_message_is_complete () =
     | `List values -> List.length values
     | _ -> Alcotest.fail "expected instruments")
 
+let legacy_initialize_message_remains_frozen () =
+  let initialization =
+    {
+      (initialization ()) with
+      scenario_contract_version = T.Contract.legacy_journal_version;
+    }
+  in
+  let message =
+    T.Strategy_protocol.initialize_message ~sequence:1L initialization
+  in
+  Alcotest.(check string)
+    "legacy protocol version" "3"
+    (match field "strategy_protocol_version" message with
+    | `String value -> value
+    | _ -> Alcotest.fail "expected version string");
+  let payload = field "payload" message in
+  Alcotest.(check bool)
+    "no v4 initial portfolio" false
+    (match payload with
+    | `Assoc fields -> List.mem_assoc "initial_portfolio" fields
+    | _ -> Alcotest.fail "expected payload object");
+  let execution = field "execution" payload in
+  Alcotest.(check bool)
+    "flat v3 execution" true
+    (match execution with
+    | `Assoc fields ->
+        List.mem_assoc "participation_bps" fields
+        && not (List.mem_assoc "configuration" fields)
+    | _ -> Alcotest.fail "expected execution object")
+
 let event_message_contains_complete_context () =
   let account = test_account () in
   let slice = market_slice 1L in
@@ -405,6 +435,8 @@ let tests =
   [
     Alcotest.test_case "initialize message is complete" `Quick
       initialize_message_is_complete;
+    Alcotest.test_case "legacy initialize message remains frozen" `Quick
+      legacy_initialize_message_remains_frozen;
     Alcotest.test_case "event context is complete" `Quick
       event_message_contains_complete_context;
     Alcotest.test_case "nonpositive equity omits weights" `Quick
