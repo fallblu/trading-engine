@@ -15,12 +15,6 @@ build: [
   ["dune" "subst"] {dev}
   ["dune" "build" "-p" name "-j" jobs]
 ]
-pin-depends: [
-  [
-    "bisect_ppx.dev"
-    "git+https://github.com/aantron/bisect_ppx.git#7061d643ff492b0045796357ee6917ded21fb1f0"
-  ]
-]
 depends: [
   "ocaml" {>= "5.5.0" & < "5.6"}
   "dune" {>= "3.24"}

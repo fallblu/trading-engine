@@ -69,8 +69,7 @@ parsers.
 
 ```sh
 cd ~/trading-engine
-opam switch set .
-opam install . --deps-only --with-test --locked
+make bootstrap
 make check
 ```
 
