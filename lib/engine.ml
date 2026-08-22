@@ -1079,7 +1079,7 @@ module Interactive = struct
           | Some limit ->
               if
                 String.equal reduction.state.config.contract_version
-                  Contract.previous_version
+                  Contract.legacy_journal_version
               then
                 emit reduction
                   (Audit.Margin_limited
