@@ -62,7 +62,9 @@ scenario slices and scheduled or external intents
 ## Quick start
 
 The project uses a local switch and does not modify the default switch. The complete check also
-uses Python's `jsonschema` package to validate the committed scenario and journal fixtures.
+uses Python's `jsonschema` package to validate every committed schema and canonical fixture. It
+checks the frozen-artifact hashes and runs the current differential corpus against the OCaml
+parsers.
 
 ```sh
 cd ~/trading-engine
@@ -202,6 +204,7 @@ do not provide reducer snapshots or restart recovery.
 - [Architecture](docs/architecture.md)
 - [Diagnostic contract](docs/diagnostics.md)
 - [Scenario contract](docs/scenario.md)
+- [Contract conformance corpus](contracts/conformance/README.md)
 - [Current contract v4 and conformance fixtures](contracts/v4/README.md)
 - [Frozen contract v2](contracts/v2/README.md)
 - [Historical contract v1](contracts/v1/README.md)

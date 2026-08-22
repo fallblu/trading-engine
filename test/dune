@@ -9,6 +9,7 @@
   test_reducer
   test_checkpoint4
   test_strategy_protocol
+  test_contract_conformance
   test_boundary_failures
   test_scenario
   test_engine)
@@ -23,6 +24,9 @@
   ../contracts/v4/scenario.schema.json
   ../contracts/v3/fixtures/demo.journal.jsonl
   ../contracts/v3/fixtures/demo.scenario.json
+  ../contracts/v3/fixtures/demo.scenario.jsonl
+  ../contracts/conformance/cases.json
+  ../contracts/strategy/v3/fixtures/external.strategy.jsonl
   fake_strategy.py)
  (libraries
   trading_engine
@@ -134,3 +138,11 @@
   ../scripts/check-schema-environment.py)
  (action
   (run python3 %{dep:test_development_environment.py})))
+
+(rule
+ (alias runtest)
+ (deps
+  validate_contract_conformance.py
+  (source_tree ../contracts))
+ (action
+  (run python3 %{dep:validate_contract_conformance.py})))
