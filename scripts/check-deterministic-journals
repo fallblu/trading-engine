@@ -110,3 +110,19 @@ compare_journal \
   v14-quote-trade \
   contracts/v14/fixtures/quote-trade.scenario.json \
   contracts/v14/fixtures/quote-trade.journal.jsonl
+compare_journal \
+  v15-demo \
+  contracts/v15/fixtures/demo.scenario.json \
+  contracts/v15/fixtures/demo.journal.jsonl
+compare_journal \
+  v15-fill-clipped \
+  contracts/v15/fixtures/fill-clipped.scenario.json \
+  contracts/v15/fixtures/fill-clipped.journal.jsonl
+compare_journal \
+  v15-quote-trade \
+  contracts/v15/fixtures/quote-trade.scenario.json \
+  contracts/v15/fixtures/quote-trade.journal.jsonl
+compare_journal \
+  v15-order-book \
+  contracts/v15/fixtures/order-book.scenario.json \
+  contracts/v15/fixtures/order-book.journal.jsonl

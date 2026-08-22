@@ -78,17 +78,20 @@
   ../contracts/v13/journal.schema.json
   ../contracts/v13/scenario-stream.schema.json
   ../contracts/v13/scenario.schema.json
-  ../contracts/v14/fixtures/demo.journal.jsonl
-  ../contracts/v14/fixtures/demo.scenario.json
-  ../contracts/v14/fixtures/demo.scenario.jsonl
-  ../contracts/v14/fixtures/fill-clipped.journal.jsonl
-  ../contracts/v14/fixtures/fill-clipped.scenario.json
-  ../contracts/v14/fixtures/quote-trade.journal.jsonl
-  ../contracts/v14/fixtures/quote-trade.scenario.json
-  ../contracts/v14/fixtures/quote-trade.scenario.jsonl
-  ../contracts/v14/journal.schema.json
-  ../contracts/v14/scenario-stream.schema.json
-  ../contracts/v14/scenario.schema.json
+  ../contracts/v15/fixtures/demo.journal.jsonl
+  ../contracts/v15/fixtures/demo.scenario.json
+  ../contracts/v15/fixtures/demo.scenario.jsonl
+  ../contracts/v15/fixtures/fill-clipped.journal.jsonl
+  ../contracts/v15/fixtures/fill-clipped.scenario.json
+  ../contracts/v15/fixtures/quote-trade.journal.jsonl
+  ../contracts/v15/fixtures/quote-trade.scenario.json
+  ../contracts/v15/fixtures/quote-trade.scenario.jsonl
+  ../contracts/v15/fixtures/order-book.journal.jsonl
+  ../contracts/v15/fixtures/order-book.scenario.json
+  ../contracts/v15/fixtures/order-book.scenario.jsonl
+  ../contracts/v15/journal.schema.json
+  ../contracts/v15/scenario-stream.schema.json
+  ../contracts/v15/scenario.schema.json
   ../contracts/v6/fixtures/demo.scenario.json
   ../contracts/v6/fixtures/demo.scenario.jsonl
   ../contracts/v5/fixtures/demo.scenario.json
@@ -105,7 +108,7 @@
   ../contracts/strategy/v9/fixtures/external.strategy.jsonl
   ../contracts/strategy/v10/fixtures/external.strategy.jsonl
   ../contracts/strategy/v11/fixtures/external.strategy.jsonl
-  ../contracts/strategy/v12/fixtures/external.strategy.jsonl
+  ../contracts/strategy/v13/fixtures/external.strategy.jsonl
   ../contracts/strategy/v4/fixtures/external.strategy.jsonl
   fake_strategy.py)
  (libraries
@@ -128,64 +131,85 @@
  (alias runtest)
  (deps
   validate_schemas.py
-  ../contracts/v14/fixtures/demo.journal.jsonl
-  ../contracts/v14/fixtures/demo.scenario.json
-  ../contracts/v14/fixtures/demo.scenario.jsonl
-  ../contracts/v14/journal.schema.json
-  ../contracts/v14/scenario-stream.schema.json
-  ../contracts/v14/scenario.schema.json)
+  ../contracts/v15/fixtures/demo.journal.jsonl
+  ../contracts/v15/fixtures/demo.scenario.json
+  ../contracts/v15/fixtures/demo.scenario.jsonl
+  ../contracts/v15/journal.schema.json
+  ../contracts/v15/scenario-stream.schema.json
+  ../contracts/v15/scenario.schema.json)
  (action
   (run
    python3
    %{dep:validate_schemas.py}
-   %{dep:../contracts/v14/scenario.schema.json}
-   %{dep:../contracts/v14/scenario-stream.schema.json}
-   %{dep:../contracts/v14/journal.schema.json}
-   %{dep:../contracts/v14/fixtures/demo.scenario.json}
-   %{dep:../contracts/v14/fixtures/demo.scenario.jsonl}
-   %{dep:../contracts/v14/fixtures/demo.journal.jsonl})))
+   %{dep:../contracts/v15/scenario.schema.json}
+   %{dep:../contracts/v15/scenario-stream.schema.json}
+   %{dep:../contracts/v15/journal.schema.json}
+   %{dep:../contracts/v15/fixtures/demo.scenario.json}
+   %{dep:../contracts/v15/fixtures/demo.scenario.jsonl}
+   %{dep:../contracts/v15/fixtures/demo.journal.jsonl})))
 
 (rule
  (alias runtest)
  (deps
   validate_schemas.py
-  ../contracts/v14/fixtures/quote-trade.journal.jsonl
-  ../contracts/v14/fixtures/quote-trade.scenario.json
-  ../contracts/v14/fixtures/quote-trade.scenario.jsonl
-  ../contracts/v14/journal.schema.json
-  ../contracts/v14/scenario-stream.schema.json
-  ../contracts/v14/scenario.schema.json)
+  ../contracts/v15/fixtures/quote-trade.journal.jsonl
+  ../contracts/v15/fixtures/quote-trade.scenario.json
+  ../contracts/v15/fixtures/quote-trade.scenario.jsonl
+  ../contracts/v15/journal.schema.json
+  ../contracts/v15/scenario-stream.schema.json
+  ../contracts/v15/scenario.schema.json)
  (action
   (run
    python3
    %{dep:validate_schemas.py}
-   %{dep:../contracts/v14/scenario.schema.json}
-   %{dep:../contracts/v14/scenario-stream.schema.json}
-   %{dep:../contracts/v14/journal.schema.json}
-   %{dep:../contracts/v14/fixtures/quote-trade.scenario.json}
-   %{dep:../contracts/v14/fixtures/quote-trade.scenario.jsonl}
-   %{dep:../contracts/v14/fixtures/quote-trade.journal.jsonl})))
+   %{dep:../contracts/v15/scenario.schema.json}
+   %{dep:../contracts/v15/scenario-stream.schema.json}
+   %{dep:../contracts/v15/journal.schema.json}
+   %{dep:../contracts/v15/fixtures/quote-trade.scenario.json}
+   %{dep:../contracts/v15/fixtures/quote-trade.scenario.jsonl}
+   %{dep:../contracts/v15/fixtures/quote-trade.journal.jsonl})))
 
 (rule
  (alias runtest)
  (deps
   validate_strategy_schema.py
-  ../contracts/v14/scenario.schema.json
-  ../contracts/v14/journal.schema.json
+  ../contracts/v15/scenario.schema.json
+  ../contracts/v15/journal.schema.json
   ../contracts/diagnostic/v1/diagnostic.schema.json
-  ../contracts/strategy/v12/message.schema.json
-  ../contracts/strategy/v12/transcript.schema.json
-  ../contracts/strategy/v12/fixtures/external.strategy.jsonl)
+  ../contracts/strategy/v13/message.schema.json
+  ../contracts/strategy/v13/transcript.schema.json
+  ../contracts/strategy/v13/fixtures/external.strategy.jsonl)
  (action
   (run
    python3
    %{dep:validate_strategy_schema.py}
-   %{dep:../contracts/v14/scenario.schema.json}
-   %{dep:../contracts/v14/journal.schema.json}
+   %{dep:../contracts/v15/scenario.schema.json}
+   %{dep:../contracts/v15/journal.schema.json}
    %{dep:../contracts/diagnostic/v1/diagnostic.schema.json}
-   %{dep:../contracts/strategy/v12/message.schema.json}
-   %{dep:../contracts/strategy/v12/transcript.schema.json}
-   %{dep:../contracts/strategy/v12/fixtures/external.strategy.jsonl})))
+   %{dep:../contracts/strategy/v13/message.schema.json}
+   %{dep:../contracts/strategy/v13/transcript.schema.json}
+   %{dep:../contracts/strategy/v13/fixtures/external.strategy.jsonl})))
+
+(rule
+ (alias runtest)
+ (deps
+  validate_schemas.py
+  ../contracts/v15/fixtures/order-book.journal.jsonl
+  ../contracts/v15/fixtures/order-book.scenario.json
+  ../contracts/v15/fixtures/order-book.scenario.jsonl
+  ../contracts/v15/journal.schema.json
+  ../contracts/v15/scenario-stream.schema.json
+  ../contracts/v15/scenario.schema.json)
+ (action
+  (run
+   python3
+   %{dep:validate_schemas.py}
+   %{dep:../contracts/v15/scenario.schema.json}
+   %{dep:../contracts/v15/scenario-stream.schema.json}
+   %{dep:../contracts/v15/journal.schema.json}
+   %{dep:../contracts/v15/fixtures/order-book.scenario.json}
+   %{dep:../contracts/v15/fixtures/order-book.scenario.jsonl}
+   %{dep:../contracts/v15/fixtures/order-book.journal.jsonl})))
 
 (rule
  (alias runtest)

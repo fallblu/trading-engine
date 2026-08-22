@@ -14,6 +14,7 @@ type t = {
   participation_bps : int;
   fee_configuration : fee_configuration;
   cost_model : cost_model option;
+  book_depth_limit : int option;
 }
 
 type price_attribution = {
@@ -67,6 +68,7 @@ let create ~participation_bps ~fixed_fee ~fee_bps =
         participation_bps;
         fee_configuration = Legacy { fixed_fee; fee_bps };
         cost_model = None;
+        book_depth_limit = None;
       }
 
 let create_v2 ~participation_bps ~fee_schedules =
@@ -91,6 +93,7 @@ let create_v2 ~participation_bps ~fee_schedules =
           participation_bps;
           fee_configuration = Schedules schedules;
           cost_model = None;
+          book_depth_limit = None;
         })
       (List.fold_left add (Ok Id.Instrument.Map.empty) fee_schedules)
 
@@ -111,7 +114,16 @@ let create_conservative ~participation_bps ~fee_schedules ~half_spread_bps
         })
       (create_v2 ~participation_bps ~fee_schedules)
 
+let create_order_book ~participation_bps ~fee_schedules ~max_depth_levels =
+  if max_depth_levels <= 0 || max_depth_levels > 1024 then
+    Error "order-book depth limit must be between 1 and 1024"
+  else
+    Result.map
+      (fun state -> { state with book_depth_limit = Some max_depth_levels })
+      (create_v2 ~participation_bps ~fee_schedules)
+
 let participation_bps state = state.participation_bps
+let book_depth_limit state = state.book_depth_limit
 
 let fixed_fee state =
   match state.fee_configuration with
@@ -809,6 +821,668 @@ let start_slice_quote_trade state ~instruments ~oms
                       Ok (Proposed (proposed, continue)))))
   in
   Ok (make_events events)
+
+type book_state = {
+  book_sequence : int64;
+  bids : Order_book_event.level list;
+  asks : Order_book_event.level list;
+}
+
+type book_view =
+  | Book_snapshot of book_state
+  | Book_added of Order_book_event.side * Scalar.Price.t * Scalar.Quantity.t
+  | Book_reduced of Order_book_event.side * Scalar.Price.t * Scalar.Quantity.t
+  | Book_trade of
+      Scalar.Price.t * Scalar.Quantity.t * Market_event.aggressor_side
+
+let book_level_quantity price levels =
+  List.find_opt
+    (fun (level : Order_book_event.level) ->
+      Scalar.Price.compare level.price price = 0)
+    levels
+  |> Option.map (fun level -> level.Order_book_event.quantity)
+  |> Option.value ~default:Scalar.Quantity.zero
+
+let sort_book_levels side levels =
+  List.sort
+    (fun (left : Order_book_event.level) right ->
+      let comparison = Scalar.Price.compare left.price right.price in
+      match side with
+      | Order_book_event.Bid -> -comparison
+      | Order_book_event.Ask -> comparison)
+    levels
+
+let replace_book_level side price quantity levels =
+  let level = Order_book_event.level ~price ~quantity |> Result.get_ok in
+  level
+  :: List.filter
+       (fun (existing : Order_book_event.level) ->
+         Scalar.Price.compare existing.price price <> 0)
+       levels
+  |> sort_book_levels side
+
+let remove_book_level price levels =
+  List.filter
+    (fun (level : Order_book_event.level) ->
+      Scalar.Price.compare level.price price <> 0)
+    levels
+
+let consume_book_levels price quantity levels =
+  let rec consume reversed = function
+    | [] -> Error "order-book execution level disappeared"
+    | (level : Order_book_event.level) :: remaining ->
+        if Scalar.Price.compare level.price price <> 0 then
+          consume (level :: reversed) remaining
+        else if Scalar.Quantity.compare quantity level.quantity > 0 then
+          Error "applied fill quantity exceeds order-book liquidity"
+        else if Scalar.Quantity.compare quantity level.quantity = 0 then
+          Ok (List.rev_append reversed remaining)
+        else
+          let* remaining_quantity =
+            Scalar.Quantity.subtract level.quantity quantity
+          in
+          let* level =
+            Order_book_event.level ~price:level.price
+              ~quantity:remaining_quantity
+          in
+          Ok (List.rev_append reversed (level :: remaining))
+  in
+  consume [] levels
+
+let consume_book_view order price quantity = function
+  | Book_snapshot book -> (
+      match order.Order.request.side with
+      | Buy ->
+          Result.map
+            (fun asks -> Book_snapshot { book with asks })
+            (consume_book_levels price quantity book.asks)
+      | Sell ->
+          Result.map
+            (fun bids -> Book_snapshot { book with bids })
+            (consume_book_levels price quantity book.bids))
+  | Book_added (side, added_price, available)
+    when Scalar.Price.compare price added_price = 0 ->
+      if Scalar.Quantity.compare quantity available > 0 then
+        Error "applied fill quantity exceeds order-book liquidity"
+      else if Scalar.Quantity.compare quantity available = 0 then
+        Ok (Book_added (side, added_price, Scalar.Quantity.zero))
+      else
+        let* remaining = Scalar.Quantity.subtract available quantity in
+        Ok (Book_added (side, added_price, remaining))
+  | view -> Ok view
+
+let valid_book depth_limit book =
+  List.length book.bids <= depth_limit
+  && List.length book.asks <= depth_limit
+  &&
+  match (book.bids, book.asks) with
+  | bid :: _, ask :: _ -> Scalar.Price.compare bid.price ask.price <= 0
+  | _ -> true
+
+let consume_feed_trade aggressor price quantity book =
+  let eligible level =
+    match aggressor with
+    | Market_event.Buy ->
+        Scalar.Price.compare level.Order_book_event.price price <= 0
+    | Sell -> Scalar.Price.compare level.price price >= 0
+    | Unknown -> false
+  in
+  let rec consume remaining consumed = function
+    | levels when Scalar.Quantity.is_zero remaining ->
+        Ok (List.rev_append consumed levels)
+    | level :: levels when eligible level ->
+        if Scalar.Quantity.compare level.quantity remaining <= 0 then
+          let* remaining = Scalar.Quantity.subtract remaining level.quantity in
+          consume remaining consumed levels
+        else
+          let* quantity = Scalar.Quantity.subtract level.quantity remaining in
+          let* level = Order_book_event.level ~price:level.price ~quantity in
+          Ok (List.rev_append consumed (level :: levels))
+    | _ -> Error "order-book trade exceeds observable depth"
+  in
+  match aggressor with
+  | Market_event.Buy ->
+      Result.map
+        (fun asks -> { book with asks })
+        (consume quantity [] book.asks)
+  | Sell ->
+      Result.map
+        (fun bids -> { book with bids })
+        (consume quantity [] book.bids)
+  | Unknown -> Ok book
+
+let start_slice_order_book state ~instruments ~oms
+    (market_slice : Market_slice.t) =
+  let depth_limit = Option.value state.book_depth_limit ~default:0 in
+  if depth_limit = 0 then Error "order-book execution configuration is required"
+  else
+    let instrument_map =
+      List.fold_left
+        (fun map instrument ->
+          Id.Instrument.Map.add instrument.Instrument.id instrument map)
+        Id.Instrument.Map.empty instruments
+    in
+    let validate_event instrument (event : Order_book_event.t) =
+      let prices, quantities =
+        match event.kind with
+        | Snapshot { bids; asks } ->
+            ( List.map (fun level -> level.Order_book_event.price) (bids @ asks),
+              List.map
+                (fun level -> level.Order_book_event.quantity)
+                (bids @ asks) )
+        | Set { price; quantity; _ } -> ([ price ], [ quantity ])
+        | Delete { price; _ } -> ([ price ], [])
+        | Trade { price; quantity; _ } -> ([ price ], [ quantity ])
+      in
+      if
+        not
+          (List.for_all
+             (fun price ->
+               Scalar.Price.is_multiple price
+                 ~tick:instrument.Instrument.tick_size)
+             prices)
+      then Error "order-book price is not aligned to the instrument tick size"
+      else if
+        not
+          (List.for_all
+             (fun quantity ->
+               Scalar.Quantity.is_multiple quantity ~lot:instrument.lot_size)
+             quantities)
+      then Error "order-book quantity is not aligned to the instrument lot size"
+      else if
+        Ptime.compare event.event_at market_slice.start_at < 0
+        || Ptime.compare event.event_at market_slice.end_at > 0
+        || Ptime.compare event.available_at market_slice.available_at > 0
+        || Ptime.compare event.received_at market_slice.received_at > 0
+      then Error "order-book event falls outside its observable slice boundary"
+      else Ok ()
+    in
+    let prepare (books, prepared) (event : Order_book_event.t) =
+      let* instrument =
+        match Id.Instrument.Map.find_opt event.instrument_id instrument_map with
+        | Some instrument -> Ok instrument
+        | None -> Error "order-book event refers to an unknown instrument"
+      in
+      let* () = validate_event instrument event in
+      let prior = Id.Instrument.Map.find_opt event.instrument_id books in
+      let* book, view =
+        match (prior, event.kind) with
+        | None, Snapshot { bids; asks } ->
+            let book = { book_sequence = event.book_sequence; bids; asks } in
+            if valid_book depth_limit book then Ok (book, Book_snapshot book)
+            else Error "order-book snapshot exceeds depth or crosses"
+        | Some _, Snapshot _ ->
+            Error "order-book bundle contains more than one snapshot"
+        | None, _ -> Error "order-book bundle must begin with a snapshot"
+        | Some prior, kind -> (
+            if Int64.succ prior.book_sequence <> event.book_sequence then
+              Error "order-book sequences must be contiguous"
+            else
+              let next_sequence book =
+                { book with book_sequence = event.book_sequence }
+              in
+              match kind with
+              | Set { side; price; quantity } ->
+                  let levels =
+                    match side with
+                    | Bid -> prior.bids
+                    | Order_book_event.Ask -> prior.asks
+                  in
+                  let old_quantity = book_level_quantity price levels in
+                  let levels = replace_book_level side price quantity levels in
+                  let book =
+                    match side with
+                    | Order_book_event.Bid ->
+                        next_sequence { prior with bids = levels }
+                    | Order_book_event.Ask ->
+                        next_sequence { prior with asks = levels }
+                  in
+                  if not (valid_book depth_limit book) then
+                    Error "order-book update exceeds depth or crosses"
+                  else if Scalar.Quantity.compare quantity old_quantity > 0 then
+                    let* added =
+                      Scalar.Quantity.subtract quantity old_quantity
+                    in
+                    Ok (book, Book_added (side, price, added))
+                  else
+                    let* removed =
+                      Scalar.Quantity.subtract old_quantity quantity
+                    in
+                    Ok (book, Book_reduced (side, price, removed))
+              | Delete { side; price } ->
+                  let levels =
+                    match side with
+                    | Bid -> prior.bids
+                    | Order_book_event.Ask -> prior.asks
+                  in
+                  let old_quantity = book_level_quantity price levels in
+                  if Scalar.Quantity.is_zero old_quantity then
+                    Error "order-book delete refers to a missing level"
+                  else
+                    let levels = remove_book_level price levels in
+                    let book =
+                      match side with
+                      | Order_book_event.Bid ->
+                          next_sequence { prior with bids = levels }
+                      | Order_book_event.Ask ->
+                          next_sequence { prior with asks = levels }
+                    in
+                    Ok (book, Book_reduced (side, price, old_quantity))
+              | Trade { price; quantity; aggressor_side } ->
+                  let* book =
+                    consume_feed_trade aggressor_side price quantity prior
+                  in
+                  Ok
+                    ( next_sequence book,
+                      Book_trade (price, quantity, aggressor_side) )
+              | Snapshot _ -> assert false)
+      in
+      Ok
+        ( Id.Instrument.Map.add event.instrument_id book books,
+          (event, instrument, view) :: prepared )
+    in
+    let* books, reversed =
+      List.fold_left
+        (fun result event ->
+          Result.bind result (fun state -> prepare state event))
+        (Ok (Id.Instrument.Map.empty, []))
+        market_slice.order_book_events
+    in
+    let expected =
+      List.map (fun instrument -> instrument.Instrument.id) instruments
+      |> Id.Instrument.Set.of_list
+    in
+    let observed =
+      Id.Instrument.Map.fold
+        (fun instrument_id _ ids -> Id.Instrument.Set.add instrument_id ids)
+        books Id.Instrument.Set.empty
+    in
+    if not (Id.Instrument.Set.equal expected observed) then
+      Error "order-book snapshots must cover every configured instrument"
+    else
+      let events = List.rev reversed in
+      let eligible =
+        Oms.active_orders oms
+        |> List.filter (fun order ->
+            Int64.compare order.Order.eligible_after_slice_sequence
+              market_slice.slice_sequence
+            < 0
+            && Ptime.compare order.created_at market_slice.start_at <= 0)
+        |> List.sort compare_execution_order
+      in
+      let order_ids = List.map (fun order -> order.Order.id) eligible in
+      let market_ioc_orders =
+        List.filter_map
+          (fun order ->
+            if Order.is_ioc order && not (Order.is_dormant_stop order) then
+              Some order.Order.id
+            else None)
+          eligible
+      in
+      let queue_for_snapshot queues instrument book =
+        let rec build prior queues = function
+          | [] -> Ok queues
+          | order :: remaining -> (
+              match Order.effective_kind order with
+              | Some (Order.Limit limit)
+                when Id.Instrument.equal order.request.instrument_id
+                       instrument.Instrument.id ->
+                  let opposite =
+                    match order.request.side with
+                    | Buy -> book.asks
+                    | Sell -> book.bids
+                  in
+                  let marketable =
+                    match opposite with
+                    | [] -> false
+                    | best :: _ -> (
+                        match order.request.side with
+                        | Buy -> Scalar.Price.compare best.price limit <= 0
+                        | Sell -> Scalar.Price.compare best.price limit >= 0)
+                  in
+                  if marketable then build (order :: prior) queues remaining
+                  else
+                    let same_side =
+                      match order.request.side with
+                      | Buy -> book.bids
+                      | Sell -> book.asks
+                    in
+                    let external_quantity =
+                      book_level_quantity limit same_side
+                    in
+                    let* ahead =
+                      List.fold_left
+                        (fun result earlier ->
+                          let* ahead = result in
+                          match Order.effective_kind earlier with
+                          | Some (Order.Limit earlier_limit)
+                            when earlier.request.side = order.request.side
+                                 && Id.Instrument.equal
+                                      earlier.request.instrument_id
+                                      order.request.instrument_id
+                                 && Scalar.Price.compare earlier_limit limit = 0
+                            ->
+                              Scalar.Quantity.add ahead
+                                (Order.remaining_quantity earlier)
+                          | _ -> Ok ahead)
+                        (Ok external_quantity) prior
+                    in
+                    build (order :: prior)
+                      (Id.Order.Map.add order.id ahead queues)
+                      remaining
+              | _ -> build (order :: prior) queues remaining)
+        in
+        build [] queues eligible
+      in
+      let order_matches_level order side price =
+        match Order.effective_kind order with
+        | Some Order.Market ->
+            (order.request.side = Buy && side = Order_book_event.Ask)
+            || (order.request.side = Sell && side = Order_book_event.Bid)
+        | Some (Limit limit) ->
+            order.request.side = Buy
+            && side = Order_book_event.Ask
+            && Scalar.Price.compare price limit <= 0
+            || order.request.side = Sell
+               && side = Order_book_event.Bid
+               && Scalar.Price.compare price limit >= 0
+        | _ -> false
+      in
+      let levels_for_order order view =
+        match view with
+        | Book_snapshot book ->
+            let levels =
+              match order.Order.request.side with
+              | Buy -> book.asks
+              | Sell -> book.bids
+            in
+            List.filter
+              (fun level ->
+                order_matches_level order
+                  (match order.request.side with
+                  | Buy -> Order_book_event.Ask
+                  | Sell -> Order_book_event.Bid)
+                  level.Order_book_event.price)
+              levels
+        | Book_added (side, price, quantity)
+          when order_matches_level order side price
+               && not (Scalar.Quantity.is_zero quantity) ->
+            [ Order_book_event.level ~price ~quantity |> Result.get_ok ]
+        | _ -> []
+      in
+      let reduce_queue queues instrument_id side price removed =
+        Id.Order.Map.mapi
+          (fun order_id ahead ->
+            match Oms.find oms order_id with
+            | Some order
+              when Id.Instrument.equal order.request.instrument_id instrument_id
+                   && (match order.request.side with
+                     | Buy -> side = Order_book_event.Bid
+                     | Sell -> side = Order_book_event.Ask)
+                   &&
+                   match Order.effective_kind order with
+                   | Some (Limit limit) -> Scalar.Price.compare limit price = 0
+                   | _ -> false ->
+                if Scalar.Quantity.compare removed ahead >= 0 then
+                  Scalar.Quantity.zero
+                else Scalar.Quantity.subtract ahead removed |> Result.get_ok
+            | _ -> ahead)
+          queues
+      in
+      let trade_allowances queues instrument_id price quantity aggressor =
+        Id.Order.Map.fold
+          (fun order_id ahead (queues, allowances) ->
+            match Oms.find oms order_id with
+            | Some order
+              when Id.Instrument.equal order.request.instrument_id instrument_id
+                   && (match (order.request.side, aggressor) with
+                     | Buy, Market_event.Sell | Sell, Buy -> true
+                     | _ -> false)
+                   &&
+                   match Order.effective_kind order with
+                   | Some (Limit limit) -> (
+                       match order.request.side with
+                       | Buy -> Scalar.Price.compare price limit <= 0
+                       | Sell -> Scalar.Price.compare price limit >= 0)
+                   | _ -> false ->
+                let next_ahead =
+                  if Scalar.Quantity.compare quantity ahead >= 0 then
+                    Scalar.Quantity.zero
+                  else Scalar.Quantity.subtract ahead quantity |> Result.get_ok
+                in
+                let through =
+                  if Scalar.Quantity.compare quantity ahead <= 0 then
+                    Scalar.Quantity.zero
+                  else Scalar.Quantity.subtract quantity ahead |> Result.get_ok
+                in
+                ( Id.Order.Map.add order_id next_ahead queues,
+                  Id.Order.Map.add order_id through allowances )
+            | _ -> (queues, allowances))
+          queues
+          (queues, Id.Order.Map.empty)
+      in
+      let rec make_events queues = function
+        | [] -> Ok (cursor (fun ~oms:_ -> Ok (Finished market_ioc_orders)))
+        | ((event : Order_book_event.t), instrument, view) :: remaining_events
+          ->
+            let* queues, allowances =
+              match view with
+              | Book_snapshot book ->
+                  Result.map
+                    (fun queues -> (queues, Id.Order.Map.empty))
+                    (queue_for_snapshot queues instrument book)
+              | Book_reduced (side, price, removed) ->
+                  Ok
+                    ( reduce_queue queues event.instrument_id side price removed,
+                      Id.Order.Map.empty )
+              | Book_trade (price, quantity, aggressor) ->
+                  Ok
+                    (trade_allowances queues event.instrument_id price quantity
+                       aggressor)
+              | Book_added _ -> Ok (queues, Id.Order.Map.empty)
+            in
+            Ok
+              (make_orders queues allowances event instrument view order_ids
+                 remaining_events)
+      and make_orders queues allowances event instrument view remaining
+          remaining_events =
+        Cursor
+          (fun current_oms ->
+            match remaining with
+            | [] ->
+                let* cursor = make_events queues remaining_events in
+                let (Cursor next) = cursor in
+                next current_oms
+            | order_id :: remaining_orders -> (
+                match Oms.find current_oms order_id with
+                | None ->
+                    Error "eligible order disappeared during order-book replay"
+                | Some order when not (Order.is_active order) ->
+                    let (Cursor next) =
+                      make_orders queues allowances event instrument view
+                        remaining_orders remaining_events
+                    in
+                    next current_oms
+                | Some order
+                  when not
+                         (Id.Instrument.equal order.request.instrument_id
+                            event.Order_book_event.instrument_id) ->
+                    let (Cursor next) =
+                      make_orders queues allowances event instrument view
+                        remaining_orders remaining_events
+                    in
+                    next current_oms
+                | Some order when Order.is_dormant_stop order ->
+                    let observed =
+                      match view with
+                      | Book_snapshot book -> (
+                          match order.request.side with
+                          | Buy -> (
+                              match book.asks with
+                              | level :: _ -> Some level.Order_book_event.price
+                              | [] -> None)
+                          | Sell -> (
+                              match book.bids with
+                              | level :: _ -> Some level.Order_book_event.price
+                              | [] -> None))
+                      | Book_added (_, price, _)
+                      | Book_reduced (_, price, _)
+                      | Book_trade (price, _, _) ->
+                          Some price
+                    in
+                    let triggered =
+                      match
+                        (order.request.kind, order.request.side, observed)
+                      with
+                      | ( ( Stop trigger
+                          | Stop_limit { trigger_price = trigger; _ } ),
+                          Buy,
+                          Some price ) ->
+                          Scalar.Price.compare price trigger >= 0
+                      | ( ( Stop trigger
+                          | Stop_limit { trigger_price = trigger; _ } ),
+                          Sell,
+                          Some price ) ->
+                          Scalar.Price.compare price trigger <= 0
+                      | _ -> false
+                    in
+                    let continuation =
+                      make_orders queues allowances event instrument view
+                        remaining_orders remaining_events
+                    in
+                    if triggered then
+                      Ok
+                        (Triggered
+                           ( order.id,
+                             event.event_at,
+                             market_slice.slice_sequence,
+                             continuation ))
+                    else
+                      let (Cursor next) = continuation in
+                      next current_oms
+                | Some order -> (
+                    let levels = levels_for_order order view in
+                    let passive = Id.Order.Map.find_opt order.id allowances in
+                    let* fok_capacity =
+                      List.fold_left
+                        (fun result (level : Order_book_event.level) ->
+                          let* total = result in
+                          let* capacity =
+                            event_capacity state instrument level.quantity
+                          in
+                          Scalar.Quantity.add total capacity)
+                        (Ok Scalar.Quantity.zero) levels
+                    in
+                    let opportunity =
+                      match (levels, passive, view) with
+                      | level :: _, _, _ ->
+                          Some
+                            ( level.price,
+                              level.quantity,
+                              Fee_schedule.Taker,
+                              true )
+                      | [], Some quantity, Book_trade (price, _, _) ->
+                          Some (price, quantity, Fee_schedule.Maker, false)
+                      | _ -> None
+                    in
+                    match opportunity with
+                    | None ->
+                        let (Cursor next) =
+                          make_orders queues allowances event instrument view
+                            remaining_orders remaining_events
+                        in
+                        next current_oms
+                    | Some (price, available, fee_liquidity, repeat_order) ->
+                        let* capacity =
+                          event_capacity state instrument available
+                        in
+                        let quantity =
+                          Scalar.Quantity.minimum capacity
+                            (Order.remaining_quantity order)
+                        in
+                        if
+                          Scalar.Quantity.is_zero quantity
+                          || Order.is_fok order
+                             && Scalar.Quantity.compare
+                                  (if levels = [] then capacity
+                                   else fok_capacity)
+                                  (Order.remaining_quantity order)
+                                < 0
+                        then
+                          let (Cursor next) =
+                            make_orders queues allowances event instrument view
+                              remaining_orders remaining_events
+                          in
+                          next current_oms
+                        else
+                          let* notional =
+                            Scalar.Money.notional price quantity
+                          in
+                          let* fee_components, fee =
+                            calculate_fee state ~instrument ~notional ~quantity
+                              ~liquidity:fee_liquidity
+                              ~fx_rates:
+                                (List.map
+                                   (fun mark ->
+                                     (mark.Market_slice.currency, mark.rate))
+                                   market_slice.fx_rates)
+                          in
+                          let proposed =
+                            {
+                              order_id = order.id;
+                              quantity;
+                              price;
+                              fee;
+                              fee_components;
+                              liquidity = fee_liquidity;
+                              executed_at = event.event_at;
+                              price_attribution = None;
+                            }
+                          in
+                          let continue applied_quantity =
+                            if
+                              Scalar.Quantity.compare applied_quantity quantity
+                              > 0
+                            then
+                              Error
+                                "applied fill quantity exceeds order-book \
+                                 liquidity"
+                            else if
+                              Scalar.Quantity.compare applied_quantity
+                                Scalar.Quantity.zero
+                              < 0
+                            then
+                              Error "applied fill quantity must be nonnegative"
+                            else if
+                              not
+                                (Scalar.Quantity.is_multiple applied_quantity
+                                   ~lot:instrument.Instrument.lot_size)
+                            then
+                              Error
+                                "applied fill quantity is not aligned to the \
+                                 instrument lot size"
+                            else
+                              let* next_view =
+                                if repeat_order then
+                                  consume_book_view order price applied_quantity
+                                    view
+                                else Ok view
+                              in
+                              let next_orders =
+                                if
+                                  repeat_order
+                                  && not
+                                       (Scalar.Quantity.is_zero applied_quantity)
+                                then order_id :: remaining_orders
+                                else remaining_orders
+                              in
+                              Ok
+                                (make_orders queues allowances event instrument
+                                   next_view next_orders remaining_events)
+                          in
+                          Ok (Proposed (proposed, continue)))))
+      in
+      make_events Id.Order.Map.empty events
 
 let finished market_ioc_orders =
   cursor (fun ~oms:_ -> Ok (Finished market_ioc_orders))

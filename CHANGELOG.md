@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add bounded level-two order-book replay with fresh snapshots, contiguous absolute updates,
+  multi-level marketable depth, deterministic passive queue position, and locked-book support.
+- Publish scenario/journal contract v15 and external strategy protocol v13 while preserving v14
+  and protocol v12 as frozen compatibility contracts.
 - Add causal quote/trade replay with displayed-liquidity capacity, aggressor-qualified passive
   fills, maker/taker fee attribution, and economic event timestamps.
 - Publish scenario/journal contract v14 and external strategy protocol v12 while preserving v13

@@ -9,6 +9,7 @@ val market_slice_to_yojson_v11 : Market_slice.t -> Yojson.Safe.t
 val market_slice_to_yojson_v12 : Market_slice.t -> Yojson.Safe.t
 val market_slice_to_yojson_v13 : Market_slice.t -> Yojson.Safe.t
 val market_slice_to_yojson_v14 : Market_slice.t -> Yojson.Safe.t
+val market_slice_to_yojson_v15 : Market_slice.t -> Yojson.Safe.t
 val order_to_yojson : Order.t -> Yojson.Safe.t
 val order_to_yojson_v8 : Order.t -> Yojson.Safe.t
 val fill_to_yojson : Fill.t -> Yojson.Safe.t
