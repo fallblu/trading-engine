@@ -115,7 +115,21 @@ def main() -> None:
     unsupported_execution_model = copy.deepcopy(scenario)
     unsupported_execution_model["execution"]["model"] = "future_model"
     expect_invalid(scenario_validator, unsupported_execution_model)
-    if contract_version in {"3", "4"}:
+    if contract_version == "5":
+        missing_configuration_version = copy.deepcopy(scenario)
+        del missing_configuration_version["execution"]["configuration"][
+            "version"
+        ]
+        expect_invalid(scenario_validator, missing_configuration_version)
+        unsupported_configuration_version = copy.deepcopy(scenario)
+        unsupported_configuration_version["execution"]["configuration"][
+            "version"
+        ] = "2"
+        expect_invalid(scenario_validator, unsupported_configuration_version)
+        unknown_configuration_field = copy.deepcopy(scenario)
+        unknown_configuration_field["execution"]["configuration"]["future"] = True
+        expect_invalid(scenario_validator, unknown_configuration_field)
+    if contract_version in {"3", "4", "5"}:
         excessive_feedback_cap = copy.deepcopy(scenario)
         excessive_feedback_cap["max_internal_events"] = 100001
         expect_invalid(scenario_validator, excessive_feedback_cap)
