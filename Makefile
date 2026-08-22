@@ -1,9 +1,10 @@
 export PATH := $(CURDIR)/.venv-schema/bin:$(PATH)
 
-.PHONY: bootstrap environment-check build test coverage fuzz-smoke fuzz fmt-check check
+.PHONY: bootstrap environment-check build test coverage benchmark-smoke benchmark fuzz-smoke fuzz fmt-check check
 
 FUZZ_SEED ?= 20260821
 FUZZ_CASES ?= 10000
+BENCHMARK_OUTPUT ?= benchmark-results/replay.json
 
 bootstrap:
 	@./scripts/bootstrap-development-environment
@@ -20,6 +21,12 @@ test:
 coverage: environment-check
 	@./scripts/check-ocaml-coverage
 
+benchmark-smoke: build
+	python3 bench/benchmark_replay.py --suite smoke --repetitions 1 --warmups 0
+
+benchmark: build
+	python3 bench/benchmark_replay.py --output $(BENCHMARK_OUTPUT)
+
 fuzz-smoke:
 	opam exec -- dune exec test/fuzz_protocol.exe -- --seed 20260821 --cases 256
 
@@ -29,4 +36,4 @@ fuzz:
 fmt-check:
 	opam exec -- dune build @fmt
 
-check: environment-check fmt-check build test
+check: environment-check fmt-check build test benchmark-smoke
