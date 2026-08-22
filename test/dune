@@ -7,6 +7,7 @@
   test_accounting
   test_execution
   test_reducer
+  test_reducer_properties
   test_checkpoint4
   test_strategy_protocol
   test_contract_conformance
