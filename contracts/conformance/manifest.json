@@ -1,0 +1,175 @@
+{
+  "format_version": "1",
+  "artifacts": [
+    {
+      "name": "scenario-v1",
+      "schema": "v1/scenario.schema.json",
+      "version_field": "contract_version",
+      "version": "1",
+      "sources": [
+        {"path": "v1/fixtures/demo.scenario.json", "format": "json"}
+      ]
+    },
+    {
+      "name": "scenario-stream-v1",
+      "schema": "v1/scenario-stream.schema.json",
+      "version_field": "contract_version",
+      "version": "1",
+      "sources": [
+        {"path": "v1/fixtures/demo.scenario.jsonl", "format": "jsonl"}
+      ]
+    },
+    {
+      "name": "journal-v1",
+      "schema": "v1/journal.schema.json",
+      "version_field": "contract_version",
+      "version": "1",
+      "sources": [
+        {"path": "v1/fixtures/demo.journal.jsonl", "format": "jsonl"}
+      ]
+    },
+    {
+      "name": "scenario-v2",
+      "schema": "v2/scenario.schema.json",
+      "version_field": "contract_version",
+      "version": "2",
+      "sources": [
+        {"path": "v2/fixtures/demo.scenario.json", "format": "json"}
+      ]
+    },
+    {
+      "name": "scenario-stream-v2",
+      "schema": "v2/scenario-stream.schema.json",
+      "version_field": "contract_version",
+      "version": "2",
+      "sources": [
+        {"path": "v2/fixtures/demo.scenario.jsonl", "format": "jsonl"}
+      ]
+    },
+    {
+      "name": "journal-v2",
+      "schema": "v2/journal.schema.json",
+      "version_field": "contract_version",
+      "version": "2",
+      "sources": [
+        {"path": "v2/fixtures/demo.journal.jsonl", "format": "jsonl"}
+      ]
+    },
+    {
+      "name": "scenario-v3",
+      "schema": "v3/scenario.schema.json",
+      "version_field": "contract_version",
+      "version": "3",
+      "sources": [
+        {"path": "v3/fixtures/demo.scenario.json", "format": "json"},
+        {"path": "strategy/v1/fixtures/external.scenario.json", "format": "json"},
+        {"path": "strategy/v2/fixtures/external.scenario.json", "format": "json"},
+        {"path": "strategy/v3/fixtures/external.scenario.json", "format": "json"}
+      ]
+    },
+    {
+      "name": "scenario-stream-v3",
+      "schema": "v3/scenario-stream.schema.json",
+      "version_field": "contract_version",
+      "version": "3",
+      "sources": [
+        {"path": "v3/fixtures/demo.scenario.jsonl", "format": "jsonl"},
+        {"path": "strategy/v1/fixtures/external.scenario.jsonl", "format": "jsonl"},
+        {"path": "strategy/v2/fixtures/external.scenario.jsonl", "format": "jsonl"},
+        {"path": "strategy/v3/fixtures/external.scenario.jsonl", "format": "jsonl"}
+      ]
+    },
+    {
+      "name": "journal-v3",
+      "schema": "v3/journal.schema.json",
+      "version_field": "contract_version",
+      "version": "3",
+      "sources": [
+        {"path": "v3/fixtures/demo.journal.jsonl", "format": "jsonl"}
+      ]
+    },
+    {
+      "name": "scenario-v4",
+      "schema": "v4/scenario.schema.json",
+      "version_field": "contract_version",
+      "version": "4",
+      "sources": [
+        {"path": "v4/fixtures/demo.scenario.json", "format": "json"},
+        {"path": "v4/fixtures/fill-clipped.scenario.json", "format": "json"}
+      ]
+    },
+    {
+      "name": "scenario-stream-v4",
+      "schema": "v4/scenario-stream.schema.json",
+      "version_field": "contract_version",
+      "version": "4",
+      "sources": [
+        {"path": "v4/fixtures/demo.scenario.jsonl", "format": "jsonl"}
+      ]
+    },
+    {
+      "name": "journal-v4",
+      "schema": "v4/journal.schema.json",
+      "version_field": "contract_version",
+      "version": "4",
+      "sources": [
+        {"path": "v4/fixtures/demo.journal.jsonl", "format": "jsonl"},
+        {"path": "v4/fixtures/fill-clipped.journal.jsonl", "format": "jsonl"}
+      ]
+    },
+    {
+      "name": "strategy-message-v1",
+      "schema": "strategy/v1/message.schema.json",
+      "version_field": "strategy_protocol_version",
+      "version": "1",
+      "sources": [
+        {"path": "strategy/v1/fixtures/external.strategy.jsonl", "format": "jsonl", "extract": ["message"]}
+      ]
+    },
+    {
+      "name": "strategy-transcript-v1",
+      "schema": "strategy/v1/transcript.schema.json",
+      "version_field": "strategy_protocol_version",
+      "version": "1",
+      "sources": [
+        {"path": "strategy/v1/fixtures/external.strategy.jsonl", "format": "jsonl"}
+      ]
+    },
+    {
+      "name": "strategy-message-v2",
+      "schema": "strategy/v2/message.schema.json",
+      "version_field": "strategy_protocol_version",
+      "version": "2",
+      "sources": [
+        {"path": "strategy/v2/fixtures/external.strategy.jsonl", "format": "jsonl", "extract": ["message"]}
+      ]
+    },
+    {
+      "name": "strategy-transcript-v2",
+      "schema": "strategy/v2/transcript.schema.json",
+      "version_field": "strategy_protocol_version",
+      "version": "2",
+      "sources": [
+        {"path": "strategy/v2/fixtures/external.strategy.jsonl", "format": "jsonl"}
+      ]
+    },
+    {
+      "name": "strategy-message-v3",
+      "schema": "strategy/v3/message.schema.json",
+      "version_field": "strategy_protocol_version",
+      "version": "3",
+      "sources": [
+        {"path": "strategy/v3/fixtures/external.strategy.jsonl", "format": "jsonl", "extract": ["message"]}
+      ]
+    },
+    {
+      "name": "strategy-transcript-v3",
+      "schema": "strategy/v3/transcript.schema.json",
+      "version_field": "strategy_protocol_version",
+      "version": "3",
+      "sources": [
+        {"path": "strategy/v3/fixtures/external.strategy.jsonl", "format": "jsonl"}
+      ]
+    }
+  ]
+}
