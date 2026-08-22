@@ -205,6 +205,8 @@ do not provide reducer snapshots or restart recovery.
 
 ## Architecture and contracts
 
+- [Support and issue guidance](.github/SUPPORT.md)
+- [Contributing](CONTRIBUTING.md)
 - [Architecture](docs/architecture.md)
 - [Diagnostic contract](docs/diagnostics.md)
 - [Scenario contract](docs/scenario.md)
@@ -218,6 +220,7 @@ do not provide reducer snapshots or restart recovery.
 - [External strategy protocol v3](contracts/strategy/v3/README.md)
 - [Historical strategy protocol v2](contracts/strategy/v2/README.md)
 - [Historical strategy protocol v1](contracts/strategy/v1/README.md)
+- [Persistra compatibility](docs/persistra.md)
 - [Strategy message JSON Schema](contracts/strategy/v3/message.schema.json)
 - [Strategy transcript JSON Schema](contracts/strategy/v3/transcript.schema.json)
 - [Execution model](docs/execution-model.md)
