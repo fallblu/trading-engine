@@ -48,7 +48,7 @@ let validate_venue_calendars ~root catalog venue_calendars =
 let header ~root ~contract_version ~base_currency ~initial_cash ~instruments
     ~venue_calendars ~max_internal_events =
   let* () =
-    if String.equal contract_version "6" then Ok ()
+    if List.mem contract_version [ "7"; "6" ] then Ok ()
     else
       Account.create ~base_currency ~initial_cash
       |> Result.map (fun _ -> ())
@@ -66,7 +66,7 @@ let header ~root ~contract_version ~base_currency ~initial_cash ~instruments
       fail ~json_path:(child root "instruments") "instrument IDs must be unique"
     else
       let* () =
-        if List.mem contract_version [ "6"; "5" ] then
+        if List.mem contract_version [ "7"; "6"; "5" ] then
           validate_venue_calendars ~root catalog venue_calendars
         else Ok ()
       in
@@ -84,7 +84,7 @@ let header ~root ~contract_version ~base_currency ~initial_cash ~instruments
         fail
           ~json_path:
             (child root
-               (if String.equal contract_version "6" then
+               (if List.mem contract_version [ "7"; "6" ] then
                   "initial_portfolio.cash"
                 else "initial_cash"))
           "initial cash must contain every scenario currency exactly once"
@@ -139,7 +139,8 @@ let initial_portfolio ~root ~currencies ~catalog ~instruments ~risk initial =
                     "initial position quantity is not aligned to its \
                      instrument lot"
                 else
-                  Risk.check_position risk position.quantity
+                  Risk.check_position_for risk position.instrument_id
+                    position.quantity
                   |> at (child path "positions"))
         (Ok ()) initial.positions
     in
@@ -240,20 +241,26 @@ let validate_portfolio_target ~json_path risk catalog = function
                 then
                   fail ~json_path
                     "target quantity is not aligned to its instrument lot"
-                else Risk.check_position risk target.quantity |> at json_path)
+                else
+                  Risk.check_position_for risk target.instrument_id
+                    target.quantity
+                  |> at json_path)
           (Ok ()) targets
   | Strategy.Submit_order request -> (
       if not (Id.Instrument.Set.mem request.Order.instrument_id catalog) then
         fail ~json_path "order refers to an unknown instrument"
-      else if
-        Scalar.Quantity.compare request.quantity (Risk.max_order_quantity risk)
-        > 0
-      then fail ~json_path "order exceeds the maximum order quantity"
       else
-        match Risk.instrument risk request.instrument_id with
-        | None -> fail ~json_path "order refers to an unknown instrument"
-        | Some instrument -> (
-            if
+        match
+          ( Risk.instrument risk request.instrument_id,
+            Risk.max_order_quantity_for risk request.instrument_id )
+        with
+        | None, _ -> fail ~json_path "order refers to an unknown instrument"
+        | _, None -> fail ~json_path "order has no instrument risk policy"
+        | Some instrument, Some order_limit -> (
+            if Scalar.Quantity.compare request.quantity order_limit > 0 then
+              fail ~json_path
+                "order exceeds the instrument maximum order quantity"
+            else if
               not
                 (Scalar.Quantity.is_multiple request.quantity
                    ~lot:instrument.Instrument.lot_size)

@@ -60,18 +60,74 @@ let instrument_to_yojson instrument =
       ("lot_size", quantity instrument.lot_size);
     ]
 
-let risk_to_yojson risk =
+let group_kind_to_string = function
+  | Risk.Issuer -> "issuer"
+  | Risk.Sector -> "sector"
+  | Risk.Currency -> "currency"
+  | Risk.Country -> "country"
+  | Risk.Asset_class -> "asset_class"
+  | Risk.Custom -> "custom"
+
+let nullable render = Option.fold ~none:`Null ~some:render
+
+let instrument_policy_to_yojson (policy : Risk.instrument_policy) =
   `Assoc
     [
-      ("max_order_quantity", quantity (Risk.max_order_quantity risk));
-      ("max_long_position", quantity (Risk.max_long_position risk));
-      ("max_short_position", quantity (Risk.max_short_position risk));
-      ("max_gross_exposure", money (Risk.max_gross_exposure risk));
-      ("max_leverage", ratio (Risk.max_leverage risk));
-      ("initial_margin_bps", `Int (Risk.initial_margin_bps risk));
-      ("maintenance_margin_bps", `Int (Risk.maintenance_margin_bps risk));
-      ("short_borrow_bps", `Int (Risk.short_borrow_bps risk));
+      ("instrument_id", instrument_id policy.instrument_id);
+      ("max_order_quantity", quantity policy.max_order_quantity);
+      ("max_long_position", quantity policy.max_long_position);
+      ("max_short_position", quantity policy.max_short_position);
+      ("max_notional_exposure", nullable money policy.max_notional_exposure);
+      ("initial_margin_bps", `Int policy.initial_margin_bps);
+      ("maintenance_margin_bps", `Int policy.maintenance_margin_bps);
+      ("shorting_allowed", `Bool policy.shorting_allowed);
     ]
+
+let group_to_yojson (group : Risk.group) =
+  let limits = group.limits in
+  `Assoc
+    [
+      ("group_id", string (Id.Risk_group.to_string group.group_id));
+      ("group_version", string "1");
+      ("group_type", string (group_kind_to_string group.group_kind));
+      ("instrument_ids", `List (List.map instrument_id group.instrument_ids));
+      ( "limits",
+        `Assoc
+          [
+            ("max_gross_exposure", nullable money limits.max_gross_exposure);
+            ("max_long_exposure", nullable money limits.max_long_exposure);
+            ("max_short_exposure", nullable money limits.max_short_exposure);
+            ( "max_absolute_net_exposure",
+              nullable money limits.max_absolute_net_exposure );
+            ("max_concentration", nullable ratio limits.max_concentration);
+          ] );
+    ]
+
+let risk_to_yojson ~protocol_version risk =
+  if String.equal protocol_version version then
+    `Assoc
+      [
+        ("max_gross_exposure", money (Risk.max_gross_exposure risk));
+        ("max_leverage", ratio (Risk.max_leverage risk));
+        ("short_borrow_bps", `Int (Risk.short_borrow_bps risk));
+        ( "instrument_policies",
+          `List
+            (List.map instrument_policy_to_yojson
+               (Risk.instrument_policies risk)) );
+        ("groups", `List (List.map group_to_yojson (Risk.groups risk)));
+      ]
+  else
+    `Assoc
+      [
+        ("max_order_quantity", quantity (Risk.max_order_quantity risk));
+        ("max_long_position", quantity (Risk.max_long_position risk));
+        ("max_short_position", quantity (Risk.max_short_position risk));
+        ("max_gross_exposure", money (Risk.max_gross_exposure risk));
+        ("max_leverage", ratio (Risk.max_leverage risk));
+        ("initial_margin_bps", `Int (Risk.initial_margin_bps risk));
+        ("maintenance_margin_bps", `Int (Risk.maintenance_margin_bps risk));
+        ("short_borrow_bps", `Int (Risk.short_borrow_bps risk));
+      ]
 
 let execution_to_yojson ~protocol_version model execution =
   if String.equal protocol_version version then
@@ -99,7 +155,11 @@ let execution_to_yojson ~protocol_version model execution =
 let protocol_version initialization =
   if String.equal initialization.scenario_contract_version Contract.version then
     version
-  else Contract.previous_strategy_protocol_version
+  else if
+    String.equal initialization.scenario_contract_version
+      Contract.previous_version
+  then Contract.previous_strategy_protocol_version
+  else "3"
 
 let initialize_message ~sequence:message_sequence initialization =
   let protocol_version = protocol_version initialization in
@@ -124,7 +184,7 @@ let initialize_message ~sequence:message_sequence initialization =
       ("base_currency", string initialization.base_currency);
       ("initial_cash", `List (List.map cash_balance_to_yojson initial_cash));
       ("instruments", `List (List.map instrument_to_yojson instruments));
-      ("risk", risk_to_yojson initialization.risk);
+      ("risk", risk_to_yojson ~protocol_version initialization.risk);
       ( "execution",
         execution_to_yojson ~protocol_version initialization.execution_model
           initialization.execution );
@@ -167,7 +227,19 @@ let marked_position_to_yojson (position : Strategy.marked_position) =
       ("weight", Option.fold ~none:`Null ~some:weight position.weight);
     ]
 
-let context_to_yojson context =
+let group_exposure_to_yojson (exposure : Risk.group_exposure) =
+  `Assoc
+    [
+      ("group_id", string (Id.Risk_group.to_string exposure.group_id));
+      ("gross_exposure", money exposure.gross_exposure);
+      ("net_exposure", money exposure.net_exposure);
+      ("long_exposure", money exposure.long_exposure);
+      ("short_exposure", money exposure.short_exposure);
+      ( "concentration",
+        Option.fold ~none:`Null ~some:weight exposure.concentration );
+    ]
+
+let context_to_yojson ~protocol_version context =
   let portfolio = Strategy.portfolio context in
   let cash_balances =
     List.sort
@@ -193,26 +265,36 @@ let context_to_yojson context =
       positions
     |> List.filter_map Fun.id
   in
+  let portfolio_fields =
+    [
+      ("base_currency", string portfolio.base_currency);
+      ("cash", money portfolio.cash);
+      ("net_market_value", money portfolio.net_market_value);
+      ("long_market_value", money portfolio.long_market_value);
+      ("short_market_value", money portfolio.short_market_value);
+      ("gross_exposure", money portfolio.gross_exposure);
+      ("equity", money portfolio.equity);
+      ("weights_available", `Bool (Option.is_some portfolio.cash_weight));
+      ("cash_weight", Option.fold ~none:`Null ~some:weight portfolio.cash_weight);
+      ( "cash_balances",
+        `List (List.map cash_attribution_to_yojson cash_balances) );
+      ("positions", `List (List.map marked_position_to_yojson positions));
+    ]
+  in
+  let portfolio_fields =
+    if String.equal protocol_version version then
+      portfolio_fields
+      @ [
+          ( "group_exposures",
+            `List (List.map group_exposure_to_yojson portfolio.group_exposures)
+          );
+        ]
+    else portfolio_fields
+  in
   `Assoc
     [
       ("now", timestamp (Strategy.now context));
-      ( "portfolio",
-        `Assoc
-          [
-            ("base_currency", string portfolio.base_currency);
-            ("cash", money portfolio.cash);
-            ("net_market_value", money portfolio.net_market_value);
-            ("long_market_value", money portfolio.long_market_value);
-            ("short_market_value", money portfolio.short_market_value);
-            ("gross_exposure", money portfolio.gross_exposure);
-            ("equity", money portfolio.equity);
-            ("weights_available", `Bool (Option.is_some portfolio.cash_weight));
-            ( "cash_weight",
-              Option.fold ~none:`Null ~some:weight portfolio.cash_weight );
-            ( "cash_balances",
-              `List (List.map cash_attribution_to_yojson cash_balances) );
-            ("positions", `List (List.map marked_position_to_yojson positions));
-          ] );
+      ("portfolio", `Assoc portfolio_fields);
       ("working_orders", `List (List.map Codec.order_to_yojson working_orders));
       ("latest_bars", `List (List.map Codec.bar_to_yojson latest_bars));
     ]
@@ -243,7 +325,8 @@ let event_message ?(protocol_version = version) ~sequence:message_sequence
   message ~protocol_version ~sequence:message_sequence ~message_type:"event"
     (`Assoc
        [
-         ("context", context_to_yojson context); ("event", event_to_yojson event);
+         ("context", context_to_yojson ~protocol_version context);
+         ("event", event_to_yojson event);
        ])
 
 let shutdown_message_for ~protocol_version ~sequence:message_sequence =
