@@ -27,17 +27,29 @@ type response =
 
 type direction = Engine_to_strategy | Strategy_to_engine
 
+val protocol_version : initialization -> string
 val initialize_message : sequence:int64 -> initialization -> Yojson.Safe.t
 
 val event_message :
-  sequence:int64 -> Strategy.context -> Strategy.event -> Yojson.Safe.t
+  ?protocol_version:string ->
+  sequence:int64 ->
+  Strategy.context ->
+  Strategy.event ->
+  Yojson.Safe.t
+
+val shutdown_message_for :
+  protocol_version:string -> sequence:int64 -> Yojson.Safe.t
 
 val shutdown_message : sequence:int64 -> Yojson.Safe.t
 
 val response_of_yojson :
-  expected_sequence:int64 -> Yojson.Safe.t -> (response, Diagnostic.t) result
+  ?protocol_version:string ->
+  expected_sequence:int64 ->
+  Yojson.Safe.t ->
+  (response, Diagnostic.t) result
 
 val response_of_string :
+  ?protocol_version:string ->
   expected_sequence:int64 ->
   string ->
   (response * Yojson.Safe.t, Diagnostic.t) result

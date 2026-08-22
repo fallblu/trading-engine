@@ -38,10 +38,10 @@ let ratio value = string (Scalar.Ratio.to_decimal_string value)
 let timestamp value = string (Codec.ptime_to_string value)
 let instrument_id value = string (Id.Instrument.to_string value)
 
-let message ~sequence:message_sequence ~message_type payload =
+let message ~protocol_version ~sequence:message_sequence ~message_type payload =
   `Assoc
     [
-      ("strategy_protocol_version", string version);
+      ("strategy_protocol_version", string protocol_version);
       ("strategy_sequence", sequence message_sequence);
       ("message_type", string message_type);
       ("payload", payload);
@@ -73,21 +73,36 @@ let risk_to_yojson risk =
       ("short_borrow_bps", `Int (Risk.short_borrow_bps risk));
     ]
 
-let execution_to_yojson model execution =
-  `Assoc
-    [
-      ("model", string (Execution_model.name model));
-      ( "configuration",
-        `Assoc
-          [
-            ("version", string "1");
-            ("participation_bps", `Int (Execution.participation_bps execution));
-            ("fixed_fee", money (Execution.fixed_fee execution));
-            ("fee_bps", `Int (Execution.fee_bps execution));
-          ] );
-    ]
+let execution_to_yojson ~protocol_version model execution =
+  if String.equal protocol_version version then
+    `Assoc
+      [
+        ("model", string (Execution_model.name model));
+        ( "configuration",
+          `Assoc
+            [
+              ("version", string "1");
+              ("participation_bps", `Int (Execution.participation_bps execution));
+              ("fixed_fee", money (Execution.fixed_fee execution));
+              ("fee_bps", `Int (Execution.fee_bps execution));
+            ] );
+      ]
+  else
+    `Assoc
+      [
+        ("model", string (Execution_model.name model));
+        ("participation_bps", `Int (Execution.participation_bps execution));
+        ("fixed_fee", money (Execution.fixed_fee execution));
+        ("fee_bps", `Int (Execution.fee_bps execution));
+      ]
+
+let protocol_version initialization =
+  if String.equal initialization.scenario_contract_version Contract.version then
+    version
+  else Contract.previous_strategy_protocol_version
 
 let initialize_message ~sequence:message_sequence initialization =
+  let protocol_version = protocol_version initialization in
   let instruments =
     List.sort
       (fun left right ->
@@ -99,26 +114,39 @@ let initialize_message ~sequence:message_sequence initialization =
       (fun (left, _) (right, _) -> String.compare left right)
       initialization.initial_cash
   in
-  message ~sequence:message_sequence ~message_type:"initialize"
-    (`Assoc
-       [
-         ("engine_version", string Contract.engine_version);
-         ( "scenario_contract_version",
-           string initialization.scenario_contract_version );
-         ("scenario_sha256", string initialization.scenario_sha256);
-         ("run_id", string (Id.Run.to_string initialization.run_id));
-         ("base_currency", string initialization.base_currency);
-         ("initial_cash", `List (List.map cash_balance_to_yojson initial_cash));
-         ( "initial_portfolio",
-           Option.fold ~none:`Null ~some:Codec.initial_portfolio_to_yojson
-             initialization.initial_portfolio );
-         ("instruments", `List (List.map instrument_to_yojson instruments));
-         ("risk", risk_to_yojson initialization.risk);
-         ( "execution",
-           execution_to_yojson initialization.execution_model
-             initialization.execution );
-         ("metadata", initialization.metadata);
-       ])
+  let fields =
+    [
+      ("engine_version", string Contract.engine_version);
+      ( "scenario_contract_version",
+        string initialization.scenario_contract_version );
+      ("scenario_sha256", string initialization.scenario_sha256);
+      ("run_id", string (Id.Run.to_string initialization.run_id));
+      ("base_currency", string initialization.base_currency);
+      ("initial_cash", `List (List.map cash_balance_to_yojson initial_cash));
+      ("instruments", `List (List.map instrument_to_yojson instruments));
+      ("risk", risk_to_yojson initialization.risk);
+      ( "execution",
+        execution_to_yojson ~protocol_version initialization.execution_model
+          initialization.execution );
+      ("metadata", initialization.metadata);
+    ]
+  in
+  let fields =
+    if String.equal protocol_version version then
+      let initial_portfolio =
+        Option.fold ~none:`Null ~some:Codec.initial_portfolio_to_yojson
+          initialization.initial_portfolio
+      in
+      List.concat
+        [
+          List.take 6 fields;
+          [ ("initial_portfolio", initial_portfolio) ];
+          List.drop 6 fields;
+        ]
+    else fields
+  in
+  message ~protocol_version ~sequence:message_sequence
+    ~message_type:"initialize" (`Assoc fields)
 
 let cash_attribution_to_yojson (balance : Account.cash_attribution) =
   `Assoc
@@ -210,15 +238,20 @@ let event_to_yojson = function
   | Strategy.Intent_rejected reason ->
       `Assoc [ ("type", string "intent_rejected"); ("reason", string reason) ]
 
-let event_message ~sequence:message_sequence context event =
-  message ~sequence:message_sequence ~message_type:"event"
+let event_message ?(protocol_version = version) ~sequence:message_sequence
+    context event =
+  message ~protocol_version ~sequence:message_sequence ~message_type:"event"
     (`Assoc
        [
          ("context", context_to_yojson context); ("event", event_to_yojson event);
        ])
 
-let shutdown_message ~sequence:message_sequence =
-  message ~sequence:message_sequence ~message_type:"shutdown" (`Assoc [])
+let shutdown_message_for ~protocol_version ~sequence:message_sequence =
+  message ~protocol_version ~sequence:message_sequence ~message_type:"shutdown"
+    (`Assoc [])
+
+let shutdown_message ~sequence =
+  shutdown_message_for ~protocol_version:version ~sequence
 
 let object_fields ~name ~expected = function
   | `Assoc fields ->
@@ -295,7 +328,7 @@ let parse_stopped_payload json =
   let* _ = object_fields ~name:"strategy stopped payload" ~expected:[] json in
   Ok Stopped
 
-let response_of_yojson_result ~expected_sequence json =
+let response_of_yojson_result ~protocol_version ~expected_sequence json =
   let* fields =
     object_fields ~name:"strategy response"
       ~expected:
@@ -311,7 +344,7 @@ let response_of_yojson_result ~expected_sequence json =
   let* supplied_version =
     required_string ~name:"strategy_protocol_version" version_json
   in
-  if not (String.equal supplied_version version) then
+  if not (String.equal supplied_version protocol_version) then
     Error ("unsupported strategy protocol version: " ^ supplied_version)
   else
     let* sequence_json = field fields "strategy_sequence" in
@@ -338,12 +371,13 @@ let response_of_yojson_result ~expected_sequence json =
           |> Result.map (fun message -> Failed message)
       | value -> Error ("unsupported strategy response type: " ^ value)
 
-let response_of_yojson ~expected_sequence json =
+let response_of_yojson ?(protocol_version = version) ~expected_sequence json =
   let json_path =
     match json with
     | `Assoc fields -> (
         match List.assoc_opt "strategy_protocol_version" fields with
-        | Some (`String supplied) when not (String.equal supplied version) ->
+        | Some (`String supplied)
+          when not (String.equal supplied protocol_version) ->
             "$.strategy_protocol_version"
         | _ -> (
             match List.assoc_opt "strategy_sequence" fields with
@@ -375,13 +409,14 @@ let response_of_yojson ~expected_sequence json =
            (Printf.sprintf "intent count is %d; limit is %d" observed
               Resource_limits.intents_per_batch))
   | _ ->
-      response_of_yojson_result ~expected_sequence json
+      response_of_yojson_result ~protocol_version ~expected_sequence json
       |> Result.map_error (fun message ->
           Diagnostic.make ~code:Diagnostic.Strategy_protocol
             ~phase:Diagnostic.Strategy ~sequence:expected_sequence ~json_path
             message)
 
-let response_of_string ~expected_sequence document =
+let response_of_string ?(protocol_version = version) ~expected_sequence document
+    =
   if String.length document > max_message_bytes then
     Error
       (Diagnostic.make ~code:Diagnostic.Resource_limit
@@ -391,7 +426,7 @@ let response_of_string ~expected_sequence document =
   else
     try
       let json = Yojson.Safe.from_string document in
-      response_of_yojson ~expected_sequence json
+      response_of_yojson ~protocol_version ~expected_sequence json
       |> Result.map (fun response -> (response, json))
     with Yojson.Json_error message as exception_ ->
       Error
@@ -405,9 +440,17 @@ let direction_to_string = function
   | Strategy_to_engine -> "strategy_to_engine"
 
 let transcript_record ~transcript_sequence ~direction ~message =
+  let protocol_version =
+    match message with
+    | `Assoc fields -> (
+        match List.assoc_opt "strategy_protocol_version" fields with
+        | Some (`String value) -> value
+        | _ -> version)
+    | _ -> version
+  in
   `Assoc
     [
-      ("strategy_protocol_version", string version);
+      ("strategy_protocol_version", string protocol_version);
       ("transcript_sequence", sequence transcript_sequence);
       ("direction", string (direction_to_string direction));
       ("message", message);
