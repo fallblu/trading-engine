@@ -1,0 +1,60 @@
+name: Feature proposal
+description: Propose one scoped capability without assigning a release commitment.
+title: "feat: "
+labels: ["enhancement"]
+assignees: []
+body:
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Accounting and valuation
+        - Artifacts and publication
+        - CLI and diagnostics
+        - Contracts and schemas
+        - Execution and order management
+        - Reducer and sequencing
+        - Risk and margin
+        - Strategy protocol
+        - CI and development tooling
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Describe the concrete unsupported workflow or invariant.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Define scope, boundaries, and observable behavior without a delivery date.
+    validations:
+      required: true
+  - type: dropdown
+    id: contract-impact
+    attributes:
+      label: Contract impact
+      options:
+        - No public contract change
+        - Additive current-contract change
+        - Breaking versioned-contract change
+        - Not yet known
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and tradeoffs
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: Verification expectations
+      description: List unit, property, conformance, failure-path, or performance evidence.
+    validations:
+      required: true

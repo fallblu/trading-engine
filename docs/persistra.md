@@ -69,6 +69,43 @@ Persistra must answer each callback before the engine continues matching. Every 
 slice uses the slice receipt time and complete bar and FX snapshot. A later callback therefore
 includes accepted intents returned from an earlier callback at that same replay clock.
 
+## Compatibility guarantees
+
+Compatibility is defined by versioned wire contracts and an explicitly tested pair of repository
+revisions. A branch name, package version, or successful build in only one repository is not a
+compatibility claim.
+
+- **Engine:** `--capabilities` is the authoritative machine-readable surface. The engine must
+  reject unsupported versions and malformed or semantically invalid input before reporting a
+  successful run.
+- **Scenario:** Frozen scenario and stream artifacts do not change. The current v4 contract may
+  receive additive changes only when old valid inputs retain their meaning; breaking changes need
+  a new version. Transitional v3 support remains explicit in `--capabilities`.
+- **Journal:** A run emits the journal version paired with its accepted scenario. Record ordering,
+  causal references, scenario hashing, terminal completion, and exact accounting remain runtime
+  invariants even when JSON Schema cannot express them.
+- **Strategy:** Protocol and transcript versions are independent of scenario versions. The current
+  external boundary is strategy v3; a host must complete its exact initialization, event,
+  shutdown, timeout, and rejection lifecycle.
+- **Persistra:** The required integration gate uses a full Persistra commit and its v3 scenario,
+  journal, and strategy integration tests. Passing that gate claims compatibility only for the
+  recorded revision pair and advertised versions.
+
+The required `persistra-compatibility` job pins the full Persistra commit stored as
+`PERSISTRA_COMPAT_REVISION` in `.github/workflows/ci.yml`. It asserts the resolved checkout and
+writes the SHA to the log and job summary. It never follows a repository variable or moving branch.
+Persistra owns the reciprocal required pin to a reviewed Trading Engine commit.
+
+To advance either baseline, the repository changing its pin selects a green full commit from the
+other repository, builds both exact checkouts, runs the cross-repository integration suite, and
+updates the one workflow SHA in a reviewed pull request. When a contract or host/runtime behavior
+changes, both repositories update their fixtures, documentation, and pins in dependency order.
+Neither repository silently advances the other's required baseline.
+
+Maintainers can manually dispatch CI with `persistra_latest_head` enabled to test Persistra
+`develop`. The `persistra-latest-head` job is nonrequired and allowed to fail, so it provides an
+early signal without changing the reproducible baseline or blocking an unrelated engine change.
+
 ## Time mapping
 
 - Intraday UTC timestamps map to slice event times.

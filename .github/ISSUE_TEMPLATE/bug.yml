@@ -1,0 +1,67 @@
+name: Bug report
+description: Report reproducible incorrect engine, CLI, artifact, or contract behavior.
+title: "fix: "
+labels: ["bug"]
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for providing a small, sanitized reproduction.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Accounting and valuation
+        - Artifacts and publication
+        - CLI and diagnostics
+        - Contracts and schemas
+        - Execution and order management
+        - Reducer and sequencing
+        - Risk and margin
+        - Strategy protocol
+        - CI and development tooling
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Engine revision or version
+      placeholder: v1.0.0 or a full commit SHA
+    validations:
+      required: true
+  - type: input
+    id: contracts
+    attributes:
+      label: Contract versions
+      description: Include scenario, journal, diagnostic, and strategy versions that apply.
+      placeholder: scenario v4, journal v4, strategy v3
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Provide exact commands and the smallest sanitized input or fixture.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include stable diagnostic codes and bounded output when available.
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safe report
+      options:
+        - label: I removed credentials, customer data, proprietary strategies, and licensed data.
+          required: true
