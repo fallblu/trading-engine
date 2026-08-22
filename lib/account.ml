@@ -115,6 +115,36 @@ let create ~base_currency ~initial_cash =
           positions = Id.Instrument.Map.empty;
         }
 
+let of_initial_portfolio (initial : Initial_portfolio.t) =
+  let cash =
+    List.fold_left
+      (fun balances (currency, amount) ->
+        Currency_map.add currency amount balances)
+      Currency_map.empty initial.cash
+  in
+  let positions =
+    List.fold_left
+      (fun positions (value : Initial_portfolio.position) ->
+        Id.Instrument.Map.add value.instrument_id
+          {
+            quantity = value.quantity;
+            cost_basis = value.cost_basis;
+            realized_pnl = value.realized_pnl;
+            dividend_pnl = value.dividend_pnl;
+            execution_fees = value.execution_fees;
+            borrow_fees = value.borrow_fees;
+          }
+          positions)
+      Id.Instrument.Map.empty initial.positions
+  in
+  Ok
+    {
+      base_currency = initial.base_currency;
+      initial_cash = cash;
+      cash;
+      positions;
+    }
+
 let base_currency (state : t) = state.base_currency
 let initial_cash (state : t) = Currency_map.bindings state.initial_cash
 let cash_balances (state : t) = Currency_map.bindings state.cash

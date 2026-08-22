@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add contract v6 explicit initial portfolio snapshots with signed cash and positions, accounting
+  history, initial marks and FX, strict risk validation, initial-state auditing, and strategy
+  protocol v4 initialization.
 - Publish strict versioned configuration and machine-readable capabilities for each compiled
   execution model.
 - Add contract v5 venue calendars with explicit venue and calendar identities, regular and

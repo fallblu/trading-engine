@@ -2,12 +2,12 @@ open Test_support
 module T = Trading_engine
 
 let demo_document () =
-  In_channel.with_open_bin "../contracts/v5/fixtures/demo.scenario.json"
+  In_channel.with_open_bin "../contracts/v6/fixtures/demo.scenario.json"
     In_channel.input_all
 
 let demo () = T.Scenario.of_string (demo_document ()) |> ok
 let demo_hash () = T.Sha256.digest_string (demo_document ())
-let stream_path = "../contracts/v5/fixtures/demo.scenario.jsonl"
+let stream_path = "../contracts/v6/fixtures/demo.scenario.jsonl"
 
 let stream_document () =
   In_channel.with_open_bin stream_path In_channel.input_all
@@ -125,9 +125,9 @@ let schema_artifacts_parse () =
           (List.mem_assoc "$defs" fields)
     | _ -> Alcotest.fail (path ^ " must contain a JSON object")
   in
-  check_schema "../contracts/v5/scenario.schema.json";
-  check_schema "../contracts/v5/scenario-stream.schema.json";
-  check_schema "../contracts/v5/journal.schema.json"
+  check_schema "../contracts/v6/scenario.schema.json";
+  check_schema "../contracts/v6/scenario-stream.schema.json";
+  check_schema "../contracts/v6/journal.schema.json"
 
 let timestamp_precision_is_bounded () =
   List.iter
@@ -189,7 +189,7 @@ let contract_version_is_required_and_supported () =
   let unsupported_diagnostic = T.Scenario.of_yojson unsupported |> error in
   Alcotest.(check string)
     "unsupported version diagnosed"
-    "unsupported scenario contract_version \"2\" (expected one of 5, 4, 3)"
+    "unsupported scenario contract_version \"2\" (expected one of 6, 5, 4, 3)"
     (T.Diagnostic.to_human unsupported_diagnostic);
   Alcotest.(check string)
     "unsupported version code" "scenario.unsupported_contract"
@@ -200,7 +200,7 @@ let contract_version_is_required_and_supported () =
 
 let duplicate_fields_are_rejected () =
   let changed =
-    map_root (fun fields -> ("initial_cash", `String "0") :: fields)
+    map_root (fun fields -> ("initial_portfolio", `String "0") :: fields)
   in
   let message = T.Scenario.of_yojson changed |> diagnostic_message in
   Alcotest.(check bool)
@@ -589,13 +589,123 @@ let portfolio_targets_are_total_and_aligned () =
     map_root (fun fields ->
         List.map
           (fun (name, value) ->
-            if String.equal name "initial_cash" then (name, `String "10000.0")
+            if String.equal name "initial_portfolio" then
+              match value with
+              | `Assoc portfolio_fields ->
+                  let changed =
+                    List.map
+                      (fun (field, field_value) ->
+                        if String.equal field "cash" then
+                          match field_value with
+                          | `List (`Assoc cash_fields :: rest) ->
+                              let cash =
+                                `Assoc
+                                  (List.map
+                                     (fun (cash_field, cash_value) ->
+                                       if String.equal cash_field "amount" then
+                                         (cash_field, `String "10000.0")
+                                       else (cash_field, cash_value))
+                                     cash_fields)
+                              in
+                              (field, `List (cash :: rest))
+                          | _ -> (field, field_value)
+                        else (field, field_value))
+                      portfolio_fields
+                  in
+                  (name, `Assoc changed)
+              | _ -> (name, value)
             else (name, value))
           fields)
   in
   Alcotest.(check bool)
     "noncanonical scalar rejected" true
     (Result.is_error (T.Scenario.of_yojson noncanonical))
+
+let update_initial_portfolio field change =
+  map_root (fun fields ->
+      List.map
+        (fun (name, value) ->
+          if String.equal name "initial_portfolio" then
+            match value with
+            | `Assoc portfolio_fields ->
+                ( name,
+                  `Assoc
+                    (List.map
+                       (fun (key, item) ->
+                         if String.equal key field then (key, change item)
+                         else (key, item))
+                       portfolio_fields) )
+            | _ -> (name, value)
+          else (name, value))
+        fields)
+
+let update_first_object_field field value = function
+  | `List (`Assoc fields :: rest) ->
+      `List
+        (`Assoc
+           (List.map
+              (fun (name, current) ->
+                if String.equal name field then (name, value)
+                else (name, current))
+              fields)
+        :: rest)
+  | _ -> Alcotest.fail "expected a nonempty object array"
+
+let initial_portfolio_validation () =
+  let signed_cash =
+    update_initial_portfolio "cash"
+      (update_first_object_field "amount" (`String "-1"))
+  in
+  Alcotest.(check bool)
+    "signed cash accepted" true
+    (Result.is_ok (T.Scenario.of_yojson signed_cash));
+  let wrong_basis =
+    update_initial_portfolio "positions"
+      (update_first_object_field "cost_basis" (`String "-90"))
+  in
+  Alcotest.(check bool)
+    "basis sign rejected" true
+    (Result.is_error (T.Scenario.of_yojson wrong_basis));
+  let off_lot =
+    update_initial_portfolio "positions"
+      (update_first_object_field "quantity" (`String "0.0005"))
+  in
+  Alcotest.(check bool)
+    "off-lot holding rejected" true
+    (Result.is_error (T.Scenario.of_yojson off_lot));
+  let missing_mark = update_initial_portfolio "marks" (fun _ -> `List []) in
+  Alcotest.(check bool)
+    "missing initial mark rejected" true
+    (Result.is_error (T.Scenario.of_yojson missing_mark));
+  let insufficient_margin =
+    update_initial_portfolio "cash"
+      (update_first_object_field "amount" (`String "-100"))
+  in
+  Alcotest.(check bool)
+    "initial margin enforced" true
+    (Result.is_error (T.Scenario.of_yojson insufficient_margin))
+
+let initial_portfolio_is_audited_and_reconciled () =
+  let result = T.Replay.run ~scenario_sha256:(demo_hash ()) (demo ()) |> ok in
+  match result.audits with
+  | _started :: initial :: first_valuation :: _ -> (
+      match (initial.event, first_valuation.event) with
+      | ( T.Audit.Initial_state { portfolio; valuation = initial_valuation },
+          T.Audit.Valuation first_valuation ) ->
+          Alcotest.(check int) "one holding" 1 (List.length portfolio.positions);
+          Alcotest.check money_testable "initial equity" (money "10100")
+            initial_valuation.account.equity;
+          Alcotest.check money_testable "first valuation reconciles"
+            initial_valuation.account.equity first_valuation.account.equity;
+          let position = List.hd initial_valuation.account.positions in
+          Alcotest.check money_testable "native basis" (money "90")
+            position.cost_basis;
+          Alcotest.check money_testable "realized attribution" (money "5")
+            position.realized_pnl;
+          Alcotest.check money_testable "historical fees" (money "0.75")
+            position.total_fees
+      | _ -> Alcotest.fail "expected initial_state followed by valuation")
+  | _ -> Alcotest.fail "expected initial audit records"
 
 let execution_model_is_required_and_supported () =
   let change_execution change =
@@ -665,7 +775,7 @@ let deterministic_replay () =
   Alcotest.(check (list string))
     "byte-identical event encoding" (encode first) (encode second);
   Alcotest.(check int)
-    "one valuation per slice" 4
+    "initial valuation plus one per slice" 5
     (List.length
        (List.filter
           (fun audit ->
@@ -711,24 +821,24 @@ let audit_ids_are_deterministic_and_causal () =
   in
   Alcotest.(check (list string))
     "external slice has no engine cause" []
-    (cause_strings (event 7L));
+    (cause_strings (event 9L));
   Alcotest.(check (list string))
     "target order cites slice and target request"
-    [ "demo-event-000000000002"; "demo-event-000000000003" ]
-    (cause_strings (event 5L));
+    [ "demo-event-000000000004"; "demo-event-000000000005" ]
+    (cause_strings (event 7L));
   Alcotest.(check (list string))
     "fill cites order creation and executable slice"
-    [ "demo-event-000000000005"; "demo-event-000000000007" ]
-    (cause_strings (event 8L));
+    [ "demo-event-000000000007"; "demo-event-000000000009" ]
+    (cause_strings (event 10L));
   Alcotest.(check (list string))
     "completion cites terminal valuation"
-    [ "demo-event-000000000019" ]
-    (cause_strings (event 20L));
-  match (event 5L).event with
+    [ "demo-event-000000000021" ]
+    (cause_strings (event 22L));
+  match (event 7L).event with
   | T.Audit.Order_accepted order ->
       Alcotest.(check string)
         "order snapshot retains creation event"
-        (T.Id.Event.to_string (event 5L).event_id)
+        (T.Id.Event.to_string (event 7L).event_id)
         (T.Id.Event.to_string order.created_event_id)
   | _ -> Alcotest.fail "expected accepted order"
 
@@ -761,7 +871,7 @@ let replay_matches_golden_file () =
     |> fun value -> value ^ "\n"
   in
   let expected =
-    In_channel.with_open_bin "../contracts/v5/fixtures/demo.journal.jsonl"
+    In_channel.with_open_bin "../contracts/v6/fixtures/demo.journal.jsonl"
       In_channel.input_all
   in
   Alcotest.(check string) "stable audit contract" expected actual
@@ -789,7 +899,7 @@ let v3_replay_matches_frozen_golden_file () =
 let fill_clipping_fixture_reconciles () =
   let document =
     In_channel.with_open_bin
-      "../contracts/v5/fixtures/fill-clipped.scenario.json" In_channel.input_all
+      "../contracts/v6/fixtures/fill-clipped.scenario.json" In_channel.input_all
   in
   let scenario = T.Scenario.of_string document |> ok in
   let result =
@@ -802,7 +912,7 @@ let fill_clipping_fixture_reconciles () =
   in
   let expected =
     In_channel.with_open_bin
-      "../contracts/v5/fixtures/fill-clipped.journal.jsonl" In_channel.input_all
+      "../contracts/v6/fixtures/fill-clipped.journal.jsonl" In_channel.input_all
   in
   Alcotest.(check string) "fill clipping audit reconciliation" expected actual
 
@@ -901,8 +1011,8 @@ let streamed_replay_matches_batch_semantics () =
       Alcotest.(check int64) "four streamed slices" 4L result.slice_count;
       Alcotest.(check int64) "two schedule batches" 2L result.schedule_count;
       Alcotest.(check int) "one instrument" 1 result.instrument_count;
-      Alcotest.(check int64) "twenty audits" 20L result.audit_count;
-      Alcotest.check money_testable "same equity" (money "10004.76812")
+      Alcotest.(check int64) "twenty-two audits" 22L result.audit_count;
+      Alcotest.check money_testable "same equity" (money "10111.65392")
         result.valuation.equity;
       Alcotest.(check string)
         "stream and batch journals agree" expected
@@ -1080,7 +1190,7 @@ let large_stream_replay_does_not_retain_audit_history () =
         "all slices consumed" (Int64.of_int slice_count) result.slice_count;
       Alcotest.(check int64)
         "events counted without an audit list"
-        (Int64.of_int ((2 * slice_count) + 2))
+        (Int64.of_int ((2 * slice_count) + 4))
         result.audit_count;
       Alcotest.(check int) "no orders accumulated" 0 (List.length result.orders))
 
@@ -1112,6 +1222,10 @@ let tests =
       market_slice_timeline_is_non_overlapping;
     Alcotest.test_case "portfolio target validation" `Quick
       portfolio_targets_are_total_and_aligned;
+    Alcotest.test_case "initial portfolio validation" `Quick
+      initial_portfolio_validation;
+    Alcotest.test_case "initial portfolio audit reconciliation" `Quick
+      initial_portfolio_is_audited_and_reconciled;
     Alcotest.test_case "execution model required and supported" `Quick
       execution_model_is_required_and_supported;
     Alcotest.test_case "deterministic replay" `Quick deterministic_replay;

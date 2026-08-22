@@ -27,6 +27,7 @@ type valuation = { account : Account.valuation; margin : Risk.margin_snapshot }
 
 type event =
   | Run_started of { scenario_sha256 : string; execution_model : string }
+  | Initial_state of { portfolio : Initial_portfolio.t; valuation : valuation }
   | Market_slice_received of Market_slice.t
   | Target_portfolio_requested of {
       basis : target_basis;

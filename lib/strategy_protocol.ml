@@ -8,6 +8,7 @@ type initialization = {
   run_id : Id.Run.t;
   base_currency : string;
   initial_cash : (string * Scalar.Money.t) list;
+  initial_portfolio : Initial_portfolio.t option;
   instruments : Instrument.t list;
   risk : Risk.t;
   execution_model : Execution_model.t;
@@ -76,9 +77,14 @@ let execution_to_yojson model execution =
   `Assoc
     [
       ("model", string (Execution_model.name model));
-      ("participation_bps", `Int (Execution.participation_bps execution));
-      ("fixed_fee", money (Execution.fixed_fee execution));
-      ("fee_bps", `Int (Execution.fee_bps execution));
+      ( "configuration",
+        `Assoc
+          [
+            ("version", string "1");
+            ("participation_bps", `Int (Execution.participation_bps execution));
+            ("fixed_fee", money (Execution.fixed_fee execution));
+            ("fee_bps", `Int (Execution.fee_bps execution));
+          ] );
     ]
 
 let initialize_message ~sequence:message_sequence initialization =
@@ -103,6 +109,9 @@ let initialize_message ~sequence:message_sequence initialization =
          ("run_id", string (Id.Run.to_string initialization.run_id));
          ("base_currency", string initialization.base_currency);
          ("initial_cash", `List (List.map cash_balance_to_yojson initial_cash));
+         ( "initial_portfolio",
+           Option.fold ~none:`Null ~some:Codec.initial_portfolio_to_yojson
+             initialization.initial_portfolio );
          ("instruments", `List (List.map instrument_to_yojson instruments));
          ("risk", risk_to_yojson initialization.risk);
          ( "execution",
