@@ -230,6 +230,7 @@ do not provide reducer snapshots or restart recovery.
 - [OCaml coverage](docs/coverage.md)
 - [Continuous integration and portability matrix](docs/continuous-integration.md)
 - [Documentation platform and generated API](docs/documentation-platform.md)
+- [Release artifacts and provenance](docs/release-artifacts.md)
 - [Performance](docs/performance.md)
 - [Reducer property testing](docs/reducer-property-testing.md)
 - [Protocol fuzzing](docs/fuzzing.md)

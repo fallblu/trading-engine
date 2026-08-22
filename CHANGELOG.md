@@ -9,6 +9,8 @@
   cells, with safe concurrency cancellation and documented required versus informational gates.
 - Publish one strict documentation site for architecture, versioned contracts, and generated OCaml
   APIs, with offline topology checks and bounded external-link validation.
+- Define a reproducible release-candidate artifact set with install verification, checksums, SPDX
+  inventory, SLSA provenance, and a manual tag-only signing boundary.
 
 ## 1.0.0 — 2026-08-21
 

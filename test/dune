@@ -161,6 +161,12 @@
 
 (rule
  (alias runtest)
+ (deps test_release_artifacts.py ../scripts/release_artifacts.py)
+ (action
+  (run python3 %{dep:test_release_artifacts.py})))
+
+(rule
+ (alias runtest)
  (deps
   validate_contract_conformance.py
   (source_tree ../contracts))
