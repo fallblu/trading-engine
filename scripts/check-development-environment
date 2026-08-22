@@ -25,16 +25,21 @@ if [ "$actual_switch" != "$local_switch" ]; then
   fail "opam selected '$actual_switch' instead of '$local_switch'"
 fi
 
-if ! missing_dependencies=$(
+if ! pending_actions=$(
   opam install "$repository_root" \
     --deps-only \
     --with-test \
     --locked \
-    --check \
+    --show-actions \
+    --color never \
     --switch "$repository_root" 2>&1
 ); then
-  printf '%s\n' "$missing_dependencies" >&2
-  fail "locked OCaml development dependencies are missing"
+  printf '%s\n' "$pending_actions" >&2
+  fail "opam could not evaluate the locked development dependencies"
+fi
+if ! printf '%s\n' "$pending_actions" | grep -Fqx "Nothing to do."; then
+  printf '%s\n' "$pending_actions" >&2
+  fail "the locked OCaml development dependencies are stale"
 fi
 
 if [ ! -x "$schema_python" ]; then
