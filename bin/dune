@@ -4,4 +4,12 @@
  (package trading_engine)
  (instrumentation
   (backend bisect_ppx))
- (libraries trading_engine cmdliner eio_main fmt.tty logs.fmt logs.cli))
+ (libraries
+  trading_engine
+  cmdliner
+  eio_main
+  fmt.tty
+  logs.fmt
+  logs.cli
+  yojson
+  unix))

@@ -10,6 +10,11 @@
   $ ../bin/main.exe --validate-only --input-format jsonl --input ../contracts/v8/fixtures/demo.scenario.jsonl
   valid run=demo instruments=1 schedule=2 slices=4 scenario_sha256=786f38d8bd10faac03b6b15c7aa8ae0a867eedc609ca6eaa75cfd93ae3ffdcae
 
+  $ ../bin/main.exe --output-format json --validate-only --input ../contracts/v8/fixtures/demo.scenario.json | python3 -c 'import json, sys; result=json.load(sys.stdin); print(result["result_version"], result["status"], result["operation"], result["run_id"]); print(result["counts"]["instruments"], result["counts"]["slices"], result["counts"]["audits"], result["valuation"]["equity"]); print(result["hashes"]["journal_sha256"], result["artifacts"]["journal"])'
+  1 success validate demo
+  1 4 22 10111.65392
+  None None
+
   $ ../bin/main.exe --input-format jsonl --input ../contracts/v8/fixtures/demo.scenario.jsonl --journal streamed.journal.jsonl --durable-artifacts
   run=demo audits=22 orders=3 active=0 filled=2 rejected=0
   cash=9846.65392 equity=10111.65392 gross=265 realized=18.965682 unrealized=7.688238 fees=3.16608
@@ -32,6 +37,12 @@
   1 scenario_stream.invalid validation
   6 6 None
 
+  $ diagnostic=$(../bin/main.exe --output-format json --validate-only --input-format jsonl --input truncated.scenario.jsonl 2>&1 >/dev/null); status=$?; test "$status" -eq 123; python3 -c 'import json, sys; diagnostic=json.loads(sys.argv[1]); print(diagnostic["diagnostic_version"], diagnostic["code"], diagnostic["phase"])' "$diagnostic"
+  1 scenario_stream.invalid validation
+
+  $ ../bin/main.exe --output-format json --validate-only --input missing.scenario.json 2>&1 >/dev/null | python3 -c 'import json, sys; diagnostic=json.load(sys.stdin); print(diagnostic["code"], diagnostic["phase"])'
+  input.io input
+
   $ sed 's/"open": "100"/"open": "100.001"/' ../contracts/v8/fixtures/demo.scenario.json > invalid-tick.json
   $ ../bin/main.exe --validate-only --input invalid-tick.json
   trading-engine: market prices and volumes must align with instrument increments
@@ -46,6 +57,36 @@
   [123]
 
   $ test ! -e validation.journal.jsonl
+
+  $ ../bin/main.exe --input-format jsonl --input ../contracts/v8/fixtures/demo.scenario.jsonl --journal piped-file.journal.jsonl >/dev/null
+  $ cat ../contracts/v8/fixtures/demo.scenario.jsonl | ../bin/main.exe --input-format jsonl --input - --journal - > piped-stdout.journal.jsonl 2> piped-summary.txt
+  $ cmp piped-file.journal.jsonl piped-stdout.journal.jsonl
+  $ python3 - piped-summary.txt piped-stdout.journal.jsonl <<'PY'
+  > import hashlib
+  > import json
+  > import sys
+  > summary_path, journal_path = sys.argv[1:]
+  > summary = open(summary_path, encoding="utf-8").read()
+  > journal_bytes = open(journal_path, "rb").read()
+  > completion = json.loads(journal_bytes.splitlines()[-1])
+  > print("journal=stdout" in summary, completion["event_type"])
+  > print(len(journal_bytes.splitlines()), hashlib.sha256(journal_bytes).hexdigest() == hashlib.sha256(open("piped-file.journal.jsonl", "rb").read()).hexdigest())
+  > PY
+  True run_completed
+  22 True
+
+  $ ../bin/main.exe --output-format json --input-format jsonl --input ../contracts/v8/fixtures/demo.scenario.jsonl --journal - > piped-json.journal.jsonl 2> piped-json-summary.json
+  $ python3 -c 'import json; result=json.load(open("piped-json-summary.json")); print(result["result_version"], result["operation"], result["artifacts"]["journal"], result["hashes"]["journal_sha256"] is not None)'
+  1 replay stdout True
+  $ cmp piped-file.journal.jsonl piped-json.journal.jsonl
+
+  $ printf '{}\n' | ../bin/main.exe --input - --journal -
+  trading-engine: standard input requires --input-format jsonl; batch JSON is not supported
+  [123]
+
+  $ ../bin/main.exe --input-format jsonl --input ../contracts/v8/fixtures/demo.scenario.jsonl --journal - --durable-artifacts
+  trading-engine: --durable-artifacts cannot be used when --journal writes to standard output
+  [123]
 
   $ ../bin/main.exe --validate-only --durable-artifacts --input ../contracts/v8/fixtures/demo.scenario.json
   trading-engine: --durable-artifacts cannot be used with --validate-only
@@ -66,6 +107,16 @@
   $ python3 -c 'from pathlib import Path; print(len(Path("external/run.journal.jsonl").read_text().splitlines()), len(Path("external/run.strategy.jsonl").read_text().splitlines()))'
   12 14
   $ diff -u ../contracts/strategy/v6/fixtures/external.strategy.jsonl external/run.strategy.jsonl
+
+  $ mkdir external-json
+  $ ../bin/main.exe --output-format json --input ../contracts/strategy/v6/fixtures/external.scenario.json --journal external-json/run.journal.jsonl --strategy-executable ./fake_strategy.py --strategy-transcript external-json/run.strategy.jsonl --strategy-timeout 5 | python3 -c 'import hashlib, json, sys; result=json.load(sys.stdin); digest=lambda path: hashlib.sha256(open(path, "rb").read()).hexdigest(); print(result["operation"], result["run_id"], result["artifacts"]["strategy_transcript"]); print(result["hashes"]["journal_sha256"] == digest(result["artifacts"]["journal"]), result["hashes"]["strategy_transcript_sha256"] == digest(result["artifacts"]["strategy_transcript"]))'
+  replay external-demo external-json/run.strategy.jsonl
+  True True
+
+  $ ../bin/main.exe --input ../contracts/strategy/v6/fixtures/external.scenario.json --journal ignored-stdout.journal.jsonl --strategy-executable ./fake_strategy.py --strategy-transcript -
+  trading-engine: --strategy-transcript does not support standard output; choose a file path
+  [123]
+  $ test ! -e ignored-stdout.journal.jsonl
 
   $ mkdir callback-ordering
   $ ../bin/main.exe --input ../contracts/strategy/v6/fixtures/external.scenario.json --journal callback-ordering/run.journal.jsonl --strategy-executable ./fake_strategy.py --strategy-arg cancel-next --strategy-transcript callback-ordering/run.strategy.jsonl --strategy-timeout 5

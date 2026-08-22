@@ -14,6 +14,10 @@ trading-engine --input scenario.json --validate-only
 trading-engine --input scenario.jsonl --input-format jsonl --validate-only
 ```
 
+Use `--input - --input-format jsonl` to read a stream from standard input. The CLI spools at most
+1 GiB to a private temporary file so the same bytes can be hashed, validated, replayed, and hashed
+again. Batch JSON cannot use standard input.
+
 ## JSON Lines stream
 
 Use the stream for histories that should not be materialized inside the engine. The first record
@@ -66,6 +70,14 @@ the scenario contract or the separate strategy protocol, never both.
 
 Each JSON Lines record is limited to 1 MiB, excluding its line feed. The reader accepts a final
 record without a line feed and drains an oversized record without retaining bytes above the limit.
+
+Use `--journal -` to write a journal to standard output. The engine first creates and verifies a
+complete temporary journal, then copies only journal bytes to the pipe. The final `run_completed`
+record and a zero process exit status signal completeness. Success summaries move to standard error,
+and diagnostics always use standard error, so protocol, journal, and summary bytes never share one
+stream. Pipes do not provide exclusive no-replace publication, atomic linking, retained partial
+artifacts, directory synchronization, or restart durability. They cannot be combined with
+`--durable-artifacts`.
 
 ## Instruments, risk, and execution
 

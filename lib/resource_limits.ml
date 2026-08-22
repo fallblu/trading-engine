@@ -1,5 +1,6 @@
 let version = "1"
 let scenario_record_bytes = 1_048_576
+let scenario_stream_bytes = 1_073_741_824
 let strategy_message_bytes = 1_048_576
 let internal_events = 100_000
 let catalog_instruments = 4_096
