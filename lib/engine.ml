@@ -69,6 +69,7 @@ let config_v11 ~contract_version ~risk ~venue_calendars ~execution_model
 
 let config_v12 = config_v11
 let config_v13 = config_v12
+let config_v14 = config_v13
 
 let valid_sha256 value =
   String.length value = 64

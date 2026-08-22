@@ -538,6 +538,278 @@ let start_slice_next_open state = start_slice_with_policy Next_open_only state
 let start_slice_adverse_touch state =
   start_slice_with_policy Adverse_touch state
 
+type observable_liquidity =
+  | Quote_liquidity of { bid : Scalar.Quantity.t; ask : Scalar.Quantity.t }
+  | Trade_liquidity of Scalar.Quantity.t
+
+let event_capacity state instrument quantity =
+  let* capacity =
+    Scalar.Quantity.bps_floor quantity ~bps:state.participation_bps
+  in
+  Scalar.Quantity.round_toward_zero_to_multiple capacity
+    ~multiple:instrument.Instrument.lot_size
+
+let validate_market_event instrument (event : Market_event.t) =
+  let tick = instrument.Instrument.tick_size in
+  let aligned = function
+    | Market_event.Quote { bid_price; ask_price; _ } ->
+        Scalar.Price.is_multiple bid_price ~tick
+        && Scalar.Price.is_multiple ask_price ~tick
+    | Trade { price; _ } -> Scalar.Price.is_multiple price ~tick
+  in
+  if not (Id.Instrument.equal instrument.id event.instrument_id) then
+    Error "execution instrument differs from the market event instrument"
+  else if not (aligned event.kind) then
+    Error "market event price is not aligned to the instrument tick size"
+  else Ok ()
+
+let event_trigger order (event : Market_event.t) =
+  let observed_price =
+    match (event.kind, order.Order.request.side) with
+    | Market_event.Quote { ask_price; _ }, Order.Buy -> ask_price
+    | Quote { bid_price; _ }, Sell -> bid_price
+    | Trade { price; _ }, _ -> price
+  in
+  match (order.request.kind, order.request.side) with
+  | Order.Stop trigger, Buy | Stop_limit { trigger_price = trigger; _ }, Buy ->
+      Scalar.Price.compare observed_price trigger >= 0
+  | Order.Stop trigger, Sell | Stop_limit { trigger_price = trigger; _ }, Sell
+    ->
+      Scalar.Price.compare observed_price trigger <= 0
+  | (Market | Limit _), _ -> false
+
+let event_opportunity order (event : Market_event.t) liquidity =
+  match
+    (event.kind, liquidity, Order.effective_kind order, order.request.side)
+  with
+  | Quote { ask_price; _ }, Quote_liquidity { ask; _ }, Some Market, Buy ->
+      Some (ask_price, ask, Fee_schedule.Taker)
+  | Quote { bid_price; _ }, Quote_liquidity { bid; _ }, Some Market, Sell ->
+      Some (bid_price, bid, Fee_schedule.Taker)
+  | Quote { ask_price; _ }, Quote_liquidity { ask; _ }, Some (Limit limit), Buy
+    when Scalar.Price.compare ask_price limit <= 0 ->
+      Some (ask_price, ask, Fee_schedule.Taker)
+  | Quote { bid_price; _ }, Quote_liquidity { bid; _ }, Some (Limit limit), Sell
+    when Scalar.Price.compare bid_price limit >= 0 ->
+      Some (bid_price, bid, Fee_schedule.Taker)
+  | ( Trade { price; aggressor_side = Market_event.Sell; _ },
+      Trade_liquidity quantity,
+      Some (Limit limit),
+      Buy )
+    when Scalar.Price.compare price limit <= 0 ->
+      Some (price, quantity, Fee_schedule.Maker)
+  | ( Trade { price; aggressor_side = Market_event.Buy; _ },
+      Trade_liquidity quantity,
+      Some (Limit limit),
+      Sell )
+    when Scalar.Price.compare price limit >= 0 ->
+      Some (price, quantity, Fee_schedule.Maker)
+  | _ -> None
+
+let consume_observable side liquidity quantity =
+  match liquidity with
+  | Quote_liquidity { bid; ask } ->
+      if side = Order.Buy then
+        Result.map
+          (fun ask -> Quote_liquidity { bid; ask })
+          (Scalar.Quantity.subtract ask quantity)
+      else
+        Result.map
+          (fun bid -> Quote_liquidity { bid; ask })
+          (Scalar.Quantity.subtract bid quantity)
+  | Trade_liquidity available ->
+      Result.map
+        (fun value -> Trade_liquidity value)
+        (Scalar.Quantity.subtract available quantity)
+
+let start_slice_quote_trade state ~instruments ~oms
+    (market_slice : Market_slice.t) =
+  let instrument_map =
+    List.fold_left
+      (fun map instrument ->
+        Id.Instrument.Map.add instrument.Instrument.id instrument map)
+      Id.Instrument.Map.empty instruments
+  in
+  let prepare_event event =
+    match
+      Id.Instrument.Map.find_opt event.Market_event.instrument_id instrument_map
+    with
+    | None -> Error "market event refers to an unknown instrument"
+    | Some instrument ->
+        let* () = validate_market_event instrument event in
+        if
+          Ptime.compare event.event_at market_slice.start_at < 0
+          || Ptime.compare event.event_at market_slice.end_at > 0
+          || Ptime.compare event.received_at market_slice.received_at > 0
+        then Error "market event falls outside its observable slice boundary"
+        else
+          let* liquidity =
+            match event.kind with
+            | Market_event.Quote { bid_quantity; ask_quantity; _ } ->
+                let* bid = event_capacity state instrument bid_quantity in
+                let* ask = event_capacity state instrument ask_quantity in
+                Ok (Quote_liquidity { bid; ask })
+            | Trade { quantity; _ } ->
+                Result.map
+                  (fun value -> Trade_liquidity value)
+                  (event_capacity state instrument quantity)
+          in
+          Ok (event, instrument, liquidity)
+  in
+  let* events =
+    List.fold_right
+      (fun event result ->
+        let* prepared = prepare_event event in
+        let* remaining = result in
+        Ok (prepared :: remaining))
+      market_slice.market_events (Ok [])
+  in
+  let eligible =
+    Oms.active_orders oms
+    |> List.filter (fun order ->
+        Int64.compare order.Order.eligible_after_slice_sequence
+          market_slice.slice_sequence
+        < 0
+        && Ptime.compare order.created_at market_slice.start_at <= 0
+        &&
+        match order.trigger_state with
+        | Some (Order.Triggered { triggered_slice_sequence; _ }) ->
+            Int64.compare triggered_slice_sequence market_slice.slice_sequence
+            < 0
+        | Some Order.Dormant | None -> true)
+    |> List.sort compare_execution_order
+  in
+  let order_ids = List.map (fun order -> order.Order.id) eligible in
+  let market_ioc_orders =
+    eligible
+    |> List.filter_map (fun order ->
+        if Order.is_ioc order && not (Order.is_dormant_stop order) then
+          Some order.Order.id
+        else None)
+  in
+  let rec make_events = function
+    | [] -> cursor (fun ~oms:_ -> Ok (Finished market_ioc_orders))
+    | (event, instrument, liquidity) :: remaining_events ->
+        make_orders event instrument liquidity order_ids remaining_events
+  and make_orders event instrument liquidity remaining remaining_events =
+    Cursor
+      (fun current_oms ->
+        match remaining with
+        | [] ->
+            let (Cursor next) = make_events remaining_events in
+            next current_oms
+        | order_id :: remaining_orders -> (
+            match Oms.find current_oms order_id with
+            | None -> Error "eligible order disappeared during market replay"
+            | Some order when not (Order.is_active order) ->
+                let (Cursor next) =
+                  make_orders event instrument liquidity remaining_orders
+                    remaining_events
+                in
+                next current_oms
+            | Some order
+              when not
+                     (Id.Instrument.equal order.request.instrument_id
+                        event.Market_event.instrument_id) ->
+                let (Cursor next) =
+                  make_orders event instrument liquidity remaining_orders
+                    remaining_events
+                in
+                next current_oms
+            | Some order when Order.is_dormant_stop order ->
+                let continuation =
+                  make_orders event instrument liquidity remaining_orders
+                    remaining_events
+                in
+                if event_trigger order event then
+                  Ok
+                    (Triggered
+                       ( order.id,
+                         event.event_at,
+                         market_slice.slice_sequence,
+                         continuation ))
+                else
+                  let (Cursor next) = continuation in
+                  next current_oms
+            | Some order -> (
+                match event_opportunity order event liquidity with
+                | None ->
+                    let (Cursor next) =
+                      make_orders event instrument liquidity remaining_orders
+                        remaining_events
+                    in
+                    next current_oms
+                | Some (price, available, fee_liquidity) ->
+                    let quantity =
+                      Scalar.Quantity.minimum available
+                        (Order.remaining_quantity order)
+                    in
+                    if
+                      Scalar.Quantity.is_zero quantity
+                      || Order.is_fok order
+                         && Scalar.Quantity.compare quantity
+                              (Order.remaining_quantity order)
+                            < 0
+                    then
+                      let (Cursor next) =
+                        make_orders event instrument liquidity remaining_orders
+                          remaining_events
+                      in
+                      next current_oms
+                    else
+                      let* notional = Scalar.Money.notional price quantity in
+                      let* fee_components, fee =
+                        calculate_fee state ~instrument ~notional ~quantity
+                          ~liquidity:fee_liquidity
+                          ~fx_rates:
+                            (List.map
+                               (fun mark ->
+                                 (mark.Market_slice.currency, mark.rate))
+                               market_slice.fx_rates)
+                      in
+                      let proposed =
+                        {
+                          order_id = order.id;
+                          quantity;
+                          price;
+                          fee;
+                          fee_components;
+                          liquidity = fee_liquidity;
+                          executed_at = event.event_at;
+                          price_attribution = None;
+                        }
+                      in
+                      let continue applied_quantity =
+                        if Scalar.Quantity.compare applied_quantity quantity > 0
+                        then
+                          Error
+                            "applied fill quantity exceeds observable liquidity"
+                        else if
+                          Scalar.Quantity.compare applied_quantity
+                            Scalar.Quantity.zero
+                          < 0
+                        then Error "applied fill quantity must be nonnegative"
+                        else if
+                          not
+                            (Scalar.Quantity.is_multiple applied_quantity
+                               ~lot:instrument.Instrument.lot_size)
+                        then
+                          Error
+                            "applied fill quantity is not aligned to the \
+                             instrument lot size"
+                        else
+                          let* liquidity =
+                            consume_observable order.request.side liquidity
+                              applied_quantity
+                          in
+                          Ok
+                            (make_orders event instrument liquidity
+                               remaining_orders remaining_events)
+                      in
+                      Ok (Proposed (proposed, continue)))))
+  in
+  Ok (make_events events)
+
 let finished market_ioc_orders =
   cursor (fun ~oms:_ -> Ok (Finished market_ioc_orders))
 
