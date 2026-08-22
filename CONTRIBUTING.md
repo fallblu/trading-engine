@@ -1,19 +1,24 @@
 # Contributing
 
-Use the repository-local opam switch and install development dependencies:
+Install `opam`, `uv`, and Python 3, then bootstrap the repository-local development
+environment:
 
 ```sh
-opam install . --deps-only --with-test --locked
+make bootstrap
 ```
 
-The schema conformance tests also require Python 3 and the JSON Schema format
-validators:
+The command creates or updates only the repository-local opam switch and
+`.venv-schema`. It installs the locked OCaml dependencies and the fully pinned JSON
+Schema validator environment. It is safe to run again after either lock changes.
+
+Check an existing environment without changing it:
 
 ```sh
-python3 -m venv .venv-schema
-.venv-schema/bin/python -m pip install 'jsonschema[format-nongpl]==4.26.0'
-export PATH="$PWD/.venv-schema/bin:$PATH"
+make environment-check
 ```
+
+The check reports missing tools, a missing or incorrect local opam switch, stale
+locked dependencies, and an incomplete schema environment with a suggested repair.
 
 Run the complete local gate before committing:
 
