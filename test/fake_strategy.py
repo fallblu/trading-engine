@@ -75,7 +75,12 @@ def response(request: dict[str, object]) -> dict[str, object]:
                     "side": "buy",
                     "quantity": "1",
                     "order_kind": "market",
+                    "trigger_price": None,
                     "limit_price": None,
+                    "time_in_force": "ioc",
+                    "venue_id": None,
+                    "calendar_id": None,
+                    "expires_at": None,
                 }
                 payload = {"intents": [order, order]}
             else:

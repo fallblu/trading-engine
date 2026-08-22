@@ -10,6 +10,7 @@ type initialization = {
   initial_cash : (string * Scalar.Money.t) list;
   initial_portfolio : Initial_portfolio.t option;
   instruments : Instrument.t list;
+  venue_calendars : Venue_calendar.t list;
   risk : Risk.t;
   execution_model : Execution_model.t;
   execution : Execution.t;
@@ -60,6 +61,35 @@ let instrument_to_yojson instrument =
       ("lot_size", quantity instrument.lot_size);
     ]
 
+let phase_to_yojson (phase : Venue_calendar.phase) =
+  `Assoc
+    [
+      ("phase", string (Venue_calendar.phase_kind_to_string phase.kind));
+      ("opens_at", timestamp phase.opens_at);
+      ("closes_at", timestamp phase.closes_at);
+    ]
+
+let session_to_yojson (session : Venue_calendar.session) =
+  `Assoc
+    [
+      ("session_date", string session.session_date);
+      ("policy", string (Venue_calendar.session_kind_to_string session.kind));
+      ("phases", `List (List.map phase_to_yojson session.phases));
+    ]
+
+let venue_calendar_to_yojson (calendar : Venue_calendar.t) =
+  `Assoc
+    [
+      ("calendar_id", string (Id.Venue_calendar.to_string calendar.id));
+      ("calendar_version", string calendar.version);
+      ("venue_id", string (Id.Venue.to_string calendar.venue_id));
+      ( "instrument_ids",
+        `List
+          (calendar.instrument_ids |> Id.Instrument.Set.elements
+         |> List.map instrument_id) );
+      ("sessions", `List (List.map session_to_yojson calendar.sessions));
+    ]
+
 let group_kind_to_string = function
   | Risk.Issuer -> "issuer"
   | Risk.Sector -> "sector"
@@ -69,6 +99,7 @@ let group_kind_to_string = function
   | Risk.Custom -> "custom"
 
 let nullable render = Option.fold ~none:`Null ~some:render
+let modern_protocol protocol_version = List.mem protocol_version [ "6"; "5" ]
 
 let instrument_policy_to_yojson (policy : Risk.instrument_policy) =
   `Assoc
@@ -104,7 +135,7 @@ let group_to_yojson (group : Risk.group) =
     ]
 
 let risk_to_yojson ~protocol_version risk =
-  if String.equal protocol_version version then
+  if modern_protocol protocol_version then
     `Assoc
       [
         ("max_gross_exposure", money (Risk.max_gross_exposure risk));
@@ -130,7 +161,7 @@ let risk_to_yojson ~protocol_version risk =
       ]
 
 let execution_to_yojson ~protocol_version model execution =
-  if String.equal protocol_version version then
+  if modern_protocol protocol_version then
     `Assoc
       [
         ("model", string (Execution_model.name model));
@@ -174,6 +205,12 @@ let initialize_message ~sequence:message_sequence initialization =
       (fun (left, _) (right, _) -> String.compare left right)
       initialization.initial_cash
   in
+  let venue_calendars =
+    List.sort
+      (fun left right ->
+        Id.Venue_calendar.compare left.Venue_calendar.id right.Venue_calendar.id)
+      initialization.venue_calendars
+  in
   let fields =
     [
       ("engine_version", string Contract.engine_version);
@@ -193,6 +230,21 @@ let initialize_message ~sequence:message_sequence initialization =
   in
   let fields =
     if String.equal protocol_version version then
+      let initial_portfolio =
+        Option.fold ~none:`Null ~some:Codec.initial_portfolio_to_yojson
+          initialization.initial_portfolio
+      in
+      List.concat
+        [
+          List.take 6 fields;
+          [
+            ("initial_portfolio", initial_portfolio);
+            ( "venue_calendars",
+              `List (List.map venue_calendar_to_yojson venue_calendars) );
+          ];
+          List.drop 6 fields;
+        ]
+    else if modern_protocol protocol_version then
       let initial_portfolio =
         Option.fold ~none:`Null ~some:Codec.initial_portfolio_to_yojson
           initialization.initial_portfolio
@@ -282,7 +334,7 @@ let context_to_yojson ~protocol_version context =
     ]
   in
   let portfolio_fields =
-    if String.equal protocol_version version then
+    if modern_protocol protocol_version then
       portfolio_fields
       @ [
           ( "group_exposures",
@@ -295,11 +347,17 @@ let context_to_yojson ~protocol_version context =
     [
       ("now", timestamp (Strategy.now context));
       ("portfolio", `Assoc portfolio_fields);
-      ("working_orders", `List (List.map Codec.order_to_yojson working_orders));
+      ( "working_orders",
+        `List
+          (List.map
+             (if String.equal protocol_version version then
+                Codec.order_to_yojson_v8
+              else Codec.order_to_yojson)
+             working_orders) );
       ("latest_bars", `List (List.map Codec.bar_to_yojson latest_bars));
     ]
 
-let event_to_yojson = function
+let event_to_yojson ~protocol_version = function
   | Strategy.Market_slice_closed market_slice ->
       `Assoc
         [
@@ -315,7 +373,10 @@ let event_to_yojson = function
       `Assoc
         [
           ("type", string "order_updated");
-          ("order", Codec.order_to_yojson order);
+          ( "order",
+            if String.equal protocol_version version then
+              Codec.order_to_yojson_v8 order
+            else Codec.order_to_yojson order );
         ]
   | Strategy.Intent_rejected reason ->
       `Assoc [ ("type", string "intent_rejected"); ("reason", string reason) ]
@@ -326,7 +387,7 @@ let event_message ?(protocol_version = version) ~sequence:message_sequence
     (`Assoc
        [
          ("context", context_to_yojson ~protocol_version context);
-         ("event", event_to_yojson event);
+         ("event", event_to_yojson ~protocol_version event);
        ])
 
 let shutdown_message_for ~protocol_version ~sequence:message_sequence =
@@ -384,7 +445,7 @@ let parse_ready_payload json =
   let* version = optional_string ~name:"strategy_version" version_json in
   Ok (Ready { name; version })
 
-let parse_intents_payload json =
+let parse_intents_payload ~protocol_version json =
   let* fields =
     object_fields ~name:"strategy intents payload" ~expected:[ "intents" ] json
   in
@@ -399,7 +460,10 @@ let parse_intents_payload json =
         (fun result value ->
           let* intents = result in
           let* intent =
-            Scenario.intent_of_yojson value
+            Scenario.intent_of_yojson
+              ~contract_version:
+                (if String.equal protocol_version version then "8" else "7")
+              value
             |> Result.map_error Diagnostic.to_human
           in
           Ok (intent :: intents))
@@ -447,7 +511,7 @@ let response_of_yojson_result ~protocol_version ~expected_sequence json =
       let* payload = field fields "payload" in
       match message_type with
       | "ready" -> parse_ready_payload payload
-      | "intents" -> parse_intents_payload payload
+      | "intents" -> parse_intents_payload ~protocol_version payload
       | "stopped" -> parse_stopped_payload payload
       | "error" ->
           parse_error_payload payload

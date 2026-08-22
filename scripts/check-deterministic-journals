@@ -50,3 +50,11 @@ compare_journal \
   v5-fill-clipped \
   contracts/v5/fixtures/fill-clipped.scenario.json \
   contracts/v5/fixtures/fill-clipped.journal.jsonl
+compare_journal \
+  v8-demo \
+  contracts/v8/fixtures/demo.scenario.json \
+  contracts/v8/fixtures/demo.journal.jsonl
+compare_journal \
+  v8-fill-clipped \
+  contracts/v8/fixtures/fill-clipped.scenario.json \
+  contracts/v8/fixtures/fill-clipped.journal.jsonl

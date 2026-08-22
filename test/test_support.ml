@@ -93,6 +93,13 @@ let request ?(instrument = instrument_id "test-equity") ?(side = T.Order.Buy)
     ~quantity:(quantity quantity_value) ~kind ~origin
   |> ok
 
+let request_v8 ?(instrument = instrument_id "test-equity") ?(side = T.Order.Buy)
+    ?(quantity_value = "10") ?(kind = T.Order.Market)
+    ?(time_in_force = T.Order.Gtc) ?(origin = T.Order.Direct) () =
+  T.Order.request_v8 ~instrument_id:instrument ~side
+    ~quantity:(quantity quantity_value) ~kind ~time_in_force ~origin
+  |> ok
+
 let accepted_order ?(id = "order-1") ?(accepted_sequence = 1L)
     ?(created_at = timestamp "2026-01-02T21:00:02Z")
     ?(eligible_after_slice_sequence = 1L) request =
@@ -147,6 +154,16 @@ let engine_config ?(contract_version = T.Contract.version) ?(risk = risk ())
   in
   T.Engine.config ~contract_version ~risk ~execution_model ~execution
     ~max_internal_events
+  |> ok
+
+let engine_config_v8 ?(risk = risk ()) ?(venue_calendars = []) ?execution_model
+    ?(execution = execution ()) ?(max_internal_events = 1000) () =
+  let execution_model =
+    Option.value execution_model
+      ~default:(T.Execution_model.find "completed_bar_v1" |> ok)
+  in
+  T.Engine.config_v8 ~contract_version:T.Contract.version ~risk ~venue_calendars
+    ~execution_model ~execution ~max_internal_events
   |> ok
 
 let risk_check risk ~account ~oms request =
