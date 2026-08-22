@@ -4,20 +4,25 @@ set -eu
 repository_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 coverage_root="$repository_root/_coverage"
 coverage_data="$coverage_root/data"
+coverage_build="$repository_root/_build-coverage"
 
-if [ "$coverage_root" != "$repository_root/_coverage" ]; then
-  echo "refusing to clean an unexpected coverage directory" >&2
+if [ "$coverage_root" != "$repository_root/_coverage" ] \
+  || [ "$coverage_build" != "$repository_root/_build-coverage" ]; then
+  echo "refusing to clean an unexpected generated directory" >&2
   exit 1
 fi
 
 rm -rf -- "$coverage_root"
+rm -rf -- "$coverage_build"
 mkdir -p "$coverage_data"
 
 export BISECT_FILE="$coverage_data/bisect"
 cd "$repository_root"
 
-opam exec --switch . -- dune clean
-opam exec --switch . -- dune runtest --instrument-with bisect_ppx --force
+opam exec --switch . -- dune runtest \
+  --build-dir "$coverage_build" \
+  --instrument-with bisect_ppx \
+  --force
 opam exec --switch . -- bisect-ppx-report summary \
   --coverage-path "$coverage_data" \
   --per-file \
