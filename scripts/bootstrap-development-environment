@@ -7,6 +7,16 @@ schema_environment="$repository_root/.venv-schema"
 schema_lock="$repository_root/requirements/schema.lock"
 coverage_repository_name="trading-engine-coverage"
 coverage_repository="$repository_root/opam-repository"
+dependency_band=${1:-locked}
+
+case "$dependency_band" in
+  locked | lowest | highest) ;;
+  *)
+    printf '%s\n' \
+      "error: dependency band must be one of: locked, lowest, highest" >&2
+    exit 2
+    ;;
+esac
 
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -37,14 +47,36 @@ if opam pin list --switch "$repository_root" --short | grep -Fqx "bisect_ppx"; t
     --yes
 fi
 
-printf '%s\n' "Installing locked OCaml development dependencies..."
-opam install "$repository_root" \
-  --deps-only \
-  --with-test \
-  --locked \
-  --require-checksums \
-  --switch "$repository_root" \
-  --yes
+printf '%s\n' "Installing $dependency_band OCaml development dependencies..."
+case "$dependency_band" in
+  locked)
+    opam install "$repository_root" \
+      --deps-only \
+      --with-test \
+      --locked \
+      --require-checksums \
+      --switch "$repository_root" \
+      --yes
+    ;;
+  lowest)
+    opam install "$repository_root" \
+      --criteria='+count[version-lag,solution]' \
+      --deps-only \
+      --with-test \
+      --require-checksums \
+      --switch "$repository_root" \
+      --yes
+    ;;
+  highest)
+    opam install "$repository_root" \
+      --criteria='-count[version-lag,solution]' \
+      --deps-only \
+      --with-test \
+      --require-checksums \
+      --switch "$repository_root" \
+      --yes
+    ;;
+esac
 
 if [ ! -x "$schema_environment/bin/python" ]; then
   printf '%s\n' "Creating the repository-local schema environment..."
@@ -61,4 +93,9 @@ uv pip sync \
   --strict \
   "$schema_lock"
 
-"$repository_root/scripts/check-development-environment"
+if [ "$dependency_band" = locked ]; then
+  "$repository_root/scripts/check-development-environment"
+else
+  printf '%s\n' \
+    "$dependency_band dependency band is ready; the locked environment check does not apply."
+fi
