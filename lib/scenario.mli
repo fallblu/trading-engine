@@ -12,6 +12,7 @@ type t = private {
   risk : Risk.t;
   execution_model : Execution_model.t;
   execution : Execution.t;
+  financing : Financing.policy option;
   max_internal_events : int;
   schedule : (int64 * Strategy.intent list) list;
   slices : Market_slice.t list;
@@ -29,6 +30,7 @@ type stream_header = private {
   risk : Risk.t;
   execution_model : Execution_model.t;
   execution : Execution.t;
+  financing : Financing.policy option;
   max_internal_events : int;
 }
 

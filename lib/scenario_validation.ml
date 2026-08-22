@@ -48,7 +48,7 @@ let validate_venue_calendars ~root catalog venue_calendars =
 let header ~root ~contract_version ~base_currency ~initial_cash ~instruments
     ~venue_calendars ~max_internal_events =
   let* () =
-    if List.mem contract_version [ "9"; "8"; "7"; "6" ] then Ok ()
+    if List.mem contract_version [ "10"; "9"; "8"; "7"; "6" ] then Ok ()
     else
       Account.create ~base_currency ~initial_cash
       |> Result.map (fun _ -> ())
@@ -66,7 +66,7 @@ let header ~root ~contract_version ~base_currency ~initial_cash ~instruments
       fail ~json_path:(child root "instruments") "instrument IDs must be unique"
     else
       let* () =
-        if List.mem contract_version [ "9"; "8"; "7"; "6"; "5" ] then
+        if List.mem contract_version [ "10"; "9"; "8"; "7"; "6"; "5" ] then
           validate_venue_calendars ~root catalog venue_calendars
         else Ok ()
       in
@@ -84,7 +84,7 @@ let header ~root ~contract_version ~base_currency ~initial_cash ~instruments
         fail
           ~json_path:
             (child root
-               (if List.mem contract_version [ "9"; "8"; "7"; "6" ] then
+               (if List.mem contract_version [ "10"; "9"; "8"; "7"; "6" ] then
                   "initial_portfolio.cash"
                 else "initial_cash"))
           "initial cash must contain every scenario currency exactly once"

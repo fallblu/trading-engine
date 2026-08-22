@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add effective-time borrow availability, signed rates, locate clipping or rejection, recalls,
+  deterministic close-outs, and explicit missing-data behavior.
+- Add effective-time currency credit/debit rates with Actual/365 or Actual/360 day count, simple or
+  daily compounding, deterministic cash-ledger entries, and realized P&L attribution.
+- Publish scenario/journal contract v10 and external strategy protocol v8 while preserving v9 and
+  protocol v7 as frozen compatibility contracts.
 - Added instrument-aware, composable fee schedules with named fixed, notional, and per-unit
   components; explicit rounding; maker/taker applicability; per-fill minimums and caps; rebates;
   and deterministic multi-currency conversion.

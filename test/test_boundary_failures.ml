@@ -330,6 +330,7 @@ let initialization () =
       risk = risk ~instruments:[ instrument ] ();
       execution_model = T.Execution_model.find "completed_bar_v1" |> ok;
       execution = execution ();
+      financing = None;
     }
 
 let process_stages =

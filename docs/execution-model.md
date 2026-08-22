@@ -1,11 +1,11 @@
 # Execution model
 
 The engine selects a compiled execution module by the scenario's stable `execution.model` name.
-Contract v9 advertises and accepts `completed_bar_v1`; embedders can inject another module through
+Contract v10 advertises and accepts `completed_bar_v1`; embedders can inject another module through
 the typed engine configuration without introducing runtime shared-library loading. The selected
 name is repeated in both terminal audit records.
 
-Each compiled model owns a strict configuration contract. The v9 envelope separates selection from
+Each compiled model owns a strict configuration contract. The v10 envelope separates selection from
 model-specific parameters:
 
 ```json
@@ -143,13 +143,30 @@ order may exceed that maximum, but no individual fill may do so.
 
 A cash dividend multiplies the pre-match signed position by its per-unit amount. It credits a long
 or debits a short in the instrument's quote-currency ledger and records realized dividend P&L.
-After actions, each open short accrues a quote-currency borrow fee from the slice open mark and the
-exact `start_at`/`end_at` duration using a 365-day basis. Positive fees round upward to one money
-micro-unit.
+Contract v10 replaces the fixed legacy rate with effective-time borrow observations. Each
+observation names an instrument, available quantity, annual rate in basis points, and recall state.
+Observations become active no later than the slice start and remain active until superseded. A new
+short either clips to the available locate or is rejected according to `locate_policy`; existing
+short quantity consumes availability. A recall rejects further shorts and, under `close_out`,
+cancels active sells and submits a priority IOC buy until the short is flat. `reject_new_shorts`
+retains the position but prevents it from increasing.
+
+Before matching, each open short accrues its observed quote-currency charge from the slice open
+mark and exact `start_at`/`end_at` duration. Missing observations follow `borrow_missing_data`:
+`reject` fails the slice and `zero` applies no charge while still preventing an unlocated new short.
+Signed rates support rebates. Charges use the scenario's explicit `actual_365` or `actual_360`
+day-count and `simple` or `daily` compounding policy.
+
+Cash financing uses effective-time observations per currency with separate annual credit and debit
+rates. Positive balances receive the credit rate; negative balances receive the debit rate. The
+same explicit interval, day-count, compounding, and deterministic micro-unit rounding rules apply.
+`cash_missing_data` either rejects a nonzero balance without an observation or treats its rate as
+zero. Interest updates the native cash ledger and is reported separately and within aggregate
+realized P&L; debit interest can therefore produce or deepen negative equity.
 
 ## Risk-limited fills and fees
 
-Contract v9 selects exactly one fee schedule per instrument. A schedule composes named `fixed`,
+Contract v10 selects exactly one fee schedule per instrument. A schedule composes named `fixed`,
 `notional_bps`, and `per_unit` components. Each component declares its currency, `up`, `down`, or
 `nearest` rounding, and `any`, `maker`, or `taker` applicability. A limit filled at its intrabar
 touch is maker liquidity; market orders and limits marketable at the open are takers.
