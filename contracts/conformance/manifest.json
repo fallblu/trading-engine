@@ -118,6 +118,15 @@
       ]
     },
     {
+      "name": "diagnostic-v1",
+      "schema": "diagnostic/v1/diagnostic.schema.json",
+      "version_field": "diagnostic_version",
+      "version": "1",
+      "sources": [
+        {"path": "diagnostic/v1/fixtures/strategy-protocol.json", "format": "json"}
+      ]
+    },
+    {
       "name": "strategy-message-v1",
       "schema": "strategy/v1/message.schema.json",
       "version_field": "strategy_protocol_version",

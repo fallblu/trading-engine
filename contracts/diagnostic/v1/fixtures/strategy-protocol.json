@@ -1,0 +1,15 @@
+{
+  "diagnostic_version": "1",
+  "code": "strategy.protocol",
+  "phase": "strategy",
+  "message": "strategy initialization: invalid strategy response JSON",
+  "context": {
+    "json_path": "$",
+    "line": 1,
+    "sequence": "1",
+    "event_id": "diagnostic-demo-event-000000000001",
+    "order_id": "diagnostic-demo-order-000000000001",
+    "causation_ids": ["diagnostic-demo-event-000000000000"]
+  },
+  "cause": null
+}
