@@ -24,6 +24,7 @@ REQUIRED_NAVIGATION = (
     "docs/scenario.md",
     "docs/diagnostics.md",
     "docs/persistra.md",
+    "SECURITY.md",
     "contracts/conformance/README.md",
     "contracts/v4/README.md",
     "contracts/v3/README.md",
@@ -40,6 +41,7 @@ REQUIRED_NAVIGATION = (
     "docs/fuzzing.md",
     "docs/documentation-platform.md",
     "docs/release-artifacts.md",
+    "docs/security-maintenance.md",
     "CONTRIBUTING.md",
     "SUPPORT.md",
     "CHANGELOG.md",
@@ -67,6 +69,7 @@ def source_markdown_files(root: Path = REPOSITORY_ROOT) -> tuple[Path, ...]:
         root / "README.md",
         root / "CONTRIBUTING.md",
         root / "CHANGELOG.md",
+        root / ".github" / "SECURITY.md",
         root / ".github" / "SUPPORT.md",
     )
     discovered = tuple(sorted((root / "docs").rglob("*.md"))) + tuple(
@@ -154,6 +157,8 @@ def site_failures(root: Path = REPOSITORY_ROOT) -> list[str]:
         site / "docs" / "architecture" / "index.html",
         site / "docs" / "execution-model" / "index.html",
         site / "docs" / "scenario" / "index.html",
+        site / "docs" / "security-maintenance" / "index.html",
+        site / "SECURITY" / "index.html",
         site / "docs" / "api-reference" / "index.html",
         site / "contracts" / "v4" / "index.html",
         site / "contracts" / "v3" / "index.html",

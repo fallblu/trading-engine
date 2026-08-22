@@ -54,6 +54,8 @@ coherent, and working. Use subject-only conventional commit messages such as
 `feat: implement deterministic order matching`.
 
 Do not add secrets, provider credentials, or customer account data to fixtures or journals.
+Report suspected vulnerabilities through the private channel in the
+[security policy](.github/SECURITY.md), not through a public issue.
 
 ## Intake and planning metadata
 
