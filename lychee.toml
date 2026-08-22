@@ -1,0 +1,21 @@
+# External links are network-sensitive and run only in the External links workflow.
+verbose = "info"
+format = "detailed"
+no_progress = true
+
+threads = 2
+max_concurrency = 4
+host_concurrency = 2
+max_redirects = 5
+max_retries = 2
+timeout = 20
+retry_wait_time = 2
+
+scheme = ["https"]
+require_https = true
+insecure = false
+exclude_all_private = true
+include_mail = false
+
+# Exceptions must match exact reviewed URLs and explain why the target cannot be checked.
+exclude = []

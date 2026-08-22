@@ -94,5 +94,5 @@ build: [
   ["dune" "build" "-p" name "-j" jobs]
 ]
 license: "MIT"
-homepage: "https://github.com/fallblu/trading-engine"
+homepage: "https://fallblu.github.io/trading-engine/"
 bug-reports: "https://github.com/fallblu/trading-engine/issues"

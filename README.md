@@ -4,6 +4,9 @@ Trading Engine is a deterministic, event-driven OCaml execution engine. It runs 
 through pre-trade risk, order management, synchronized completed-bar execution, exact accounting,
 valuation, and a hash-bound JSON Lines audit journal.
 
+The [documentation site](docs/documentation-platform.md) connects the architecture, execution and
+scenario contracts, stable versioned artifacts, and generated OCaml API reference.
+
 The engine is replay-first. Its pure kernel and explicit source, strategy, execution, and journal
 layers keep networking, files, and wall-clock state outside the reducer.
 
@@ -226,6 +229,7 @@ do not provide reducer snapshots or restart recovery.
 - [Execution model](docs/execution-model.md)
 - [OCaml coverage](docs/coverage.md)
 - [Continuous integration and portability matrix](docs/continuous-integration.md)
+- [Documentation platform and generated API](docs/documentation-platform.md)
 - [Performance](docs/performance.md)
 - [Reducer property testing](docs/reducer-property-testing.md)
 - [Protocol fuzzing](docs/fuzzing.md)
