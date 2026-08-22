@@ -25,7 +25,8 @@ Coverage runs once in the exact locked Ubuntu environment. The required Persistr
 once against its full pinned commit; it is not repeated across dependency or operating-system
 cells. The manually dispatched Persistra moving-head job remains informational.
 
-Pull requests and unprotected branch pushes cancel superseded runs. Tags and protected branches do
-not, so durable integration evidence is not discarded. The key combines the source repository and
-source branch, so a pull request cancels its duplicate feature-branch push without colliding with a
-fork or another branch.
+Feature-branch pushes do not start CI; the pull-request event owns that validation and avoids a
+duplicate check set. Pull requests cancel superseded commits. Push validation runs only on
+`develop` and tags, where it is never cancelled, so durable integration evidence is not discarded.
+The concurrency key combines the source repository and source branch without colliding with a fork
+or another branch.
