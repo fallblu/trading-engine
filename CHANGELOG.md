@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Add exact stock-dividend, rights, and spin-off distributions with explicit basis allocation,
+  fractional rejection or cash-in-lieu policy, destination currency validation, target adjustment,
+  and complete journal attribution.
+- Add stable-identity instrument lifecycle state for halt, resume, identifier/provider remapping,
+  expiration, and delisting with deterministic order cancellation and explicit terminal hold or
+  cash-out policy.
+- Publish scenario/journal contract v12 and external strategy protocol v10 while preserving v11
+  and protocol v9 as frozen compatibility contracts.
 - Add deterministic trade-date and settlement-date accounting, versioned business-date settlement
   calendars, settled and unsettled cash and position attribution, explicit settlement buying-power
   policies, and auditable settlement completion and failure events.

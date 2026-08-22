@@ -78,8 +78,14 @@ let engine_config ~contract_version ~risk ~venue_calendars ~execution_model
       Engine.config_v10 ~contract_version ~risk ~venue_calendars
         ~execution_model ~execution ~financing ~max_internal_events
   | Some financing, Some settlement ->
-      Engine.config_v11 ~contract_version ~risk ~venue_calendars
-        ~execution_model ~execution ~financing ~settlement ~max_internal_events
+      if String.equal contract_version "12" then
+        Engine.config_v12 ~contract_version ~risk ~venue_calendars
+          ~execution_model ~execution ~financing ~settlement
+          ~max_internal_events
+      else
+        Engine.config_v11 ~contract_version ~risk ~venue_calendars
+          ~execution_model ~execution ~financing ~settlement
+          ~max_internal_events
   | None, Some _ -> Error "settlement requires financing configuration"
 
 let run ~scenario_sha256 ?journal_path ?(durability = Artifact_writer.Buffered)

@@ -8,6 +8,8 @@ type cancellation_reason =
   | Gtd_expired
   | Margin_call
   | Borrow_recall
+  | Instrument_halt
+  | Instrument_terminal
 
 type target_basis = Weights | Quantities
 
@@ -48,6 +50,16 @@ type event =
   | Cash_dividend_applied of {
       action : Corporate_action.t;
       quantity : Scalar.Quantity.t;
+      cash_amount : Scalar.Money.t;
+    }
+  | Distribution_applied of {
+      action : Corporate_action.t;
+      result : Account.distribution_result;
+    }
+  | Lifecycle_applied of {
+      lifecycle_event : Instrument_lifecycle.event;
+      listing : Instrument_lifecycle.listing;
+      liquidated_quantity : Scalar.Quantity.t;
       cash_amount : Scalar.Money.t;
     }
   | Order_adjusted of { order : Order.t; action_id : Id.Corporate_action.t }
@@ -155,6 +167,8 @@ let cancellation_reason_to_string = function
   | Gtd_expired -> "gtd_expired"
   | Margin_call -> "margin_call"
   | Borrow_recall -> "borrow_recall"
+  | Instrument_halt -> "instrument_halt"
+  | Instrument_terminal -> "instrument_terminal"
 
 let target_basis_to_string = function
   | Weights -> "weights"
@@ -171,6 +185,8 @@ let event_name = function
   | Order_cancelled _ -> "order_cancelled"
   | Split_applied _ -> "split_applied"
   | Cash_dividend_applied _ -> "cash_dividend_applied"
+  | Distribution_applied _ -> "distribution_applied"
+  | Lifecycle_applied _ -> "lifecycle_applied"
   | Order_adjusted _ -> "order_adjusted"
   | Fill_applied _ -> "fill_applied"
   | Settlement_instruction_created _ -> "settlement_instruction_created"

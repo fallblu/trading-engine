@@ -51,7 +51,8 @@ scenario slices and scheduled or external intents
   maker/taker applicability, minimums, caps, rebates, and deterministic FX conversion
 - Explicit multi-currency cash ledgers and complete per-slice FX marks in a base currency
 - Explicit signed initial portfolios with cost basis, P&L and fee history, marks, and FX state
-- Split and cash-dividend processing before matching, including target and order adjustment
+- Splits, dividends, rights, spin-offs, fractional cash-in-lieu, and exact basis allocation
+- Stable instrument identity with halt/resume, identifier changes, expiration, and delisting
 - Effective-time short locates, availability clipping, borrow-rate accrual, recalls, and
   deterministic close-out orders
 - Per-currency credit/debit cash rates with explicit day-count and compounding policies
@@ -60,7 +61,7 @@ scenario slices and scheduled or external intents
   fee-component attribution
 - Deterministic event IDs, ordered causal references, and order-creation attribution
 - Contract-selected compiled execution modules with versioned model-owned configuration and
-  capability descriptors; v11 currently exposes `completed_bar_v1` configuration v2
+  capability descriptors; v12 currently exposes `completed_bar_v1` configuration v2
 - Strict batch JSON and bounded-memory JSON Lines scenario parsing with JSON Schemas
 - Versioned synchronous JSON Lines strategy processes with per-request timeouts and strict
   lifecycle supervision
@@ -90,7 +91,7 @@ Validate the included scenario with an in-memory replay:
 
 ```sh
 opam exec -- dune exec trading-engine -- \
-  --input contracts/v11/fixtures/demo.scenario.json \
+  --input contracts/v12/fixtures/demo.scenario.json \
   --validate-only
 ```
 
@@ -98,7 +99,7 @@ Run it and create a journal:
 
 ```sh
 opam exec -- dune exec trading-engine -- \
-  --input contracts/v11/fixtures/demo.scenario.json \
+  --input contracts/v12/fixtures/demo.scenario.json \
   --journal demo.journal.jsonl
 ```
 
@@ -106,7 +107,7 @@ For larger histories, validate and replay the equivalent stream one slice at a t
 
 ```sh
 opam exec -- dune exec trading-engine -- \
-  --input contracts/v11/fixtures/demo.scenario.jsonl \
+  --input contracts/v12/fixtures/demo.scenario.jsonl \
   --input-format jsonl \
   --journal demo.journal.jsonl
 ```
@@ -115,7 +116,7 @@ Run an external strategy against an empty-schedule scenario:
 
 ```sh
 opam exec -- dune exec trading-engine -- \
-  --input contracts/strategy/v9/fixtures/external.scenario.json \
+  --input contracts/strategy/v10/fixtures/external.scenario.json \
   --journal external.journal.jsonl \
   --strategy-executable ./my-strategy \
   --strategy-arg=config.toml \
@@ -184,7 +185,11 @@ slice whose start is not earlier than its creation time.
 - Eligible liquidation orders consume capacity before other orders. Within each origin class,
   sells precede buys and FIFO creation order breaks ties within a side.
 - Corporate actions are applied before matching. Splits adjust positions, persistent targets, and
-  active orders; cash dividends credit longs and debit shorts in the quote-currency ledger.
+  active orders; distributions allocate basis and fractional cash exactly; cash dividends credit
+  longs and debit shorts in the quote-currency ledger.
+- Lifecycle events update symbols and provider mappings without changing instrument identity.
+  Halts and terminal events cancel orders; expiration and delisting follow an explicit hold or
+  cash-out policy.
 - Effective-time borrow observations control short availability and rates. New shorts are rejected
   or clipped to their locate, recalls reject new shorts or create deterministic close-out orders,
   and observed borrow charges accrue before matching.
@@ -226,19 +231,19 @@ do not provide reducer snapshots or restart recovery.
 - [Diagnostic contract](docs/diagnostics.md)
 - [Scenario contract](docs/scenario.md)
 - [Contract conformance corpus](contracts/conformance/README.md)
-- [Current contract v11 and conformance fixtures](contracts/v11/README.md)
+- [Current contract v12 and conformance fixtures](contracts/v12/README.md)
 - [Frozen contract v2](contracts/v2/README.md)
 - [Historical contract v1](contracts/v1/README.md)
-- [Scenario JSON Schema](contracts/v11/scenario.schema.json)
-- [Scenario stream record JSON Schema](contracts/v11/scenario-stream.schema.json)
-- [Journal record JSON Schema](contracts/v11/journal.schema.json)
-- [External strategy protocol v9](contracts/strategy/v9/README.md)
+- [Scenario JSON Schema](contracts/v12/scenario.schema.json)
+- [Scenario stream record JSON Schema](contracts/v12/scenario-stream.schema.json)
+- [Journal record JSON Schema](contracts/v12/journal.schema.json)
+- [External strategy protocol v10](contracts/strategy/v10/README.md)
 - [Historical strategy protocol v3](contracts/strategy/v3/README.md)
 - [Historical strategy protocol v2](contracts/strategy/v2/README.md)
 - [Historical strategy protocol v1](contracts/strategy/v1/README.md)
 - [Persistra compatibility](docs/persistra.md)
-- [Strategy message JSON Schema](contracts/strategy/v9/message.schema.json)
-- [Strategy transcript JSON Schema](contracts/strategy/v9/transcript.schema.json)
+- [Strategy message JSON Schema](contracts/strategy/v10/message.schema.json)
+- [Strategy transcript JSON Schema](contracts/strategy/v10/transcript.schema.json)
 - [Execution model](docs/execution-model.md)
 - [OCaml coverage](docs/coverage.md)
 - [Continuous integration and portability matrix](docs/continuous-integration.md)

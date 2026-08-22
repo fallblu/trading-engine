@@ -21,7 +21,7 @@ Every runtime cell replays the frozen v3 demo, v5 demo, and v5 risk-limited fill
 canonical fixtures. Standard output and standard error are captured separately because human
 diagnostics may contain platform-specific paths or process details and are not part of the journal
 contract.
-The full test suite additionally validates and replays the current v11 batch, stream, journal, and
+The full test suite additionally validates and replays the current v12 batch, stream, journal, and
 strategy-v8 fixtures, including financing attribution and the reconciled first valuation.
 
 Coverage runs once in the exact locked Ubuntu environment. The required Persistra job also runs

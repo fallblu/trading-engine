@@ -10,6 +10,8 @@ type cancellation_reason =
   | Gtd_expired
   | Margin_call
   | Borrow_recall
+  | Instrument_halt
+  | Instrument_terminal
 
 type target_basis = Weights | Quantities
 
@@ -50,6 +52,16 @@ type event =
   | Cash_dividend_applied of {
       action : Corporate_action.t;
       quantity : Scalar.Quantity.t;
+      cash_amount : Scalar.Money.t;
+    }
+  | Distribution_applied of {
+      action : Corporate_action.t;
+      result : Account.distribution_result;
+    }
+  | Lifecycle_applied of {
+      lifecycle_event : Instrument_lifecycle.event;
+      listing : Instrument_lifecycle.listing;
+      liquidated_quantity : Scalar.Quantity.t;
       cash_amount : Scalar.Money.t;
     }
   | Order_adjusted of { order : Order.t; action_id : Id.Corporate_action.t }

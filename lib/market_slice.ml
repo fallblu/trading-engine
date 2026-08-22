@@ -9,6 +9,7 @@ type t = {
   bars : Bar.t list;
   fx_rates : fx_mark list;
   corporate_actions : Corporate_action.t list;
+  lifecycle_events : Instrument_lifecycle.event list;
   borrow_observations : Financing.borrow_observation list;
   cash_rate_observations : Financing.cash_rate_observation list;
   settlement_failures : Settlement.failure list;
@@ -30,9 +31,9 @@ let fx_mark ~currency ~rate =
 let compare_bar left right =
   Id.Instrument.compare left.Bar.instrument_id right.Bar.instrument_id
 
-let create_v11 ~slice_sequence ~start_at ~end_at ~available_at ~received_at
+let create_v12 ~slice_sequence ~start_at ~end_at ~available_at ~received_at
     ~bars ~fx_rates ~corporate_actions ~borrow_observations
-    ~cash_rate_observations ~settlement_failures =
+    ~cash_rate_observations ~settlement_failures ~lifecycle_events =
   if Int64.compare slice_sequence 0L <= 0 then
     Error "market slice sequence must be positive"
   else if Ptime.compare start_at end_at >= 0 then
@@ -63,6 +64,16 @@ let create_v11 ~slice_sequence ~start_at ~end_at ~available_at ~received_at
     in
     let corporate_actions =
       List.sort Corporate_action.compare corporate_actions
+    in
+    let lifecycle_events =
+      List.sort Instrument_lifecycle.compare_event lifecycle_events
+    in
+    let rec unique_lifecycle = function
+      | [] | [ _ ] -> true
+      | left :: (right :: _ as remaining) ->
+          (not
+             (Id.Corporate_action.equal left.Instrument_lifecycle.id right.id))
+          && unique_lifecycle remaining
     in
     let rec unique_actions = function
       | [] | [ _ ] -> true
@@ -119,6 +130,8 @@ let create_v11 ~slice_sequence ~start_at ~end_at ~available_at ~received_at
       Error "market slice must contain one FX rate per currency"
     else if not (unique_actions corporate_actions) then
       Error "market slice corporate action IDs must be unique"
+    else if not (unique_lifecycle lifecycle_events) then
+      Error "market slice lifecycle event IDs must be unique"
     else if not (unique_borrow borrow_observations) then
       Error "market slice borrow observation instrument IDs must be unique"
     else if not (unique_cash_rate cash_rate_observations) then
@@ -136,10 +149,18 @@ let create_v11 ~slice_sequence ~start_at ~end_at ~available_at ~received_at
           bars;
           fx_rates;
           corporate_actions;
+          lifecycle_events;
           borrow_observations;
           cash_rate_observations;
           settlement_failures;
         }
+
+let create_v11 ~slice_sequence ~start_at ~end_at ~available_at ~received_at
+    ~bars ~fx_rates ~corporate_actions ~borrow_observations
+    ~cash_rate_observations ~settlement_failures =
+  create_v12 ~slice_sequence ~start_at ~end_at ~available_at ~received_at ~bars
+    ~fx_rates ~corporate_actions ~borrow_observations ~cash_rate_observations
+    ~settlement_failures ~lifecycle_events:[]
 
 let create_v10 ~slice_sequence ~start_at ~end_at ~available_at ~received_at
     ~bars ~fx_rates ~corporate_actions ~borrow_observations
@@ -170,10 +191,12 @@ let compare_replay_order left right =
 
 let pp formatter state =
   Format.fprintf formatter
-    "slice[%Ld] bars=%d fx=%d actions=%d borrow=%d cash_rates=%d failures=%d"
+    "slice[%Ld] bars=%d fx=%d actions=%d lifecycle=%d borrow=%d cash_rates=%d \
+     failures=%d"
     state.slice_sequence (List.length state.bars)
     (List.length state.fx_rates)
     (List.length state.corporate_actions)
+    (List.length state.lifecycle_events)
     (List.length state.borrow_observations)
     (List.length state.cash_rate_observations)
     (List.length state.settlement_failures)
