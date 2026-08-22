@@ -75,6 +75,7 @@ let config_v12 = config_v11
 let config_v13 = config_v12
 let config_v14 = config_v13
 let config_v15 = config_v14
+let config_v16 = config_v15
 
 let valid_sha256 value =
   String.length value = 64
@@ -1499,15 +1500,13 @@ module Interactive = struct
     | Ok (desired, requested) ->
         replace_targets reduction Audit.Weights desired requested
 
-  let metric reduction name value =
-    if String.length name = 0 || String.trim name <> name then
-      reject_intent reduction "metric name must be a nonempty trimmed string"
-    else emit reduction (Audit.Metric_emitted { name; value })
+  let emit_metric reduction observation =
+    emit reduction (Audit.Metric_emitted observation)
 
   let handle_intent reduction = function
     | intent when reduction.state.liquidation_pending -> (
         match intent with
-        | Strategy.Emit_metric { name; value } -> metric reduction name value
+        | Strategy.Emit_metric observation -> emit_metric reduction observation
         | _ -> reject_intent reduction "margin liquidation is in progress")
     | Strategy.Target_weights targets -> set_weight_targets reduction targets
     | Strategy.Target_quantities targets ->
@@ -1519,7 +1518,7 @@ module Interactive = struct
         else submit_order reduction request
     | Strategy.Cancel_order order_id ->
         cancel_order reduction ~reason:Audit.Strategy_requested order_id
-    | Strategy.Emit_metric { name; value } -> metric reduction name value
+    | Strategy.Emit_metric observation -> emit_metric reduction observation
 
   type drain_result =
     | Drained of reduction

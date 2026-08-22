@@ -5,6 +5,12 @@ let internal_events = 100_000
 let catalog_instruments = 4_096
 let intents_per_batch = 4_096
 let artifact_record_bytes = 2_097_152
+let metric_name_bytes = 128
+let metric_string_value_bytes = 1_024
+let metric_unit_bytes = 64
+let metric_dimensions = 16
+let metric_dimension_key_bytes = 64
+let metric_dimension_value_bytes = 128
 
 let to_yojson () =
   `Assoc
@@ -16,4 +22,10 @@ let to_yojson () =
       ("catalog_instruments", `Int catalog_instruments);
       ("intents_per_batch", `Int intents_per_batch);
       ("artifact_record_bytes", `Int artifact_record_bytes);
+      ("metric_name_bytes", `Int metric_name_bytes);
+      ("metric_string_value_bytes", `Int metric_string_value_bytes);
+      ("metric_unit_bytes", `Int metric_unit_bytes);
+      ("metric_dimensions", `Int metric_dimensions);
+      ("metric_dimension_key_bytes", `Int metric_dimension_key_bytes);
+      ("metric_dimension_value_bytes", `Int metric_dimension_value_bytes);
     ]

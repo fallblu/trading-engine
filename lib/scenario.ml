@@ -556,7 +556,7 @@ let parse_v7_risk base_currency instruments json =
 let parse_risk ~contract_version base_currency instruments json =
   if
     List.mem contract_version
-      [ "15"; "14"; "13"; "12"; "11"; "10"; "9"; "8"; "7" ]
+      [ "16"; "15"; "14"; "13"; "12"; "11"; "10"; "9"; "8"; "7" ]
   then parse_v7_risk base_currency instruments json
   else parse_legacy_risk base_currency instruments json
 
@@ -829,7 +829,7 @@ let parse_versioned_execution ~contract_version ~instruments json =
 let parse_execution ~contract_version ~instruments json =
   if
     List.mem contract_version
-      [ "15"; "14"; "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6"; "5" ]
+      [ "16"; "15"; "14"; "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6"; "5" ]
   then parse_versioned_execution ~contract_version ~instruments json
   else parse_legacy_execution ~contract_version json
 
@@ -879,7 +879,8 @@ let parse_portfolio_intent ~name ~parse_target make json =
 
 let parse_submit_intent ~contract_version json =
   let versioned =
-    List.mem contract_version [ "15"; "14"; "13"; "12"; "11"; "10"; "9"; "8" ]
+    List.mem contract_version
+      [ "16"; "15"; "14"; "13"; "12"; "11"; "10"; "9"; "8" ]
   in
   let* fields =
     object_fields ~name:"submit_order intent"
@@ -979,17 +980,86 @@ let parse_cancel_intent json =
   let* order_id = parse_id Id.Order.of_string ~name:"order_id" order_json in
   Ok (Strategy.Cancel_order order_id)
 
-let parse_metric_intent json =
-  let* fields =
-    object_fields ~name:"emit_metric intent"
-      ~expected:[ "type"; "name"; "value" ]
-      json
-  in
-  let* name_json = field fields "name" in
-  let* name = string ~name:"metric name" name_json in
-  let* value_json = field fields "value" in
-  let* value = string ~name:"metric value" value_json in
-  Ok (Strategy.Emit_metric { name; value })
+let parse_metric_intent ~contract_version json =
+  if not (String.equal contract_version "16") then
+    let* fields =
+      object_fields ~name:"emit_metric intent"
+        ~expected:[ "type"; "name"; "value" ]
+        json
+    in
+    let* name_json = field fields "name" in
+    let* name = string ~name:"metric name" name_json in
+    let* value_json = field fields "value" in
+    let* value = string ~name:"metric value" value_json in
+    let* metric = Metric.create ~name ~value:(Metric.String value) () in
+    Ok (Strategy.Emit_metric metric)
+  else
+    let* fields =
+      match json with
+      | `Assoc fields ->
+          let names = List.map fst fields in
+          let unique = List.sort_uniq String.compare names in
+          let allowed =
+            [ "aggregation"; "dimensions"; "name"; "type"; "unit"; "value" ]
+          in
+          if List.length names <> List.length unique then
+            Error "emit_metric intent must not contain duplicate fields"
+          else if
+            not
+              (List.for_all (fun name -> List.mem name allowed) unique
+              && List.for_all
+                   (fun name -> List.mem name unique)
+                   [ "type"; "name"; "value" ])
+          then Error "emit_metric intent has unknown or missing fields"
+          else Ok fields
+      | _ -> Error "emit_metric intent must be a JSON object"
+    in
+    let* name_json = field fields "name" in
+    let* name = string ~name:"metric name" name_json in
+    let* value =
+      let* json = field fields "value" in
+      let* value_fields =
+        object_fields ~name:"metric value" ~expected:[ "type"; "value" ] json
+      in
+      let* type_json = field value_fields "type" in
+      let* value_type = string ~name:"metric value type" type_json in
+      let* value_json = field value_fields "value" in
+      match (value_type, value_json) with
+      | "numeric", `String value ->
+          Metric.numeric_of_string value
+          |> Result.map (fun value -> Metric.Numeric value)
+      | "string", `String value -> Ok (Metric.String value)
+      | "boolean", `Bool value -> Ok (Metric.Boolean value)
+      | _ -> Error "metric value does not match its declared type"
+    in
+    let* unit_ =
+      match List.assoc_opt "unit" fields with
+      | None -> Ok None
+      | Some json -> string ~name:"metric unit" json |> Result.map Option.some
+    in
+    let* dimensions =
+      match List.assoc_opt "dimensions" fields with
+      | None -> Ok []
+      | Some (`Assoc dimensions) ->
+          List.fold_left
+            (fun result (key, json) ->
+              let* values = result in
+              let* value = string ~name:"metric dimension value" json in
+              Ok ((key, value) :: values))
+            (Ok []) dimensions
+      | Some _ -> Error "metric dimensions must be an object"
+    in
+    let* aggregation =
+      match List.assoc_opt "aggregation" fields with
+      | None -> Ok None
+      | Some json ->
+          let* value = string ~name:"metric aggregation" json in
+          Metric.aggregation_of_string value |> Result.map Option.some
+    in
+    let* metric =
+      Metric.create ~name ~value ?unit_ ~dimensions ?aggregation ()
+    in
+    Ok (Strategy.Emit_metric metric)
 
 let parse_intent ~contract_version json =
   match json with
@@ -1008,7 +1078,8 @@ let parse_intent ~contract_version json =
       | Some (`String "submit_order") ->
           parse_submit_intent ~contract_version json
       | Some (`String "cancel_order") -> parse_cancel_intent json
-      | Some (`String "emit_metric") -> parse_metric_intent json
+      | Some (`String "emit_metric") ->
+          parse_metric_intent ~contract_version json
       | Some _ -> Error "unsupported intent type"
       | None -> Error "intent is missing type")
   | _ -> Error "intent must be a JSON object"
@@ -1850,25 +1921,27 @@ let parse_order_book_event json =
 
 let parse_slice ~contract_version json =
   let financing_fields =
-    if List.mem contract_version [ "15"; "14"; "13"; "12"; "11"; "10" ] then
-      [ "borrow_observations"; "cash_rate_observations" ]
+    if List.mem contract_version [ "16"; "15"; "14"; "13"; "12"; "11"; "10" ]
+    then [ "borrow_observations"; "cash_rate_observations" ]
     else []
   in
   let settlement_fields =
-    if List.mem contract_version [ "15"; "14"; "13"; "12"; "11" ] then
+    if List.mem contract_version [ "16"; "15"; "14"; "13"; "12"; "11" ] then
       [ "settlement_failures" ]
     else []
   in
   let lifecycle_fields =
-    if List.mem contract_version [ "15"; "14"; "13"; "12" ] then
+    if List.mem contract_version [ "16"; "15"; "14"; "13"; "12" ] then
       [ "lifecycle_events" ]
     else []
   in
   let market_event_fields =
-    if List.mem contract_version [ "15"; "14" ] then [ "market_events" ] else []
+    if List.mem contract_version [ "16"; "15"; "14" ] then [ "market_events" ]
+    else []
   in
   let order_book_event_fields =
-    if String.equal contract_version "15" then [ "order_book_events" ] else []
+    if List.mem contract_version [ "16"; "15" ] then [ "order_book_events" ]
+    else []
   in
   let* fields =
     object_fields ~name:"market slice"
@@ -1906,7 +1979,7 @@ let parse_slice ~contract_version json =
   let* actions_json = field fields "corporate_actions" in
   let* actions_json = list ~name:"corporate_actions" actions_json in
   let* corporate_actions = map_list parse_corporate_action actions_json in
-  if List.mem contract_version [ "15"; "14"; "13"; "12"; "11"; "10" ] then
+  if List.mem contract_version [ "16"; "15"; "14"; "13"; "12"; "11"; "10" ] then
     let* borrow_json =
       Result.bind
         (field fields "borrow_observations")
@@ -1921,7 +1994,7 @@ let parse_slice ~contract_version json =
     let* cash_rate_observations =
       map_list parse_cash_rate_observation cash_json
     in
-    if List.mem contract_version [ "15"; "14"; "13"; "12"; "11" ] then
+    if List.mem contract_version [ "16"; "15"; "14"; "13"; "12"; "11" ] then
       let* failures_json =
         Result.bind
           (field fields "settlement_failures")
@@ -1930,21 +2003,21 @@ let parse_slice ~contract_version json =
       let* settlement_failures =
         map_list parse_settlement_failure failures_json
       in
-      if List.mem contract_version [ "15"; "14"; "13"; "12" ] then
+      if List.mem contract_version [ "16"; "15"; "14"; "13"; "12" ] then
         let* lifecycle_json =
           Result.bind
             (field fields "lifecycle_events")
             (list ~name:"lifecycle_events")
         in
         let* lifecycle_events = map_list parse_lifecycle_event lifecycle_json in
-        if List.mem contract_version [ "15"; "14" ] then
+        if List.mem contract_version [ "16"; "15"; "14" ] then
           let* events_json =
             Result.bind
               (field fields "market_events")
               (list ~name:"market_events")
           in
           let* market_events = map_list parse_market_event events_json in
-          if String.equal contract_version "15" then
+          if List.mem contract_version [ "16"; "15" ] then
             let* book_events_json =
               Result.bind
                 (field fields "order_book_events")
@@ -2015,7 +2088,7 @@ let construct_header ~root ~contract_path ~contract_version
     let* initial_cash, initial_portfolio =
       if
         List.mem contract_version
-          [ "15"; "14"; "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6" ]
+          [ "16"; "15"; "14"; "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6" ]
       then
         let* portfolio =
           parse_initial_portfolio ~base_currency shape.initial_state
@@ -2085,8 +2158,8 @@ let construct_header ~root ~contract_path ~contract_version
       | _, _ -> Ok Financing.legacy_policy
     in
     let financing =
-      if List.mem contract_version [ "15"; "14"; "13"; "12"; "11"; "10" ] then
-        Some financing
+      if List.mem contract_version [ "16"; "15"; "14"; "13"; "12"; "11"; "10" ]
+      then Some financing
       else None
     in
     let* settlement =

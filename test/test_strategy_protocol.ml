@@ -45,7 +45,7 @@ let initialize_message_is_complete () =
     T.Strategy_protocol.initialize_message ~sequence:1L (initialization ())
   in
   Alcotest.(check string)
-    "protocol version" "13"
+    "protocol version" "14"
     (match field "strategy_protocol_version" message with
     | `String value -> value
     | _ -> Alcotest.fail "expected version string");
@@ -265,7 +265,7 @@ let nonpositive_equity_omits_weights () =
 let response message_type payload =
   `Assoc
     [
-      ("strategy_protocol_version", `String "13");
+      ("strategy_protocol_version", `String "14");
       ("strategy_sequence", `String "3");
       ("message_type", `String message_type);
       ("payload", payload);
@@ -301,7 +301,31 @@ let responses_are_strict_and_typed () =
                    [
                      ("type", `String "emit_metric");
                      ("name", `String "signal");
-                     ("value", `String "0.5");
+                     ( "value",
+                       `Assoc
+                         [
+                           ("type", `String "numeric"); ("value", `String "0.5");
+                         ] );
+                   ];
+                 `Assoc
+                   [
+                     ("type", `String "emit_metric");
+                     ("name", `String "regime");
+                     ( "value",
+                       `Assoc
+                         [
+                           ("type", `String "string");
+                           ("value", `String "risk-on");
+                         ] );
+                   ];
+                 `Assoc
+                   [
+                     ("type", `String "emit_metric");
+                     ("name", `String "healthy");
+                     ( "value",
+                       `Assoc
+                         [ ("type", `String "boolean"); ("value", `Bool true) ]
+                     );
                    ];
                ] );
          ])
@@ -309,9 +333,27 @@ let responses_are_strict_and_typed () =
   (match
      T.Strategy_protocol.response_of_yojson ~expected_sequence:3L intents |> ok
    with
-  | T.Strategy_protocol.Intents [ T.Strategy.Emit_metric { name; value } ] ->
-      Alcotest.(check string) "metric name" "signal" name;
-      Alcotest.(check string) "metric value" "0.5" value
+  | T.Strategy_protocol.Intents
+      [
+        T.Strategy.Emit_metric metric;
+        T.Strategy.Emit_metric string_metric;
+        T.Strategy.Emit_metric boolean_metric;
+      ] -> (
+      Alcotest.(check string) "metric name" "signal" metric.name;
+      (match metric.value with
+      | T.Metric.Numeric value ->
+          Alcotest.(check string)
+            "metric value" "0.5"
+            (T.Metric.numeric_to_string value)
+      | _ -> Alcotest.fail "expected numeric metric value");
+      (match string_metric.value with
+      | T.Metric.String value ->
+          Alcotest.(check string) "string metric value" "risk-on" value
+      | _ -> Alcotest.fail "expected string metric value");
+      match boolean_metric.value with
+      | T.Metric.Boolean value ->
+          Alcotest.(check bool) "boolean metric value" true value
+      | _ -> Alcotest.fail "expected boolean metric value")
   | _ -> Alcotest.fail "expected metric intent");
   let wrong_sequence =
     T.Strategy_protocol.response_of_yojson ~expected_sequence:4L ready

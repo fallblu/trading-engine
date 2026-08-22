@@ -457,9 +457,10 @@ let versioned_market_slice_to_yojson ~contract_version market_slice =
     ]
   |> function
   | `Assoc fields
-    when List.mem contract_version [ "15"; "14"; "13"; "12"; "11"; "10" ] ->
+    when List.mem contract_version [ "16"; "15"; "14"; "13"; "12"; "11"; "10" ]
+    ->
       let settlement =
-        if List.mem contract_version [ "15"; "14"; "13"; "12"; "11" ] then
+        if List.mem contract_version [ "16"; "15"; "14"; "13"; "12"; "11" ] then
           [
             ( "settlement_failures",
               `List
@@ -469,7 +470,7 @@ let versioned_market_slice_to_yojson ~contract_version market_slice =
         else []
       in
       let lifecycle =
-        if List.mem contract_version [ "15"; "14"; "13"; "12" ] then
+        if List.mem contract_version [ "16"; "15"; "14"; "13"; "12" ] then
           [
             ( "lifecycle_events",
               `List
@@ -479,7 +480,7 @@ let versioned_market_slice_to_yojson ~contract_version market_slice =
         else []
       in
       let market_events =
-        if List.mem contract_version [ "15"; "14" ] then
+        if List.mem contract_version [ "16"; "15"; "14" ] then
           [
             ( "market_events",
               `List
@@ -489,7 +490,7 @@ let versioned_market_slice_to_yojson ~contract_version market_slice =
         else []
       in
       let order_book_events =
-        if String.equal contract_version "15" then
+        if List.mem contract_version [ "16"; "15" ] then
           [
             ( "order_book_events",
               `List
@@ -533,6 +534,9 @@ let market_slice_to_yojson_v14 market_slice =
 
 let market_slice_to_yojson_v15 market_slice =
   versioned_market_slice_to_yojson ~contract_version:"15" market_slice
+
+let market_slice_to_yojson_v16 market_slice =
+  versioned_market_slice_to_yojson ~contract_version:"16" market_slice
 
 let request_fields request =
   let kind, limit_price =
@@ -637,7 +641,9 @@ let order_to_yojson_v8 order =
       ])
 
 let versioned_order_to_yojson ~contract_version order =
-  if List.mem contract_version [ "15"; "14"; "13"; "12"; "11"; "10"; "9"; "8" ]
+  if
+    List.mem contract_version
+      [ "16"; "15"; "14"; "13"; "12"; "11"; "10"; "9"; "8" ]
   then order_to_yojson_v8 order
   else order_to_yojson order
 
@@ -835,8 +841,9 @@ let account_valuation_to_yojson ?(contract_version = "8") valuation =
       ( "cash_balances",
         `List
           (List.map
-             (if List.mem contract_version [ "15"; "14"; "13"; "12"; "11" ] then
-                cash_attribution_to_yojson_v11
+             (if
+                List.mem contract_version [ "16"; "15"; "14"; "13"; "12"; "11" ]
+              then cash_attribution_to_yojson_v11
               else if String.equal contract_version "10" then
                 cash_attribution_to_yojson_v10
               else cash_attribution_to_yojson)
@@ -844,8 +851,9 @@ let account_valuation_to_yojson ?(contract_version = "8") valuation =
       ( "positions",
         `List
           (List.map
-             (if List.mem contract_version [ "15"; "14"; "13"; "12"; "11" ] then
-                position_attribution_to_yojson_v11
+             (if
+                List.mem contract_version [ "16"; "15"; "14"; "13"; "12"; "11" ]
+              then position_attribution_to_yojson_v11
               else if
                 String.equal contract_version "9"
                 || String.equal contract_version "10"
@@ -855,15 +863,16 @@ let account_valuation_to_yojson ?(contract_version = "8") valuation =
     ]
   |> function
   | `Assoc fields
-    when List.mem contract_version [ "15"; "14"; "13"; "12"; "11"; "10"; "9" ]
-    ->
+    when List.mem contract_version
+           [ "16"; "15"; "14"; "13"; "12"; "11"; "10"; "9" ] ->
       let financing =
-        if List.mem contract_version [ "15"; "14"; "13"; "12"; "11"; "10" ] then
-          [ ("cash_interest", money valuation.Account.cash_interest) ]
+        if
+          List.mem contract_version [ "16"; "15"; "14"; "13"; "12"; "11"; "10" ]
+        then [ ("cash_interest", money valuation.Account.cash_interest) ]
         else []
       in
       let settlement =
-        if List.mem contract_version [ "15"; "14"; "13"; "12"; "11" ] then
+        if List.mem contract_version [ "16"; "15"; "14"; "13"; "12"; "11" ] then
           [
             ("settled_cash", money valuation.Account.settled_cash);
             ("unsettled_cash", money valuation.unsettled_cash);
@@ -912,7 +921,7 @@ let valuation_to_yojson ~contract_version valuation =
       let fields =
         if
           List.mem contract_version
-            [ "15"; "14"; "13"; "12"; "11"; "10"; "9"; "8" ]
+            [ "16"; "15"; "14"; "13"; "12"; "11"; "10"; "9"; "8" ]
         then
           fields
           @ [
@@ -969,6 +978,41 @@ let requested_target_to_yojson target =
       ( "reference_price",
         Option.fold ~none:`Null ~some:price target.reference_price );
     ]
+
+let metric_to_yojson metric =
+  let value =
+    match metric.Metric.value with
+    | Metric.Numeric value ->
+        `Assoc
+          [
+            ("type", string "numeric");
+            ("value", string (Metric.numeric_to_string value));
+          ]
+    | Metric.String value ->
+        `Assoc [ ("type", string "string"); ("value", string value) ]
+    | Metric.Boolean value ->
+        `Assoc [ ("type", string "boolean"); ("value", `Bool value) ]
+  in
+  `Assoc
+    ([ ("name", string metric.name); ("value", value) ]
+    @ (match metric.unit_ with
+      | None -> []
+      | Some unit_ -> [ ("unit", string unit_) ])
+    @ (if metric.dimensions = [] then []
+       else
+         [
+           ( "dimensions",
+             `Assoc
+               (List.map
+                  (fun dimension ->
+                    (dimension.Metric.key, string dimension.value))
+                  metric.dimensions) );
+         ])
+    @
+    match metric.aggregation with
+    | None -> []
+    | Some aggregation ->
+        [ ("aggregation", string (Metric.aggregation_to_string aggregation)) ])
 
 let payload_to_yojson ~contract_version = function
   | Audit.Run_started { scenario_sha256; execution_model } ->
@@ -1054,7 +1098,9 @@ let payload_to_yojson ~contract_version = function
           ("final_price", price attribution.final_price);
         ]
   | Audit.Fill_applied fill ->
-      if List.mem contract_version [ "15"; "14"; "13"; "12"; "11"; "10"; "9" ]
+      if
+        List.mem contract_version
+          [ "16"; "15"; "14"; "13"; "12"; "11"; "10"; "9" ]
       then fill_to_yojson_v9 fill
       else fill_to_yojson fill
   | Audit.Settlement_instruction_created instruction
@@ -1183,8 +1229,16 @@ let payload_to_yojson ~contract_version = function
   | Audit.Margin_call_triggered valuation | Audit.Margin_restored valuation ->
       valuation_to_yojson ~contract_version valuation
   | Audit.Intent_rejected reason -> `Assoc [ ("reason", string reason) ]
-  | Audit.Metric_emitted { name; value } ->
-      `Assoc [ ("name", string name); ("value", string value) ]
+  | Audit.Metric_emitted metric ->
+      if String.equal contract_version "16" then metric_to_yojson metric
+      else
+        let value =
+          match metric.Metric.value with
+          | Metric.String value -> value
+          | Metric.Numeric value -> Metric.numeric_to_string value
+          | Metric.Boolean value -> string_of_bool value
+        in
+        `Assoc [ ("name", string metric.name); ("value", string value) ]
   | Audit.Valuation valuation -> valuation_to_yojson ~contract_version valuation
   | Audit.Run_completed
       { scenario_sha256; execution_model; valuation; order_counts } ->
