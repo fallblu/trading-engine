@@ -1,6 +1,9 @@
 type t = {
+  versioned : bool;
   base_currency : string;
   instruments : Instrument.t Id.Instrument.Map.t;
+  instrument_policies : instrument_policy Id.Instrument.Map.t;
+  groups : group list;
   max_order_quantity : Scalar.Quantity.t;
   max_long_position : Scalar.Quantity.t;
   max_short_position : Scalar.Quantity.t;
@@ -11,12 +14,50 @@ type t = {
   short_borrow_bps : int;
 }
 
+and instrument_policy = {
+  instrument_id : Id.Instrument.t;
+  max_order_quantity : Scalar.Quantity.t;
+  max_long_position : Scalar.Quantity.t;
+  max_short_position : Scalar.Quantity.t;
+  max_notional_exposure : Scalar.Money.t option;
+  initial_margin_bps : int;
+  maintenance_margin_bps : int;
+  shorting_allowed : bool;
+}
+
+and group_kind = Issuer | Sector | Currency | Country | Asset_class | Custom
+
+and group_limits = {
+  max_gross_exposure : Scalar.Money.t option;
+  max_long_exposure : Scalar.Money.t option;
+  max_short_exposure : Scalar.Money.t option;
+  max_absolute_net_exposure : Scalar.Money.t option;
+  max_concentration : Scalar.Ratio.t option;
+}
+
+and group = {
+  group_id : Id.Risk_group.t;
+  group_kind : group_kind;
+  instrument_ids : Id.Instrument.t list;
+  limits : group_limits;
+}
+
+type group_exposure = {
+  group_id : Id.Risk_group.t;
+  gross_exposure : Scalar.Money.t;
+  net_exposure : Scalar.Money.t;
+  long_exposure : Scalar.Money.t;
+  short_exposure : Scalar.Money.t;
+  concentration : Scalar.Weight.t option;
+}
+
 type margin_snapshot = {
   initial_requirement : Scalar.Money.t;
   maintenance_requirement : Scalar.Money.t;
   initial_excess : Scalar.Money.t;
   maintenance_excess : Scalar.Money.t;
   margin_call : bool;
+  group_exposures : group_exposure list;
 }
 
 type fill_limit =
@@ -26,6 +67,16 @@ type fill_limit =
   | Maximum_gross_exposure of Scalar.Money.t
   | Maximum_leverage of Scalar.Ratio.t
   | Initial_margin of int
+  | Instrument_maximum_long_position of Id.Instrument.t * Scalar.Quantity.t
+  | Instrument_maximum_short_position of Id.Instrument.t * Scalar.Quantity.t
+  | Instrument_maximum_notional of Id.Instrument.t * Scalar.Money.t
+  | Instrument_shorting_disabled of Id.Instrument.t
+  | Instrument_initial_margin of Id.Instrument.t * int
+  | Group_maximum_gross of Id.Risk_group.t * Scalar.Money.t
+  | Group_maximum_long of Id.Risk_group.t * Scalar.Money.t
+  | Group_maximum_short of Id.Risk_group.t * Scalar.Money.t
+  | Group_maximum_absolute_net of Id.Risk_group.t * Scalar.Money.t
+  | Group_maximum_concentration of Id.Risk_group.t * Scalar.Ratio.t
 
 type fill_check_error = Limit of fill_limit | Invalid of string
 
@@ -39,6 +90,108 @@ let valid_label value =
          let code = Char.code character in
          code >= 0x21 && code <> 0x7f)
        value
+
+let valid_margin ~initial_margin_bps ~maintenance_margin_bps =
+  if initial_margin_bps <= 0 || initial_margin_bps > 10_000 then
+    Error "initial margin basis points must be between 1 and 10000"
+  else if maintenance_margin_bps <= 0 || maintenance_margin_bps > 10_000 then
+    Error "maintenance margin basis points must be between 1 and 10000"
+  else if initial_margin_bps < maintenance_margin_bps then
+    Error "initial margin must not be below maintenance margin"
+  else Ok ()
+
+let create_instrument_policy ~instrument ~max_order_quantity ~max_long_position
+    ~max_short_position ~max_notional_exposure ~initial_margin_bps
+    ~maintenance_margin_bps ~shorting_allowed =
+  let lot = instrument.Instrument.lot_size in
+  if not (Scalar.Quantity.is_positive max_order_quantity) then
+    Error "maximum order quantity must be positive"
+  else if not (Scalar.Quantity.is_positive max_long_position) then
+    Error "maximum long position must be positive"
+  else if not (Scalar.Quantity.is_positive max_short_position) then
+    Error "maximum short position must be positive"
+  else if Scalar.Quantity.compare max_order_quantity lot < 0 then
+    Error "maximum order quantity must cover the instrument lot size"
+  else if Scalar.Quantity.compare max_long_position lot < 0 then
+    Error "maximum long position must cover the instrument lot size"
+  else if Scalar.Quantity.compare max_short_position lot < 0 then
+    Error "maximum short position must cover the instrument lot size"
+  else if
+    Option.exists
+      (fun value -> Scalar.Money.compare value Scalar.Money.zero <= 0)
+      max_notional_exposure
+  then Error "maximum instrument notional exposure must be positive"
+  else
+    let* () = valid_margin ~initial_margin_bps ~maintenance_margin_bps in
+    Ok
+      {
+        instrument_id = instrument.id;
+        max_order_quantity;
+        max_long_position;
+        max_short_position;
+        max_notional_exposure;
+        initial_margin_bps;
+        maintenance_margin_bps;
+        shorting_allowed;
+      }
+
+let create_group_limits ~max_gross_exposure ~max_long_exposure
+    ~max_short_exposure ~max_absolute_net_exposure ~max_concentration =
+  let positive_money = function
+    | None -> true
+    | Some value -> Scalar.Money.compare value Scalar.Money.zero > 0
+  in
+  if
+    not
+      (List.for_all positive_money
+         [
+           max_gross_exposure;
+           max_long_exposure;
+           max_short_exposure;
+           max_absolute_net_exposure;
+         ])
+  then Error "group money limits must be positive"
+  else if
+    Option.exists
+      (fun value ->
+        Scalar.Ratio.compare value Scalar.Ratio.one > 0
+        || Scalar.Ratio.to_micros value <= 0L)
+      max_concentration
+  then Error "group concentration must be greater than zero and at most one"
+  else if
+    List.for_all Option.is_none
+      [
+        max_gross_exposure;
+        max_long_exposure;
+        max_short_exposure;
+        max_absolute_net_exposure;
+      ]
+    && Option.is_none max_concentration
+  then Error "group must configure at least one limit"
+  else
+    Ok
+      {
+        max_gross_exposure;
+        max_long_exposure;
+        max_short_exposure;
+        max_absolute_net_exposure;
+        max_concentration;
+      }
+
+let create_group ~group_id ~group_kind ~instrument_ids ~limits =
+  if instrument_ids = [] then Error "risk group must contain an instrument"
+  else if
+    List.length instrument_ids
+    <> List.length (List.sort_uniq Id.Instrument.compare instrument_ids)
+  then Error "risk group instrument IDs must be unique"
+  else
+    Ok
+      {
+        group_id;
+        group_kind;
+        instrument_ids = List.sort Id.Instrument.compare instrument_ids;
+        limits;
+      }
 
 let create ~base_currency ~instruments ~max_order_quantity ~max_long_position
     ~max_short_position ~max_gross_exposure ~max_leverage ~initial_margin_bps
@@ -95,10 +248,27 @@ let create ~base_currency ~instruments ~max_order_quantity ~max_long_position
     let* instruments =
       List.fold_left add (Ok Id.Instrument.Map.empty) instruments
     in
+    let* instrument_policies =
+      Id.Instrument.Map.bindings instruments
+      |> List.fold_left
+           (fun result (_, instrument) ->
+             let* policies = result in
+             let* policy =
+               create_instrument_policy ~instrument ~max_order_quantity
+                 ~max_long_position ~max_short_position
+                 ~max_notional_exposure:None ~initial_margin_bps
+                 ~maintenance_margin_bps ~shorting_allowed:true
+             in
+             Ok (Id.Instrument.Map.add instrument.Instrument.id policy policies))
+           (Ok Id.Instrument.Map.empty)
+    in
     Ok
       {
+        versioned = false;
         base_currency;
         instruments;
+        instrument_policies;
+        groups = [];
         max_order_quantity;
         max_long_position;
         max_short_position;
@@ -109,6 +279,79 @@ let create ~base_currency ~instruments ~max_order_quantity ~max_long_position
         short_borrow_bps;
       }
 
+let create_v7 ~base_currency ~instruments
+    ~(instrument_policies : instrument_policy list) ~(groups : group list)
+    ~max_gross_exposure ~max_leverage ~short_borrow_bps =
+  if not (valid_label base_currency) then
+    Error "base currency must not be empty or contain whitespace"
+  else if instruments = [] then Error "risk must define at least one instrument"
+  else if Scalar.Money.compare max_gross_exposure Scalar.Money.zero <= 0 then
+    Error "maximum gross exposure must be positive"
+  else if short_borrow_bps < 0 || short_borrow_bps > 10_000 then
+    Error "short borrow basis points must be between 0 and 10000"
+  else
+    let add_instrument result instrument =
+      let* map = result in
+      if Id.Instrument.Map.mem instrument.Instrument.id map then
+        Error "instrument IDs must be unique"
+      else Ok (Id.Instrument.Map.add instrument.id instrument map)
+    in
+    let* instrument_map =
+      List.fold_left add_instrument (Ok Id.Instrument.Map.empty) instruments
+    in
+    let add_policy result policy =
+      let* map = result in
+      if not (Id.Instrument.Map.mem policy.instrument_id instrument_map) then
+        Error "instrument policy refers to an unknown instrument"
+      else if Id.Instrument.Map.mem policy.instrument_id map then
+        Error "instrument policy IDs must be unique"
+      else Ok (Id.Instrument.Map.add policy.instrument_id policy map)
+    in
+    let* policy_map =
+      List.fold_left add_policy (Ok Id.Instrument.Map.empty) instrument_policies
+    in
+    if
+      Id.Instrument.Map.cardinal policy_map
+      <> Id.Instrument.Map.cardinal instrument_map
+    then Error "risk must define exactly one policy for every instrument"
+    else
+      let group_ids = List.map (fun (group : group) -> group.group_id) groups in
+      if
+        List.length group_ids
+        <> List.length (List.sort_uniq Id.Risk_group.compare group_ids)
+      then Error "risk group IDs must be unique"
+      else if
+        List.exists
+          (fun (group : group) ->
+            List.exists
+              (fun instrument_id ->
+                not (Id.Instrument.Map.mem instrument_id instrument_map))
+              group.instrument_ids)
+          groups
+      then Error "risk group refers to an unknown instrument"
+      else
+        let representative = List.hd instrument_policies in
+        Ok
+          {
+            versioned = true;
+            base_currency;
+            instruments = instrument_map;
+            instrument_policies = policy_map;
+            groups =
+              List.sort
+                (fun (left : group) right ->
+                  Id.Risk_group.compare left.group_id right.group_id)
+                groups;
+            max_order_quantity = representative.max_order_quantity;
+            max_long_position = representative.max_long_position;
+            max_short_position = representative.max_short_position;
+            max_gross_exposure;
+            max_leverage;
+            initial_margin_bps = representative.initial_margin_bps;
+            maintenance_margin_bps = representative.maintenance_margin_bps;
+            short_borrow_bps;
+          }
+
 let base_currency state = state.base_currency
 
 let instruments state =
@@ -117,6 +360,13 @@ let instruments state =
 let instrument state instrument_id =
   Id.Instrument.Map.find_opt instrument_id state.instruments
 
+let instrument_policies state =
+  Id.Instrument.Map.bindings state.instrument_policies |> List.map snd
+
+let instrument_policy state instrument_id =
+  Id.Instrument.Map.find_opt instrument_id state.instrument_policies
+
+let groups state = state.groups
 let max_order_quantity state = state.max_order_quantity
 let max_long_position state = state.max_long_position
 let max_short_position state = state.max_short_position
@@ -126,21 +376,104 @@ let initial_margin_bps state = state.initial_margin_bps
 let maintenance_margin_bps state = state.maintenance_margin_bps
 let short_borrow_bps state = state.short_borrow_bps
 
+let max_order_quantity_for state instrument_id =
+  Option.map
+    (fun (policy : instrument_policy) -> policy.max_order_quantity)
+    (instrument_policy state instrument_id)
+
+let group_exposure_from_positions group ~equity positions =
+  let member instrument_id =
+    List.exists (Id.Instrument.equal instrument_id) group.instrument_ids
+  in
+  let* net, long, short =
+    List.fold_left
+      (fun result (position : Account.position_attribution) ->
+        let* net, long, short = result in
+        if not (member position.instrument_id) then Ok (net, long, short)
+        else
+          let* net = Scalar.Money.add net position.base_market_value in
+          if
+            Scalar.Money.compare position.base_market_value Scalar.Money.zero
+            >= 0
+          then
+            let* long = Scalar.Money.add long position.base_market_value in
+            Ok (net, long, short)
+          else
+            let* magnitude = Scalar.Money.negate position.base_market_value in
+            let* short = Scalar.Money.add short magnitude in
+            Ok (net, long, short))
+      (Ok (Scalar.Money.zero, Scalar.Money.zero, Scalar.Money.zero))
+      positions
+  in
+  let* gross = Scalar.Money.add long short in
+  let* concentration =
+    if Scalar.Money.compare equity Scalar.Money.zero <= 0 then Ok None
+    else Scalar.Money.weight_toward_zero gross ~equity |> Result.map Option.some
+  in
+  Ok
+    {
+      group_id = group.group_id;
+      gross_exposure = gross;
+      net_exposure = net;
+      long_exposure = long;
+      short_exposure = short;
+      concentration;
+    }
+
+let group_exposures state valuation =
+  List.fold_left
+    (fun result group ->
+      let* exposures = result in
+      let* exposure =
+        group_exposure_from_positions group ~equity:valuation.Account.equity
+          valuation.positions
+      in
+      Ok (exposure :: exposures))
+    (Ok []) state.groups
+  |> Result.map List.rev
+
 let margin_snapshot state valuation =
-  let* initial_requirement =
-    Scalar.Money.bps_ceil valuation.Account.gross_exposure
-      ~bps:state.initial_margin_bps
+  let requirements =
+    if not state.versioned then
+      let* initial =
+        Scalar.Money.bps_ceil valuation.Account.gross_exposure
+          ~bps:state.initial_margin_bps
+      in
+      let* maintenance =
+        Scalar.Money.bps_ceil valuation.gross_exposure
+          ~bps:state.maintenance_margin_bps
+      in
+      Ok (initial, maintenance)
+    else
+      List.fold_left
+        (fun result (position : Account.position_attribution) ->
+          let* initial, maintenance = result in
+          let* notional = Scalar.Money.absolute position.base_market_value in
+          let* policy =
+            match instrument_policy state position.instrument_id with
+            | Some policy -> Ok policy
+            | None -> Error "valuation position has no instrument risk policy"
+          in
+          let* item_initial =
+            Scalar.Money.bps_ceil notional ~bps:policy.initial_margin_bps
+          in
+          let* item_maintenance =
+            Scalar.Money.bps_ceil notional ~bps:policy.maintenance_margin_bps
+          in
+          let* initial = Scalar.Money.add initial item_initial in
+          let* maintenance = Scalar.Money.add maintenance item_maintenance in
+          Ok (initial, maintenance))
+        (Ok (Scalar.Money.zero, Scalar.Money.zero))
+        valuation.positions
   in
-  let* maintenance_requirement =
-    Scalar.Money.bps_ceil valuation.gross_exposure
-      ~bps:state.maintenance_margin_bps
-  in
+  let* initial_requirement, maintenance_requirement = requirements in
   let* initial_excess =
     Scalar.Money.subtract valuation.equity initial_requirement
   in
   let* maintenance_excess =
     Scalar.Money.subtract valuation.equity maintenance_requirement
   in
+  let* group_exposures = group_exposures state valuation in
   Ok
     {
       initial_requirement;
@@ -149,6 +482,7 @@ let margin_snapshot state valuation =
       maintenance_excess;
       margin_call =
         Scalar.Money.compare maintenance_excess Scalar.Money.zero < 0;
+      group_exposures;
     }
 
 let check_initial_values state ~equity ~gross_exposure =
@@ -170,8 +504,123 @@ let check_initial_values state ~equity ~gross_exposure =
       else Ok ()
 
 let check_initial state valuation =
-  check_initial_values state ~equity:valuation.Account.equity
-    ~gross_exposure:valuation.gross_exposure
+  if not state.versioned then
+    check_initial_values state ~equity:valuation.Account.equity
+      ~gross_exposure:valuation.gross_exposure
+  else
+    let* () =
+      if
+        Scalar.Money.compare valuation.Account.gross_exposure
+          state.max_gross_exposure
+        > 0
+      then Error "portfolio would exceed maximum gross exposure"
+      else
+        let* leveraged_equity =
+          Scalar.Money.multiply_ratio valuation.equity state.max_leverage
+        in
+        if Scalar.Money.compare valuation.gross_exposure leveraged_equity > 0
+        then Error "portfolio would exceed maximum leverage"
+        else Ok ()
+    in
+    let* () =
+      List.fold_left
+        (fun result (position : Account.position_attribution) ->
+          let* () = result in
+          let* policy =
+            match instrument_policy state position.instrument_id with
+            | Some policy -> Ok policy
+            | None -> Error "initial position has no instrument risk policy"
+          in
+          let* minimum_short =
+            Scalar.Quantity.negate policy.max_short_position
+          in
+          let* () =
+            if
+              Scalar.Quantity.compare position.quantity policy.max_long_position
+              > 0
+            then Error "initial position exceeds its maximum long position"
+            else if Scalar.Quantity.compare position.quantity minimum_short < 0
+            then Error "initial position exceeds its maximum short position"
+            else if
+              (not policy.shorting_allowed)
+              && Scalar.Quantity.is_negative position.quantity
+            then Error "initial position violates its shorting policy"
+            else Ok ()
+          in
+          let* notional = Scalar.Money.absolute position.base_market_value in
+          match policy.max_notional_exposure with
+          | Some limit when Scalar.Money.compare notional limit > 0 ->
+              Error
+                "initial position exceeds the instrument maximum notional \
+                 exposure"
+          | _ -> Ok ())
+        (Ok ()) valuation.positions
+    in
+    let* margin = margin_snapshot state valuation in
+    let* () =
+      if Scalar.Money.compare margin.initial_excess Scalar.Money.zero < 0 then
+        Error "portfolio would violate instrument initial margin requirements"
+      else Ok ()
+    in
+    List.fold_left
+      (fun result (group : group) ->
+        let* () = result in
+        let* exposure =
+          match
+            List.find_opt
+              (fun item -> Id.Risk_group.equal item.group_id group.group_id)
+              margin.group_exposures
+          with
+          | Some exposure -> Ok exposure
+          | None -> Error "initial valuation omitted a configured risk group"
+        in
+        let* absolute_net = Scalar.Money.absolute exposure.net_exposure in
+        let exceeds option observed =
+          Option.exists
+            (fun limit -> Scalar.Money.compare observed limit > 0)
+            option
+        in
+        let group_name = Id.Risk_group.to_string group.group_id in
+        if exceeds group.limits.max_gross_exposure exposure.gross_exposure then
+          Error
+            (Printf.sprintf
+               "initial portfolio exceeds group %s maximum gross exposure"
+               group_name)
+        else if exceeds group.limits.max_long_exposure exposure.long_exposure
+        then
+          Error
+            (Printf.sprintf
+               "initial portfolio exceeds group %s maximum long exposure"
+               group_name)
+        else if exceeds group.limits.max_short_exposure exposure.short_exposure
+        then
+          Error
+            (Printf.sprintf
+               "initial portfolio exceeds group %s maximum short exposure"
+               group_name)
+        else if exceeds group.limits.max_absolute_net_exposure absolute_net then
+          Error
+            (Printf.sprintf
+               "initial portfolio exceeds group %s maximum absolute net \
+                exposure"
+               group_name)
+        else
+          match group.limits.max_concentration with
+          | None -> Ok ()
+          | Some _
+            when Scalar.Money.compare valuation.equity Scalar.Money.zero <= 0 ->
+              Error "group concentration requires positive equity"
+          | Some limit ->
+              let* threshold =
+                Scalar.Money.multiply_ratio valuation.equity limit
+              in
+              if Scalar.Money.compare exposure.gross_exposure threshold > 0 then
+                Error
+                  (Printf.sprintf
+                     "initial portfolio exceeds group %s maximum concentration"
+                     group_name)
+              else Ok ())
+      (Ok ()) state.groups
 
 let invalid result = Result.map_error (fun message -> Invalid message) result
 
@@ -217,6 +666,181 @@ let check_post_fill state ~before_position ~after_position ~before ~after =
       check_fill_initial state ~equity:after.equity
         ~gross_exposure:after.gross_exposure
 
+type projected_value = {
+  instrument_id : Id.Instrument.t;
+  quantity : Scalar.Quantity.t;
+  signed_value : Scalar.Money.t;
+  absolute_value : Scalar.Money.t;
+}
+
+let sum_values values =
+  List.fold_left
+    (fun result value ->
+      let* gross, long, short, net = result in
+      let* gross = Scalar.Money.add gross value.absolute_value in
+      let* net = Scalar.Money.add net value.signed_value in
+      if Scalar.Money.compare value.signed_value Scalar.Money.zero >= 0 then
+        let* long = Scalar.Money.add long value.signed_value in
+        Ok (gross, long, short, net)
+      else
+        let* magnitude = Scalar.Money.negate value.signed_value in
+        let* short = Scalar.Money.add short magnitude in
+        Ok (gross, long, short, net))
+    (Ok
+       ( Scalar.Money.zero,
+         Scalar.Money.zero,
+         Scalar.Money.zero,
+         Scalar.Money.zero ))
+    values
+
+let group_values (group : group) values =
+  List.filter
+    (fun value ->
+      List.exists (Id.Instrument.equal value.instrument_id) group.instrument_ids)
+    values
+  |> sum_values
+
+let check_group_fill_limit state ~equity values =
+  let rec check = function
+    | [] -> Ok ()
+    | (group : group) :: rest ->
+        let* gross, long, short, net = group_values group values |> invalid in
+        let* absolute_net = Scalar.Money.absolute net |> invalid in
+        let fail option observed make =
+          match option with
+          | Some limit when Scalar.Money.compare observed limit > 0 ->
+              Error (Limit (make group.group_id limit))
+          | _ -> Ok ()
+        in
+        let* () =
+          fail group.limits.max_gross_exposure gross (fun id limit ->
+              Group_maximum_gross (id, limit))
+        in
+        let* () =
+          fail group.limits.max_long_exposure long (fun id limit ->
+              Group_maximum_long (id, limit))
+        in
+        let* () =
+          fail group.limits.max_short_exposure short (fun id limit ->
+              Group_maximum_short (id, limit))
+        in
+        let* () =
+          fail group.limits.max_absolute_net_exposure absolute_net
+            (fun id limit -> Group_maximum_absolute_net (id, limit))
+        in
+        let* () =
+          match group.limits.max_concentration with
+          | None -> Ok ()
+          | Some _ when Scalar.Money.compare equity Scalar.Money.zero <= 0 ->
+              Error (Invalid "group concentration requires positive equity")
+          | Some limit ->
+              let* threshold =
+                Scalar.Money.multiply_ratio equity limit |> invalid
+              in
+              if Scalar.Money.compare gross threshold > 0 then
+                Error
+                  (Limit (Group_maximum_concentration (group.group_id, limit)))
+              else Ok ()
+        in
+        check rest
+  in
+  check state.groups
+
+let check_post_fill_for state ~instrument_id ~before_position ~after_position
+    ~before ~after =
+  match instrument_policy state instrument_id with
+  | None -> Error (Invalid "fill has no instrument risk policy")
+  | Some policy ->
+      let* before_absolute =
+        Scalar.Quantity.absolute before_position |> invalid
+      in
+      let* after_absolute =
+        Scalar.Quantity.absolute after_position |> invalid
+      in
+      let increasing =
+        Scalar.Quantity.compare after_absolute before_absolute > 0
+      in
+      let* () =
+        if not increasing then Ok ()
+        else if
+          Scalar.Quantity.compare after_position policy.max_long_position > 0
+        then
+          Error
+            (Limit
+               (Instrument_maximum_long_position
+                  (instrument_id, policy.max_long_position)))
+        else
+          let* minimum_short =
+            Scalar.Quantity.negate policy.max_short_position |> invalid
+          in
+          if Scalar.Quantity.compare after_position minimum_short < 0 then
+            Error
+              (Limit
+                 (Instrument_maximum_short_position
+                    (instrument_id, policy.max_short_position)))
+          else if
+            (not policy.shorting_allowed)
+            && Scalar.Quantity.is_negative after_position
+          then Error (Limit (Instrument_shorting_disabled instrument_id))
+          else Ok ()
+      in
+      let* values =
+        List.map
+          (fun (position : Account.position_attribution) ->
+            let* absolute_value =
+              Scalar.Money.absolute position.base_market_value |> invalid
+            in
+            Ok
+              {
+                instrument_id = position.instrument_id;
+                quantity = position.quantity;
+                signed_value = position.base_market_value;
+                absolute_value;
+              })
+          after.Account.positions
+        |> List.fold_left
+             (fun result item ->
+               let* values = result in
+               let* value = item in
+               Ok (value :: values))
+             (Ok [])
+        |> Result.map List.rev
+      in
+      let* current =
+        match
+          List.find_opt
+            (fun value -> Id.Instrument.equal value.instrument_id instrument_id)
+            values
+        with
+        | Some value -> Ok value
+        | None ->
+            Ok
+              {
+                instrument_id;
+                quantity = Scalar.Quantity.zero;
+                signed_value = Scalar.Money.zero;
+                absolute_value = Scalar.Money.zero;
+              }
+      in
+      let* () =
+        match policy.max_notional_exposure with
+        | Some limit
+          when increasing
+               && Scalar.Money.compare current.absolute_value limit > 0 ->
+            Error (Limit (Instrument_maximum_notional (instrument_id, limit)))
+        | _ -> Ok ()
+      in
+      let* gross, _, _, _ = sum_values values |> invalid in
+      let* () =
+        if state.versioned then Ok ()
+        else if Scalar.Money.compare gross before.Account.gross_exposure <= 0
+        then Ok ()
+        else
+          check_fill_initial state ~equity:after.Account.equity
+            ~gross_exposure:gross
+      in
+      check_group_fill_limit state ~equity:after.equity values
+
 let check_position state quantity =
   if Scalar.Quantity.compare quantity state.max_long_position > 0 then
     Error "position would exceed the maximum long position"
@@ -225,6 +849,27 @@ let check_position state quantity =
     if Scalar.Quantity.compare quantity minimum_short < 0 then
       Error "position would exceed the maximum short position"
     else Ok ()
+
+let check_position_for state instrument_id quantity =
+  match instrument_policy state instrument_id with
+  | None -> Error "position refers to an unknown instrument risk policy"
+  | Some policy ->
+      if Scalar.Quantity.compare quantity policy.max_long_position > 0 then
+        Error
+          (if state.versioned then
+             "position would exceed the instrument maximum long position"
+           else "position would exceed the maximum long position")
+      else
+        let* minimum_short = Scalar.Quantity.negate policy.max_short_position in
+        if Scalar.Quantity.compare quantity minimum_short < 0 then
+          Error
+            (if state.versioned then
+               "position would exceed the instrument maximum short position"
+             else "position would exceed the maximum short position")
+        else if
+          (not policy.shorting_allowed) && Scalar.Quantity.is_negative quantity
+        then Error "instrument policy does not allow short positions"
+        else Ok ()
 
 let check_alignment instrument request =
   if
@@ -334,6 +979,36 @@ let projected_valuation_quantities state ~account ~oms request =
        (Ok [])
   |> Result.map List.rev
 
+let fill_projected_quantities state ~account ~oms ~(order : Order.t)
+    ~filled_quantity =
+  Id.Instrument.Map.bindings state.instruments
+  |> List.fold_left
+       (fun result (instrument_id, _) ->
+         let* values = result in
+         let* reservations = reservations_for_instrument ~oms instrument_id in
+         let* reservations =
+           if Id.Instrument.equal instrument_id order.request.instrument_id then
+             match order.request.side with
+             | Order.Buy ->
+                 let* buys =
+                   Scalar.Quantity.subtract reservations.buys filled_quantity
+                 in
+                 Ok { reservations with buys }
+             | Order.Sell ->
+                 let* sells =
+                   Scalar.Quantity.subtract reservations.sells filled_quantity
+                 in
+                 Ok { reservations with sells }
+           else Ok reservations
+         in
+         let* positions =
+           directional_positions ~account instrument_id reservations
+         in
+         let* quantity = worst_directional_position positions in
+         Ok ((instrument_id, quantity) :: values))
+       (Ok [])
+  |> Result.map List.rev
+
 let projected_gross_exposure state ~account ~oms ~marks ~fx_rates request =
   let* quantities =
     projected_valuation_quantities state ~account ~oms request
@@ -377,13 +1052,318 @@ let projected_gross_exposure state ~account ~oms ~marks ~fx_rates request =
   in
   Ok gross_exposure
 
-let check state ~account ~oms ~marks ~fx_rates request =
-  if Scalar.Quantity.compare request.Order.quantity state.max_order_quantity > 0
-  then Error "order exceeds the maximum order quantity"
+let projected_values state ~marks ~fx_rates quantities =
+  let mark_map =
+    List.fold_left
+      (fun map (instrument_id, mark) ->
+        Id.Instrument.Map.add instrument_id mark map)
+      Id.Instrument.Map.empty marks
+  in
+  let module Currency_map = Map.Make (String) in
+  let fx_map =
+    List.fold_left
+      (fun map (currency, rate) -> Currency_map.add currency rate map)
+      Currency_map.empty fx_rates
+  in
+  List.fold_left
+    (fun result (instrument_id, quantity) ->
+      let* values = result in
+      let* instrument =
+        match instrument state instrument_id with
+        | Some value -> Ok value
+        | None -> Error "projected position has no configured instrument"
+      in
+      let* mark =
+        match Id.Instrument.Map.find_opt instrument_id mark_map with
+        | Some value -> Ok value
+        | None -> Error "projected position has no current market price"
+      in
+      let* rate =
+        match Currency_map.find_opt instrument.quote_currency fx_map with
+        | Some value -> Ok value
+        | None -> Error "projected position has no current FX rate"
+      in
+      let* signed_value = Scalar.Money.notional mark quantity in
+      let* signed_value = Scalar.Money.convert signed_value ~rate in
+      let* absolute_value = Scalar.Money.absolute signed_value in
+      Ok ({ instrument_id; quantity; signed_value; absolute_value } :: values))
+    (Ok []) quantities
+  |> Result.map List.rev
+
+let first_some checks =
+  let rec loop = function
+    | [] -> Ok ()
+    | check :: rest -> (
+        match check () with Ok () -> loop rest | Error _ as e -> e)
+  in
+  loop checks
+
+let check_projected_values state ~equity values =
+  let* gross, _, _, _ = sum_values values in
+  let* () =
+    if not state.versioned then
+      check_initial_values state ~equity ~gross_exposure:gross
+    else if Scalar.Money.compare gross state.max_gross_exposure > 0 then
+      Error "portfolio would exceed maximum gross exposure"
+    else
+      let* leveraged_equity =
+        Scalar.Money.multiply_ratio equity state.max_leverage
+      in
+      if Scalar.Money.compare gross leveraged_equity > 0 then
+        Error "portfolio would exceed maximum leverage"
+      else
+        let* initial_requirement =
+          List.fold_left
+            (fun result value ->
+              let* total = result in
+              let* policy =
+                match instrument_policy state value.instrument_id with
+                | Some policy -> Ok policy
+                | None ->
+                    Error "projected position has no instrument risk policy"
+              in
+              let* requirement =
+                Scalar.Money.bps_ceil value.absolute_value
+                  ~bps:policy.initial_margin_bps
+              in
+              Scalar.Money.add total requirement)
+            (Ok Scalar.Money.zero) values
+        in
+        let* excess = Scalar.Money.subtract equity initial_requirement in
+        if Scalar.Money.compare excess Scalar.Money.zero < 0 then
+          Error "portfolio would violate instrument initial margin requirements"
+        else Ok ()
+  in
+  let* () =
+    List.fold_left
+      (fun result value ->
+        let* () = result in
+        let* policy =
+          match instrument_policy state value.instrument_id with
+          | Some policy -> Ok policy
+          | None -> Error "projected position has no instrument risk policy"
+        in
+        let* () = check_position_for state value.instrument_id value.quantity in
+        match policy.max_notional_exposure with
+        | Some limit when Scalar.Money.compare value.absolute_value limit > 0 ->
+            Error
+              "position would exceed the instrument maximum notional exposure"
+        | _ -> Ok ())
+      (Ok ()) values
+  in
+  List.fold_left
+    (fun result (group : group) ->
+      let* () = result in
+      let* gross, long, short, net = group_values group values in
+      let* absolute_net = Scalar.Money.absolute net in
+      let concentration_exceeded limit =
+        let* threshold = Scalar.Money.multiply_ratio equity limit in
+        Ok (Scalar.Money.compare gross threshold > 0)
+      in
+      first_some
+        [
+          (fun () ->
+            match group.limits.max_gross_exposure with
+            | Some limit when Scalar.Money.compare gross limit > 0 ->
+                Error
+                  (Printf.sprintf
+                     "position would exceed group %s maximum gross exposure"
+                     (Id.Risk_group.to_string group.group_id))
+            | _ -> Ok ());
+          (fun () ->
+            match group.limits.max_long_exposure with
+            | Some limit when Scalar.Money.compare long limit > 0 ->
+                Error
+                  (Printf.sprintf
+                     "position would exceed group %s maximum long exposure"
+                     (Id.Risk_group.to_string group.group_id))
+            | _ -> Ok ());
+          (fun () ->
+            match group.limits.max_short_exposure with
+            | Some limit when Scalar.Money.compare short limit > 0 ->
+                Error
+                  (Printf.sprintf
+                     "position would exceed group %s maximum short exposure"
+                     (Id.Risk_group.to_string group.group_id))
+            | _ -> Ok ());
+          (fun () ->
+            match group.limits.max_absolute_net_exposure with
+            | Some limit when Scalar.Money.compare absolute_net limit > 0 ->
+                Error
+                  (Printf.sprintf
+                     "position would exceed group %s maximum absolute net \
+                      exposure"
+                     (Id.Risk_group.to_string group.group_id))
+            | _ -> Ok ());
+          (fun () ->
+            match group.limits.max_concentration with
+            | None -> Ok ()
+            | Some _ when Scalar.Money.compare equity Scalar.Money.zero <= 0 ->
+                Error "group concentration requires positive equity"
+            | Some limit ->
+                let* exceeded = concentration_exceeded limit in
+                if exceeded then
+                  Error
+                    (Printf.sprintf
+                       "position would exceed group %s maximum concentration"
+                       (Id.Risk_group.to_string group.group_id))
+                else Ok ());
+        ])
+    (Ok ()) state.groups
+
+let check_reserved_fill state ~account ~oms ~marks ~fx_rates ~(order : Order.t)
+    ~filled_quantity ~after =
+  if not state.versioned then Ok ()
   else
-    match instrument state request.instrument_id with
-    | None -> Error "order refers to an unknown instrument"
-    | Some instrument ->
+    let instrument_id = order.request.instrument_id in
+    let* quantities =
+      fill_projected_quantities state ~account ~oms ~order ~filled_quantity
+      |> invalid
+    in
+    let* values =
+      projected_values state ~marks ~fx_rates quantities |> invalid
+    in
+    let* policy =
+      match instrument_policy state instrument_id with
+      | Some policy -> Ok policy
+      | None -> Error (Invalid "fill has no instrument risk policy")
+    in
+    let* current =
+      match
+        List.find_opt
+          (fun value -> Id.Instrument.equal value.instrument_id instrument_id)
+          values
+      with
+      | Some value -> Ok value
+      | None -> Error (Invalid "fill projection omitted its instrument")
+    in
+    let* () =
+      List.fold_left
+        (fun result value ->
+          let* () = result in
+          let* item_policy =
+            match instrument_policy state value.instrument_id with
+            | Some policy -> Ok policy
+            | None -> Error (Invalid "fill projection has no risk policy")
+          in
+          if
+            Scalar.Quantity.compare value.quantity item_policy.max_long_position
+            > 0
+          then
+            Error
+              (Limit
+                 (Instrument_maximum_long_position
+                    (value.instrument_id, item_policy.max_long_position)))
+          else
+            let* minimum_short =
+              Scalar.Quantity.negate item_policy.max_short_position |> invalid
+            in
+            if Scalar.Quantity.compare value.quantity minimum_short < 0 then
+              Error
+                (Limit
+                   (Instrument_maximum_short_position
+                      (value.instrument_id, item_policy.max_short_position)))
+            else if
+              (not item_policy.shorting_allowed)
+              && Scalar.Quantity.is_negative value.quantity
+            then
+              Error (Limit (Instrument_shorting_disabled value.instrument_id))
+            else
+              match item_policy.max_notional_exposure with
+              | Some limit
+                when Scalar.Money.compare value.absolute_value limit > 0 ->
+                  Error
+                    (Limit
+                       (Instrument_maximum_notional (value.instrument_id, limit)))
+              | _ -> Ok ())
+        (Ok ()) values
+    in
+    if Scalar.Quantity.compare current.quantity policy.max_long_position > 0
+    then
+      Error
+        (Limit
+           (Instrument_maximum_long_position
+              (instrument_id, policy.max_long_position)))
+    else
+      let* minimum_short =
+        Scalar.Quantity.negate policy.max_short_position |> invalid
+      in
+      if Scalar.Quantity.compare current.quantity minimum_short < 0 then
+        Error
+          (Limit
+             (Instrument_maximum_short_position
+                (instrument_id, policy.max_short_position)))
+      else if
+        (not policy.shorting_allowed)
+        && Scalar.Quantity.is_negative current.quantity
+      then Error (Limit (Instrument_shorting_disabled instrument_id))
+      else
+        let* () =
+          match policy.max_notional_exposure with
+          | Some limit
+            when Scalar.Money.compare current.absolute_value limit > 0 ->
+              Error (Limit (Instrument_maximum_notional (instrument_id, limit)))
+          | _ -> Ok ()
+        in
+        let* gross, _, _, _ = sum_values values |> invalid in
+        let* () =
+          if Scalar.Money.compare gross state.max_gross_exposure > 0 then
+            Error (Limit (Maximum_gross_exposure state.max_gross_exposure))
+          else
+            let* leveraged_equity =
+              Scalar.Money.multiply_ratio after.Account.equity
+                state.max_leverage
+              |> invalid
+            in
+            if Scalar.Money.compare gross leveraged_equity > 0 then
+              Error (Limit (Maximum_leverage state.max_leverage))
+            else Ok ()
+        in
+        let* initial_requirement =
+          List.fold_left
+            (fun result value ->
+              let* total = result in
+              let* item_policy =
+                match instrument_policy state value.instrument_id with
+                | Some policy -> Ok policy
+                | None -> Error (Invalid "fill projection has no risk policy")
+              in
+              let* requirement =
+                Scalar.Money.bps_ceil value.absolute_value
+                  ~bps:item_policy.initial_margin_bps
+                |> invalid
+              in
+              Scalar.Money.add total requirement |> invalid)
+            (Ok Scalar.Money.zero) values
+        in
+        let* excess =
+          Scalar.Money.subtract after.equity initial_requirement |> invalid
+        in
+        if Scalar.Money.compare excess Scalar.Money.zero < 0 then
+          Error
+            (Limit
+               (Instrument_initial_margin
+                  (instrument_id, policy.initial_margin_bps)))
+        else check_group_fill_limit state ~equity:after.equity values
+
+let check state ~account ~oms ~marks ~fx_rates (request : Order.request) =
+  match instrument state request.instrument_id with
+  | None -> Error "order refers to an unknown instrument"
+  | Some instrument ->
+      let* policy =
+        match instrument_policy state request.instrument_id with
+        | Some value -> Ok value
+        | None -> Error "order has no instrument risk policy"
+      in
+      if
+        Scalar.Quantity.compare request.Order.quantity policy.max_order_quantity
+        > 0
+      then
+        Error
+          (if state.versioned then
+             "order exceeds the instrument maximum order quantity"
+           else "order exceeds the maximum order quantity")
+      else
         let* () = check_alignment instrument request in
         let* () = check_self_cross ~oms request in
         let* pending, projected = projected_position ~account ~oms request in
@@ -392,14 +1372,13 @@ let check state ~account ~oms ~marks ~fx_rates request =
         if Scalar.Quantity.compare projected_absolute pending_absolute <= 0 then
           Ok ()
         else
-          let* () = check_position state projected in
+          let* () = check_position_for state request.instrument_id projected in
           let* before =
             Account.value account ~instruments:(instruments state) ~marks
               ~fx_rates
           in
-          let* projected_gross_exposure =
-            projected_gross_exposure state ~account ~oms ~marks ~fx_rates
-              request
+          let* quantities =
+            projected_valuation_quantities state ~account ~oms request
           in
-          check_initial_values state ~equity:before.equity
-            ~gross_exposure:projected_gross_exposure
+          let* values = projected_values state ~marks ~fx_rates quantities in
+          check_projected_values state ~equity:before.equity values

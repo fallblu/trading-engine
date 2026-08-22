@@ -105,6 +105,82 @@ let fill_limit_to_yojson = function
   | Risk.Initial_margin value ->
       ( "initial_margin",
         `Assoc [ ("unit", string "basis_points"); ("value", `Int value) ] )
+  | Risk.Instrument_maximum_long_position (id, value) ->
+      ( "instrument_max_long_position",
+        `Assoc
+          [
+            ("instrument_id", instrument_id id);
+            ("unit", string "quantity");
+            ("value", quantity value);
+          ] )
+  | Risk.Instrument_maximum_short_position (id, value) ->
+      ( "instrument_max_short_position",
+        `Assoc
+          [
+            ("instrument_id", instrument_id id);
+            ("unit", string "quantity");
+            ("value", quantity value);
+          ] )
+  | Risk.Instrument_maximum_notional (id, value) ->
+      ( "instrument_max_notional_exposure",
+        `Assoc
+          [
+            ("instrument_id", instrument_id id);
+            ("unit", string "money");
+            ("value", money value);
+          ] )
+  | Risk.Instrument_shorting_disabled id ->
+      ( "instrument_shorting_disabled",
+        `Assoc [ ("instrument_id", instrument_id id); ("value", `Bool false) ]
+      )
+  | Risk.Instrument_initial_margin (id, value) ->
+      ( "instrument_initial_margin",
+        `Assoc
+          [
+            ("instrument_id", instrument_id id);
+            ("unit", string "basis_points");
+            ("value", `Int value);
+          ] )
+  | Risk.Group_maximum_gross (id, value) ->
+      ( "group_max_gross_exposure",
+        `Assoc
+          [
+            ("group_id", string (Id.Risk_group.to_string id));
+            ("unit", string "money");
+            ("value", money value);
+          ] )
+  | Risk.Group_maximum_long (id, value) ->
+      ( "group_max_long_exposure",
+        `Assoc
+          [
+            ("group_id", string (Id.Risk_group.to_string id));
+            ("unit", string "money");
+            ("value", money value);
+          ] )
+  | Risk.Group_maximum_short (id, value) ->
+      ( "group_max_short_exposure",
+        `Assoc
+          [
+            ("group_id", string (Id.Risk_group.to_string id));
+            ("unit", string "money");
+            ("value", money value);
+          ] )
+  | Risk.Group_maximum_absolute_net (id, value) ->
+      ( "group_max_absolute_net_exposure",
+        `Assoc
+          [
+            ("group_id", string (Id.Risk_group.to_string id));
+            ("unit", string "money");
+            ("value", money value);
+          ] )
+  | Risk.Group_maximum_concentration (id, value) ->
+      ( "group_max_concentration",
+        `Assoc
+          [
+            ("group_id", string (Id.Risk_group.to_string id));
+            ("unit", string "ratio");
+            ("value", string (Scalar.Ratio.to_decimal_string value));
+          ] )
 
 let bar_to_yojson bar =
   `Assoc
@@ -318,10 +394,34 @@ let margin_to_yojson margin =
       ("margin_call", `Bool margin.margin_call);
     ]
 
-let valuation_to_yojson valuation =
+let group_exposure_to_yojson (exposure : Risk.group_exposure) =
+  `Assoc
+    [
+      ("group_id", string (Id.Risk_group.to_string exposure.group_id));
+      ("gross_exposure", money exposure.gross_exposure);
+      ("net_exposure", money exposure.net_exposure);
+      ("long_exposure", money exposure.long_exposure);
+      ("short_exposure", money exposure.short_exposure);
+      ( "concentration",
+        Option.fold ~none:`Null ~some:weight exposure.concentration );
+    ]
+
+let valuation_to_yojson ~contract_version valuation =
   match account_valuation_to_yojson valuation.Audit.account with
   | `Assoc fields ->
-      `Assoc (fields @ [ ("margin", margin_to_yojson valuation.margin) ])
+      let fields = fields @ [ ("margin", margin_to_yojson valuation.margin) ] in
+      let fields =
+        if String.equal contract_version Contract.version then
+          fields
+          @ [
+              ( "group_exposures",
+                `List
+                  (List.map group_exposure_to_yojson
+                     valuation.margin.Risk.group_exposures) );
+            ]
+        else fields
+      in
+      `Assoc fields
   | _ -> assert false
 
 let order_counts_to_yojson counts =
@@ -344,7 +444,7 @@ let requested_target_to_yojson target =
         Option.fold ~none:`Null ~some:price target.reference_price );
     ]
 
-let payload_to_yojson = function
+let payload_to_yojson ~contract_version = function
   | Audit.Run_started { scenario_sha256; execution_model } ->
       `Assoc
         [
@@ -355,7 +455,7 @@ let payload_to_yojson = function
       `Assoc
         [
           ("portfolio", initial_portfolio_to_yojson portfolio);
-          ("valuation", valuation_to_yojson valuation);
+          ("valuation", valuation_to_yojson ~contract_version valuation);
         ]
   | Audit.Market_slice_received market_slice ->
       market_slice_to_yojson market_slice
@@ -458,18 +558,18 @@ let payload_to_yojson = function
           ("fee", money fee);
         ]
   | Audit.Margin_call_triggered valuation | Audit.Margin_restored valuation ->
-      valuation_to_yojson valuation
+      valuation_to_yojson ~contract_version valuation
   | Audit.Intent_rejected reason -> `Assoc [ ("reason", string reason) ]
   | Audit.Metric_emitted { name; value } ->
       `Assoc [ ("name", string name); ("value", string value) ]
-  | Audit.Valuation valuation -> valuation_to_yojson valuation
+  | Audit.Valuation valuation -> valuation_to_yojson ~contract_version valuation
   | Audit.Run_completed
       { scenario_sha256; execution_model; valuation; order_counts } ->
       `Assoc
         [
           ("scenario_sha256", string scenario_sha256);
           ("execution_model", string execution_model);
-          ("valuation", valuation_to_yojson valuation);
+          ("valuation", valuation_to_yojson ~contract_version valuation);
           ("order_counts", order_counts_to_yojson order_counts);
         ]
 
@@ -487,7 +587,9 @@ let audit_to_yojson audit =
       ("run_id", string (Id.Run.to_string audit.run_id));
       ("recorded_at", timestamp audit.recorded_at);
       ("event_type", string (Audit.event_name audit.event));
-      ("payload", payload_to_yojson audit.event);
+      ( "payload",
+        payload_to_yojson ~contract_version:audit.contract_version audit.event
+      );
     ]
 
 let audit_to_string audit = Yojson.Safe.to_string (audit_to_yojson audit)

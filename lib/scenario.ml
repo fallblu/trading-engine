@@ -323,7 +323,7 @@ let parse_instrument json =
   let* lot_size = parse_quantity ~name:"lot_size" lot_json in
   Instrument.create ~id ~symbol ~quote_currency ~tick_size ~lot_size
 
-let parse_risk base_currency instruments json =
+let parse_legacy_risk base_currency instruments json =
   let* fields =
     object_fields ~name:"risk"
       ~expected:
@@ -364,6 +364,195 @@ let parse_risk base_currency instruments json =
   Risk.create ~base_currency ~instruments ~max_order_quantity ~max_long_position
     ~max_short_position ~max_gross_exposure ~max_leverage ~initial_margin_bps
     ~maintenance_margin_bps ~short_borrow_bps
+
+let parse_nullable parse ~name = function
+  | `Null -> Ok None
+  | json -> parse ~name json |> Result.map Option.some
+
+let parse_group_kind = function
+  | "issuer" -> Ok Risk.Issuer
+  | "sector" -> Ok Risk.Sector
+  | "currency" -> Ok Risk.Currency
+  | "country" -> Ok Risk.Country
+  | "asset_class" -> Ok Risk.Asset_class
+  | "custom" -> Ok Risk.Custom
+  | _ -> Error "group_type is unsupported"
+
+let parse_instrument_policy instrument_map json =
+  let* fields =
+    object_fields ~name:"instrument risk policy"
+      ~expected:
+        [
+          "instrument_id";
+          "max_order_quantity";
+          "max_long_position";
+          "max_short_position";
+          "max_notional_exposure";
+          "initial_margin_bps";
+          "maintenance_margin_bps";
+          "shorting_allowed";
+        ]
+      json
+  in
+  let* id_json = field fields "instrument_id" in
+  let* instrument_id =
+    parse_id Id.Instrument.of_string ~name:"instrument_id" id_json
+  in
+  let* instrument =
+    match Id.Instrument.Map.find_opt instrument_id instrument_map with
+    | Some instrument -> Ok instrument
+    | None -> Error "instrument policy refers to an unknown instrument"
+  in
+  let* max_order_quantity =
+    field fields "max_order_quantity" |> fun result ->
+    Result.bind result (parse_quantity ~name:"max_order_quantity")
+  in
+  let* max_long_position =
+    field fields "max_long_position" |> fun result ->
+    Result.bind result (parse_quantity ~name:"max_long_position")
+  in
+  let* max_short_position =
+    field fields "max_short_position" |> fun result ->
+    Result.bind result (parse_quantity ~name:"max_short_position")
+  in
+  let* max_notional_exposure =
+    field fields "max_notional_exposure" |> fun result ->
+    Result.bind result (parse_money ~name:"max_notional_exposure")
+  in
+  let* initial_margin_bps =
+    field fields "initial_margin_bps" |> fun result ->
+    Result.bind result (integer ~name:"initial_margin_bps")
+  in
+  let* maintenance_margin_bps =
+    field fields "maintenance_margin_bps" |> fun result ->
+    Result.bind result (integer ~name:"maintenance_margin_bps")
+  in
+  let* shorting_allowed =
+    match List.assoc "shorting_allowed" fields with
+    | `Bool value -> Ok value
+    | _ -> Error "shorting_allowed must be a boolean"
+  in
+  Risk.create_instrument_policy ~instrument ~max_order_quantity
+    ~max_long_position ~max_short_position
+    ~max_notional_exposure:(Some max_notional_exposure) ~initial_margin_bps
+    ~maintenance_margin_bps ~shorting_allowed
+
+let parse_group json =
+  let* fields =
+    object_fields ~name:"risk group"
+      ~expected:
+        [
+          "group_id"; "group_version"; "group_type"; "instrument_ids"; "limits";
+        ]
+      json
+  in
+  let* group_id =
+    field fields "group_id" |> fun result ->
+    Result.bind result (parse_id Id.Risk_group.of_string ~name:"group_id")
+  in
+  let* group_version =
+    field fields "group_version" |> fun result ->
+    Result.bind result (string ~name:"group_version")
+  in
+  let* () =
+    if String.equal group_version "1" then Ok ()
+    else Error "group_version must be 1"
+  in
+  let* group_kind =
+    field fields "group_type" |> fun result ->
+    Result.bind result (string ~name:"group_type") |> fun result ->
+    Result.bind result parse_group_kind
+  in
+  let* instrument_ids_json =
+    field fields "instrument_ids" |> fun result ->
+    Result.bind result (list ~name:"instrument_ids")
+  in
+  let* instrument_ids =
+    map_list
+      (parse_id Id.Instrument.of_string ~name:"instrument_id")
+      instrument_ids_json
+  in
+  let* limits_json = field fields "limits" in
+  let* limits_fields =
+    object_fields ~name:"risk group limits"
+      ~expected:
+        [
+          "max_gross_exposure";
+          "max_long_exposure";
+          "max_short_exposure";
+          "max_absolute_net_exposure";
+          "max_concentration";
+        ]
+      limits_json
+  in
+  let money_limit name =
+    field limits_fields name |> fun result ->
+    Result.bind result (parse_nullable parse_money ~name)
+  in
+  let* max_gross_exposure = money_limit "max_gross_exposure" in
+  let* max_long_exposure = money_limit "max_long_exposure" in
+  let* max_short_exposure = money_limit "max_short_exposure" in
+  let* max_absolute_net_exposure = money_limit "max_absolute_net_exposure" in
+  let* max_concentration =
+    field limits_fields "max_concentration" |> fun result ->
+    Result.bind result (parse_nullable parse_ratio ~name:"max_concentration")
+  in
+  let* limits =
+    Risk.create_group_limits ~max_gross_exposure ~max_long_exposure
+      ~max_short_exposure ~max_absolute_net_exposure ~max_concentration
+  in
+  Risk.create_group ~group_id ~group_kind ~instrument_ids ~limits
+
+let parse_v7_risk base_currency instruments json =
+  let* fields =
+    object_fields ~name:"risk"
+      ~expected:
+        [
+          "max_gross_exposure";
+          "max_leverage";
+          "short_borrow_bps";
+          "instrument_policies";
+          "groups";
+        ]
+      json
+  in
+  let instrument_map =
+    List.fold_left
+      (fun map instrument ->
+        Id.Instrument.Map.add instrument.Instrument.id instrument map)
+      Id.Instrument.Map.empty instruments
+  in
+  let* policies_json =
+    field fields "instrument_policies" |> fun result ->
+    Result.bind result (list ~name:"instrument_policies")
+  in
+  let* instrument_policies =
+    map_list (parse_instrument_policy instrument_map) policies_json
+  in
+  let* groups_json =
+    field fields "groups" |> fun result ->
+    Result.bind result (list ~name:"groups")
+  in
+  let* groups = map_list parse_group groups_json in
+  let* max_gross_exposure =
+    field fields "max_gross_exposure" |> fun result ->
+    Result.bind result (parse_money ~name:"max_gross_exposure")
+  in
+  let* max_leverage =
+    field fields "max_leverage" |> fun result ->
+    Result.bind result (parse_ratio ~name:"max_leverage")
+  in
+  let* short_borrow_bps =
+    field fields "short_borrow_bps" |> fun result ->
+    Result.bind result (integer ~name:"short_borrow_bps")
+  in
+  Risk.create_v7 ~base_currency ~instruments ~instrument_policies ~groups
+    ~max_gross_exposure ~max_leverage ~short_borrow_bps
+
+let parse_risk ~contract_version base_currency instruments json =
+  if String.equal contract_version "7" then
+    parse_v7_risk base_currency instruments json
+  else parse_legacy_risk base_currency instruments json
 
 let parse_execution_values fields =
   let* participation_json = field fields "participation_bps" in
@@ -434,7 +623,7 @@ let parse_versioned_execution ~contract_version json =
     Ok (execution_model, execution)
 
 let parse_execution ~contract_version json =
-  if List.mem contract_version [ "6"; "5" ] then
+  if List.mem contract_version [ "7"; "6"; "5" ] then
     parse_versioned_execution ~contract_version json
   else parse_legacy_execution ~contract_version json
 
@@ -821,7 +1010,7 @@ let construct_header ~root ~contract_path ~contract_version
       |> at (child root "base_currency")
     in
     let* initial_cash, initial_portfolio =
-      if String.equal contract_version "6" then
+      if List.mem contract_version [ "7"; "6" ] then
         let* portfolio =
           parse_initial_portfolio ~base_currency shape.initial_state
           |> at (child root "initial_portfolio")
@@ -867,7 +1056,8 @@ let construct_header ~root ~contract_path ~contract_version
         ~initial_cash ~instruments ~venue_calendars ~max_internal_events
     in
     let* risk =
-      parse_risk base_currency instruments shape.risk |> at (child root "risk")
+      parse_risk ~contract_version base_currency instruments shape.risk
+      |> at (child root "risk")
     in
     let* () =
       match initial_portfolio with

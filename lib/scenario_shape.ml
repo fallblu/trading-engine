@@ -68,13 +68,13 @@ let common ~root ~contract_version fields =
   let* run_id = field ~root fields "run_id" in
   let* base_currency = field ~root fields "base_currency" in
   let initial_field =
-    if String.equal contract_version "6" then "initial_portfolio"
+    if List.mem contract_version [ "7"; "6" ] then "initial_portfolio"
     else "initial_cash"
   in
   let* initial_state = field ~root fields initial_field in
   let* instruments = field ~root fields "instruments" in
   let venue_calendars =
-    if List.mem contract_version [ "6"; "5" ] then
+    if List.mem contract_version [ "7"; "6"; "5" ] then
       List.assoc_opt "venue_calendars" fields
     else None
   in
@@ -105,10 +105,11 @@ let batch json =
     match preliminary with `String value -> value | _ -> ""
   in
   let calendar_fields =
-    if List.mem contract_version [ "6"; "5" ] then [ "venue_calendars" ] else []
+    if List.mem contract_version [ "7"; "6"; "5" ] then [ "venue_calendars" ]
+    else []
   in
   let initial_field =
-    if String.equal contract_version "6" then "initial_portfolio"
+    if List.mem contract_version [ "7"; "6" ] then "initial_portfolio"
     else "initial_cash"
   in
   let* fields =
@@ -139,10 +140,11 @@ let batch json =
 let stream_header ~contract_version json =
   let root = "$.payload" in
   let calendar_fields =
-    if List.mem contract_version [ "6"; "5" ] then [ "venue_calendars" ] else []
+    if List.mem contract_version [ "7"; "6"; "5" ] then [ "venue_calendars" ]
+    else []
   in
   let initial_field =
-    if String.equal contract_version "6" then "initial_portfolio"
+    if List.mem contract_version [ "7"; "6" ] then "initial_portfolio"
     else "initial_cash"
   in
   let* fields =

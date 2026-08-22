@@ -182,7 +182,13 @@ let runtime_result case =
       let expected_sequence =
         string_field "expected_sequence" case |> Int64.of_string
       in
-      T.Strategy_protocol.response_of_yojson ~expected_sequence response
+      let protocol_version =
+        match optional_field "protocol_version" case with
+        | Some (`String value) -> value
+        | _ -> T.Contract.strategy_protocol_version
+      in
+      T.Strategy_protocol.response_of_yojson ~protocol_version
+        ~expected_sequence response
       |> Result.map (fun _ -> ())
   | kind -> Alcotest.failf "unsupported differential runtime kind %s" kind
 
