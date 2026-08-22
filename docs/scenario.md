@@ -6,7 +6,8 @@ JSON integers. Unknown, missing, duplicate, noncanonical, and non-finite values 
 
 Use [the v4 demo](../contracts/v4/fixtures/demo.scenario.json) as the canonical complete example.
 The [scenario JSON Schema](../contracts/v4/scenario.schema.json) provides structural validation.
-The engine parser also enforces cross-field and cross-record invariants.
+The engine parser also enforces cross-field and cross-record invariants. Diagnostics identify the
+failed field or array item. Stream diagnostics additionally retain the record line and sequence.
 
 ```sh
 trading-engine --input scenario.json --validate-only
@@ -26,6 +27,10 @@ The contract version is repeated, and `scenario_sequence` is contiguous from one
 adjacent to their decision slice rather than stored in a future-looking global schedule. Before
 replay, the reader checks each intent-bearing slice against the next slice's start time while
 retaining only those two records.
+
+The batch object and stream header share one domain-construction path and the same static semantic
+checks. Stream items reuse the batch slice and intent validators directly; no synthetic batch
+scenario is constructed.
 
 The [stream record JSON Schema](../contracts/v4/scenario-stream.schema.json) validates each line,
 and [the v4 stream fixture](../contracts/v4/fixtures/demo.scenario.jsonl) is the canonical example.

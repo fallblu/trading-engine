@@ -264,6 +264,62 @@ let map_field key change = function
            fields)
   | _ -> Alcotest.fail "expected object"
 
+let validation_layers_report_precise_context () =
+  let document = Yojson.Safe.from_string (demo_document ()) in
+  let instruments =
+    match document with
+    | `Assoc fields -> (
+        match List.assoc "instruments" fields with
+        | `List (instrument :: _) -> [ instrument; instrument ]
+        | _ -> Alcotest.fail "demo instruments must be nonempty")
+    | _ -> Alcotest.fail "demo must be an object"
+  in
+  let batch =
+    change_field "instruments" (`List instruments) document
+    |> T.Scenario.of_yojson |> error
+  in
+  Alcotest.(check string)
+    "batch shared validation" "instrument IDs must be unique" batch.message;
+  Alcotest.(check (option string))
+    "batch semantic path" (Some "$.instruments") batch.context.json_path;
+  let stream_header_payload =
+    stream_records () |> List.hd |> Yojson.Safe.from_string |> function
+    | `Assoc fields -> List.assoc "payload" fields
+    | _ -> Alcotest.fail "stream header must be an object"
+  in
+  let stream_header =
+    change_field "instruments" (`List instruments) stream_header_payload
+    |> T.Scenario.stream_header_of_yojson ~contract_version:T.Contract.version
+    |> error
+  in
+  Alcotest.(check string)
+    "stream shares header semantics" batch.message stream_header.message;
+  Alcotest.(check (option string))
+    "stream semantic path" (Some "$.payload.instruments")
+    stream_header.context.json_path;
+  let malformed_stream =
+    stream_records ()
+    |> List.mapi (fun index line ->
+        if index <> 1 then line
+        else
+          Yojson.Safe.from_string line
+          |> map_field "payload"
+               (map_field "intents" (function
+                 | `List (`Assoc fields :: remaining) ->
+                     `List
+                       (`Assoc (("unexpected", `Bool true) :: fields)
+                       :: remaining)
+                 | _ -> Alcotest.fail "stream intents must be nonempty"))
+          |> Yojson.Safe.to_string)
+  in
+  with_stream malformed_stream (fun path ->
+      let diagnostic = T.Replay.run_stream path |> error in
+      Alcotest.(check (option int))
+        "stream record line" (Some 2) diagnostic.context.line;
+      Alcotest.(check (option string))
+        "stream item path" (Some "$.payload.intents[0]")
+        diagnostic.context.json_path)
+
 let dense_schedule_document slice_count =
   let base = timestamp "2026-02-01T00:00:00Z" in
   let slices =
@@ -1011,6 +1067,8 @@ let tests =
       duplicate_fields_are_rejected;
     Alcotest.test_case "metadata validation is recursive" `Quick
       recursive_metadata_validation;
+    Alcotest.test_case "validation layers report precise context" `Quick
+      validation_layers_report_precise_context;
     Alcotest.test_case "configured resources are bounded" `Quick
       configured_resources_are_bounded;
     Alcotest.test_case "invalid schedule sequences rejected" `Quick

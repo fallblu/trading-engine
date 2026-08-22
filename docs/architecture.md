@@ -17,7 +17,10 @@ journal files, and the runtime shell.
 | `Execution`, `Execution_model` | Pluggable synchronized-slice matching, capacity allocation, and fees |
 | `Account` | Currency ledgers, signed positions, attribution, average cost, fees, P&L, and valuation |
 | `Engine` | Sequencing, portfolio reconciliation, and pure suspend/resume orchestration |
-| `Scenario`, `Scenario_stream`, `Replay` | Strict batch and bounded-memory scripted runners |
+| `Scenario_shape` | Exact batch, stream-header, and stream-item JSON fields |
+| `Scenario` | Domain construction shared by batch and stream inputs |
+| `Scenario_validation` | Shared cross-field and cross-record scenario invariants |
+| `Scenario_stream`, `Replay` | Bounded-memory stream adaptation and scripted runners |
 | `Strategy_protocol`, `Strategy_process`, `External_replay` | Versioned child supervision and external runners |
 | `Sha256`, `Codec`, `Diagnostic`, `Artifact_writer`, `Journal`, `Strategy_transcript` | Input identity, stable diagnostics and audit JSON, and file publication |
 
@@ -25,6 +28,11 @@ Boundary failures use the versioned [diagnostic contract](diagnostics.md). Pure 
 and reducer internals keep plain errors inside the deterministic boundary; replay adapters attach
 stable codes, phases, source locations, event causality, and sanitized exception details before
 returning an error to callers.
+
+Batch and stream headers use the same domain construction and static semantic checks. Stream
+items reuse the batch slice, intent, timeline, and catalog validators against the prior item;
+they do not construct temporary batch documents. Shape, construction, and semantic errors retain
+their precise JSON path, while the stream adapter adds the record line and sequence.
 
 The journal and strategy transcript share one typed-state artifact lifecycle for exclusive staging,
 append, close, no-replace publication, and cleanup. Artifact writers and the process supervisor route
