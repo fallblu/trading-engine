@@ -26,5 +26,6 @@ once against its full pinned commit; it is not repeated across dependency or ope
 cells. The manually dispatched Persistra moving-head job remains informational.
 
 Pull requests and unprotected branch pushes cancel superseded runs. Tags and protected branches do
-not, so durable integration evidence is not discarded. Pull-request concurrency keys use the pull
-request number; all other events use the exact Git ref.
+not, so durable integration evidence is not discarded. The key combines the source repository and
+source branch, so a pull request cancels its duplicate feature-branch push without colliding with a
+fork or another branch.
