@@ -7,6 +7,8 @@
   nonrequired latest-head signal.
 - Verify exact canonical journal bytes across locked, dependency-bound, and operating-system CI
   cells, with safe concurrency cancellation and documented required versus informational gates.
+- Publish one strict documentation site for architecture, versioned contracts, and generated OCaml
+  APIs, with offline topology checks and bounded external-link validation.
 
 ## 1.0.0 — 2026-08-21
 

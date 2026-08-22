@@ -1,0 +1,59 @@
+name: External links
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/external-links.yml
+      - .github/SUPPORT.md
+      - contracts/**/*.md
+      - docs/**/*.md
+      - CHANGELOG.md
+      - CONTRIBUTING.md
+      - README.md
+      - lychee.toml
+  push:
+    branches:
+      - develop
+    paths:
+      - .github/workflows/external-links.yml
+      - .github/SUPPORT.md
+      - contracts/**/*.md
+      - docs/**/*.md
+      - CHANGELOG.md
+      - CONTRIBUTING.md
+      - README.md
+      - lychee.toml
+  schedule:
+    - cron: "17 7 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: external-links-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    name: external-links
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
+        with:
+          args: >-
+            --config lychee.toml --verbose --no-progress
+            'README.md' 'CONTRIBUTING.md' 'CHANGELOG.md' '.github/SUPPORT.md'
+            'docs/**/*.md' 'contracts/**/README.md'
+          checkbox: false
+          fail: true
+          failIfEmpty: true
+          format: detailed
+          jobSummary: false
+          lycheeVersion: v0.24.2
+          output: lychee-report.txt
+          token: ""

@@ -1,0 +1,36 @@
+#!/bin/sh
+
+set -eu
+
+repository_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+documentation_environment="$repository_root/.venv-docs"
+documentation_lock="$repository_root/requirements/docs.lock"
+
+if [ ! -f "$repository_root/_opam/.opam-switch/switch-config" ]; then
+  printf '%s\n' "error: run 'make bootstrap' before bootstrapping documentation" >&2
+  exit 1
+fi
+
+printf '%s\n' "Installing locked OCaml documentation dependencies..."
+opam install "$repository_root" \
+  --deps-only \
+  --locked \
+  --with-doc \
+  --require-checksums \
+  --switch "$repository_root" \
+  --yes
+
+if [ ! -x "$documentation_environment/bin/python" ]; then
+  printf '%s\n' "Creating the repository-local documentation environment..."
+  uv venv \
+    --python "$(command -v python3)" \
+    --no-python-downloads \
+    "$documentation_environment"
+fi
+
+printf '%s\n' "Installing locked documentation site dependencies..."
+uv pip sync \
+  --python "$documentation_environment/bin/python" \
+  --no-python-downloads \
+  --strict \
+  "$documentation_lock"
