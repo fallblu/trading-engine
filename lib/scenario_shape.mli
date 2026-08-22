@@ -8,6 +8,7 @@ type common = {
   base_currency : Yojson.Safe.t;
   initial_cash : Yojson.Safe.t;
   instruments : Yojson.Safe.t;
+  venue_calendars : Yojson.Safe.t option;
   risk : Yojson.Safe.t;
   execution : Yojson.Safe.t;
   max_internal_events : Yojson.Safe.t;
@@ -24,5 +25,8 @@ type stream_item = { market_slice : Yojson.Safe.t; intents : Yojson.Safe.t }
 
 val error : json_path:string -> string -> error
 val batch : Yojson.Safe.t -> (batch, error) result
-val stream_header : Yojson.Safe.t -> (common, error) result
+
+val stream_header :
+  contract_version:string -> Yojson.Safe.t -> (common, error) result
+
 val stream_item : Yojson.Safe.t -> (stream_item, error) result

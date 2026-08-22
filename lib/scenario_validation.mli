@@ -2,9 +2,11 @@
 
 val header :
   root:string ->
+  contract_version:string ->
   base_currency:string ->
   initial_cash:(string * Scalar.Money.t) list ->
   instruments:Instrument.t list ->
+  venue_calendars:Venue_calendar.t list ->
   max_internal_events:int ->
   (string list * Id.Instrument.Set.t, Scenario_shape.error) result
 

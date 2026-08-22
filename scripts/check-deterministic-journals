@@ -43,10 +43,10 @@ compare_journal \
   contracts/v3/fixtures/demo.scenario.json \
   contracts/v3/fixtures/demo.journal.jsonl
 compare_journal \
-  v4-demo \
-  contracts/v4/fixtures/demo.scenario.json \
-  contracts/v4/fixtures/demo.journal.jsonl
+  v5-demo \
+  contracts/v5/fixtures/demo.scenario.json \
+  contracts/v5/fixtures/demo.journal.jsonl
 compare_journal \
-  v4-fill-clipped \
-  contracts/v4/fixtures/fill-clipped.scenario.json \
-  contracts/v4/fixtures/fill-clipped.journal.jsonl
+  v5-fill-clipped \
+  contracts/v5/fixtures/fill-clipped.scenario.json \
+  contracts/v5/fixtures/fill-clipped.journal.jsonl

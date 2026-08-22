@@ -16,7 +16,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_EXECUTABLE = ROOT / "_build/default/bin/main.exe"
-FIXTURE = ROOT / "contracts/v4/fixtures/demo.scenario.json"
+FIXTURE = ROOT / "contracts/v5/fixtures/demo.scenario.json"
 
 
 def timestamp(value: datetime) -> str:
