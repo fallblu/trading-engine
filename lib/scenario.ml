@@ -554,8 +554,8 @@ let parse_v7_risk base_currency instruments json =
     ~max_gross_exposure ~max_leverage ~short_borrow_bps
 
 let parse_risk ~contract_version base_currency instruments json =
-  if List.mem contract_version [ "13"; "12"; "11"; "10"; "9"; "8"; "7" ] then
-    parse_v7_risk base_currency instruments json
+  if List.mem contract_version [ "14"; "13"; "12"; "11"; "10"; "9"; "8"; "7" ]
+  then parse_v7_risk base_currency instruments json
   else parse_legacy_risk base_currency instruments json
 
 let parse_execution_values fields =
@@ -803,8 +803,9 @@ let parse_versioned_execution ~contract_version ~instruments json =
         List.mem model_name
           [ "completed_bar_next_open_v1"; "completed_bar_adverse_touch_v1" ]
       then parse_conservative_execution instruments configuration
-      else if String.equal version "2" then
-        parse_execution_v2 instruments configuration
+      else if
+        String.equal model_name "quote_trade_v1" || String.equal version "2"
+      then parse_execution_v2 instruments configuration
       else parse_execution_values configuration
     in
     Ok (execution_model, execution)
@@ -812,7 +813,7 @@ let parse_versioned_execution ~contract_version ~instruments json =
 let parse_execution ~contract_version ~instruments json =
   if
     List.mem contract_version
-      [ "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6"; "5" ]
+      [ "14"; "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6"; "5" ]
   then parse_versioned_execution ~contract_version ~instruments json
   else parse_legacy_execution ~contract_version json
 
@@ -862,7 +863,7 @@ let parse_portfolio_intent ~name ~parse_target make json =
 
 let parse_submit_intent ~contract_version json =
   let versioned =
-    List.mem contract_version [ "13"; "12"; "11"; "10"; "9"; "8" ]
+    List.mem contract_version [ "14"; "13"; "12"; "11"; "10"; "9"; "8" ]
   in
   let* fields =
     object_fields ~name:"submit_order intent"
@@ -1598,20 +1599,123 @@ let parse_cash_rate_observation json =
   Financing.cash_rate_observation ~currency ~effective_at ~credit_rate_bps
     ~debit_rate_bps
 
+let parse_market_event json =
+  let* loose_fields =
+    match json with
+    | `Assoc fields -> Ok fields
+    | _ -> Error "market event must be a JSON object"
+  in
+  let* type_name =
+    Result.bind (field loose_fields "type") (string ~name:"market event type")
+  in
+  let common_fields =
+    [
+      "type";
+      "instrument_id";
+      "event_at";
+      "available_at";
+      "received_at";
+      "ingest_sequence";
+    ]
+  in
+  let specific_fields =
+    match type_name with
+    | "quote" -> [ "bid_price"; "bid_quantity"; "ask_price"; "ask_quantity" ]
+    | "trade" -> [ "price"; "quantity"; "aggressor_side" ]
+    | _ -> []
+  in
+  let* () =
+    if specific_fields = [] then
+      Error "market event type must be quote or trade"
+    else Ok ()
+  in
+  let* fields =
+    object_fields
+      ~name:(type_name ^ " market event")
+      ~expected:(common_fields @ specific_fields)
+      json
+  in
+  let* instrument_id =
+    Result.bind
+      (field fields "instrument_id")
+      (parse_id Id.Instrument.of_string ~name:"market event instrument_id")
+  in
+  let* event_at =
+    Result.bind (field fields "event_at")
+      (parse_timestamp ~name:"market event_at")
+  in
+  let* available_at =
+    Result.bind
+      (field fields "available_at")
+      (parse_timestamp ~name:"market available_at")
+  in
+  let* received_at =
+    Result.bind
+      (field fields "received_at")
+      (parse_timestamp ~name:"market received_at")
+  in
+  let* ingest_sequence =
+    Result.bind
+      (field fields "ingest_sequence")
+      (parse_int64 ~name:"market ingest_sequence")
+  in
+  match type_name with
+  | "quote" ->
+      let* bid_price =
+        Result.bind (field fields "bid_price") (parse_price ~name:"bid_price")
+      in
+      let* bid_quantity =
+        Result.bind
+          (field fields "bid_quantity")
+          (parse_quantity ~name:"bid_quantity")
+      in
+      let* ask_price =
+        Result.bind (field fields "ask_price") (parse_price ~name:"ask_price")
+      in
+      let* ask_quantity =
+        Result.bind
+          (field fields "ask_quantity")
+          (parse_quantity ~name:"ask_quantity")
+      in
+      Market_event.quote ~instrument_id ~event_at ~available_at ~received_at
+        ~ingest_sequence ~bid_price ~bid_quantity ~ask_price ~ask_quantity
+  | "trade" ->
+      let* price =
+        Result.bind (field fields "price") (parse_price ~name:"trade price")
+      in
+      let* quantity =
+        Result.bind (field fields "quantity")
+          (parse_quantity ~name:"trade quantity")
+      in
+      let* aggressor_side =
+        Result.bind
+          (Result.bind
+             (field fields "aggressor_side")
+             (string ~name:"aggressor_side"))
+          Market_event.aggressor_side_of_string
+      in
+      Market_event.trade ~instrument_id ~event_at ~available_at ~received_at
+        ~ingest_sequence ~price ~quantity ~aggressor_side
+  | _ -> assert false
+
 let parse_slice ~contract_version json =
   let financing_fields =
-    if List.mem contract_version [ "13"; "12"; "11"; "10" ] then
+    if List.mem contract_version [ "14"; "13"; "12"; "11"; "10" ] then
       [ "borrow_observations"; "cash_rate_observations" ]
     else []
   in
   let settlement_fields =
-    if List.mem contract_version [ "13"; "12"; "11" ] then
+    if List.mem contract_version [ "14"; "13"; "12"; "11" ] then
       [ "settlement_failures" ]
     else []
   in
   let lifecycle_fields =
-    if List.mem contract_version [ "13"; "12" ] then [ "lifecycle_events" ]
+    if List.mem contract_version [ "14"; "13"; "12" ] then
+      [ "lifecycle_events" ]
     else []
+  in
+  let market_event_fields =
+    if String.equal contract_version "14" then [ "market_events" ] else []
   in
   let* fields =
     object_fields ~name:"market slice"
@@ -1626,7 +1730,8 @@ let parse_slice ~contract_version json =
            "fx_rates";
            "corporate_actions";
          ]
-        @ financing_fields @ settlement_fields @ lifecycle_fields)
+        @ financing_fields @ settlement_fields @ lifecycle_fields
+        @ market_event_fields)
       json
   in
   let* sequence_json = field fields "slice_sequence" in
@@ -1648,7 +1753,7 @@ let parse_slice ~contract_version json =
   let* actions_json = field fields "corporate_actions" in
   let* actions_json = list ~name:"corporate_actions" actions_json in
   let* corporate_actions = map_list parse_corporate_action actions_json in
-  if List.mem contract_version [ "13"; "12"; "11"; "10" ] then
+  if List.mem contract_version [ "14"; "13"; "12"; "11"; "10" ] then
     let* borrow_json =
       Result.bind
         (field fields "borrow_observations")
@@ -1663,7 +1768,7 @@ let parse_slice ~contract_version json =
     let* cash_rate_observations =
       map_list parse_cash_rate_observation cash_json
     in
-    if List.mem contract_version [ "13"; "12"; "11" ] then
+    if List.mem contract_version [ "14"; "13"; "12"; "11" ] then
       let* failures_json =
         Result.bind
           (field fields "settlement_failures")
@@ -1672,20 +1777,32 @@ let parse_slice ~contract_version json =
       let* settlement_failures =
         map_list parse_settlement_failure failures_json
       in
-      if List.mem contract_version [ "13"; "12" ] then
+      if List.mem contract_version [ "14"; "13"; "12" ] then
         let* lifecycle_json =
           Result.bind
             (field fields "lifecycle_events")
             (list ~name:"lifecycle_events")
         in
         let* lifecycle_events = map_list parse_lifecycle_event lifecycle_json in
-        let create =
-          if String.equal contract_version "13" then Market_slice.create_v13
-          else Market_slice.create_v12
-        in
-        create ~slice_sequence ~start_at ~end_at ~available_at ~received_at
-          ~bars ~fx_rates ~corporate_actions ~borrow_observations
-          ~cash_rate_observations ~settlement_failures ~lifecycle_events
+        if String.equal contract_version "14" then
+          let* events_json =
+            Result.bind
+              (field fields "market_events")
+              (list ~name:"market_events")
+          in
+          let* market_events = map_list parse_market_event events_json in
+          Market_slice.create_v14 ~slice_sequence ~start_at ~end_at
+            ~available_at ~received_at ~bars ~fx_rates ~corporate_actions
+            ~borrow_observations ~cash_rate_observations ~settlement_failures
+            ~lifecycle_events ~market_events
+        else
+          let create =
+            if String.equal contract_version "13" then Market_slice.create_v13
+            else Market_slice.create_v12
+          in
+          create ~slice_sequence ~start_at ~end_at ~available_at ~received_at
+            ~bars ~fx_rates ~corporate_actions ~borrow_observations
+            ~cash_rate_observations ~settlement_failures ~lifecycle_events
       else
         Market_slice.create_v11 ~slice_sequence ~start_at ~end_at ~available_at
           ~received_at ~bars ~fx_rates ~corporate_actions ~borrow_observations
@@ -1730,7 +1847,8 @@ let construct_header ~root ~contract_path ~contract_version
     in
     let* initial_cash, initial_portfolio =
       if
-        List.mem contract_version [ "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6" ]
+        List.mem contract_version
+          [ "14"; "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6" ]
       then
         let* portfolio =
           parse_initial_portfolio ~base_currency shape.initial_state
@@ -1800,7 +1918,7 @@ let construct_header ~root ~contract_path ~contract_version
       | _, _ -> Ok Financing.legacy_policy
     in
     let financing =
-      if List.mem contract_version [ "13"; "12"; "11"; "10" ] then
+      if List.mem contract_version [ "14"; "13"; "12"; "11"; "10" ] then
         Some financing
       else None
     in

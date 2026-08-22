@@ -98,3 +98,15 @@ compare_journal \
   v13-fill-clipped \
   contracts/v13/fixtures/fill-clipped.scenario.json \
   contracts/v13/fixtures/fill-clipped.journal.jsonl
+compare_journal \
+  v14-demo \
+  contracts/v14/fixtures/demo.scenario.json \
+  contracts/v14/fixtures/demo.journal.jsonl
+compare_journal \
+  v14-fill-clipped \
+  contracts/v14/fixtures/fill-clipped.scenario.json \
+  contracts/v14/fixtures/fill-clipped.journal.jsonl
+compare_journal \
+  v14-quote-trade \
+  contracts/v14/fixtures/quote-trade.scenario.json \
+  contracts/v14/fixtures/quote-trade.journal.jsonl
