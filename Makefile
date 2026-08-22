@@ -1,6 +1,6 @@
 export PATH := $(CURDIR)/.venv-schema/bin:$(PATH)
 
-.PHONY: bootstrap environment-check build test metadata-check docs-bootstrap docs-source-check docs-check docs-build determinism-check dependency-band-check coverage benchmark-smoke benchmark fuzz-smoke fuzz fmt-check check
+.PHONY: bootstrap environment-check build test metadata-check docs-bootstrap docs-source-check docs-check docs-build release-build release-check determinism-check dependency-band-check coverage benchmark-smoke benchmark fuzz-smoke fuzz fmt-check check
 
 FUZZ_SEED ?= 20260821
 FUZZ_CASES ?= 10000
@@ -31,6 +31,12 @@ docs-check: docs-source-check
 
 docs-build: docs-bootstrap docs-check
 	@./scripts/build-documentation-site
+
+release-build: environment-check
+	@./scripts/build-release-artifacts "$(CURDIR)/release" "$(VERSION)"
+
+release-check: environment-check
+	@VERSION="$(VERSION)" ./scripts/check-release-artifacts
 
 determinism-check: build
 	@./scripts/check-deterministic-journals
