@@ -554,7 +554,7 @@ let parse_v7_risk base_currency instruments json =
     ~max_gross_exposure ~max_leverage ~short_borrow_bps
 
 let parse_risk ~contract_version base_currency instruments json =
-  if List.mem contract_version [ "12"; "11"; "10"; "9"; "8"; "7" ] then
+  if List.mem contract_version [ "13"; "12"; "11"; "10"; "9"; "8"; "7" ] then
     parse_v7_risk base_currency instruments json
   else parse_legacy_risk base_currency instruments json
 
@@ -654,7 +654,7 @@ let parse_fee_schedule instrument_ids json =
   Fee_schedule.create ~schedule_id ~instrument_id ~settlement_currency ~minimum
     ~maximum ~components
 
-let parse_execution_v2 instruments fields =
+let parse_execution_common instruments fields =
   let* participation_json = field fields "participation_bps" in
   let* participation_bps =
     integer ~name:"participation_bps" participation_json
@@ -679,7 +679,67 @@ let parse_execution_v2 instruments fields =
     else
       Error "fee schedules must cover every configured instrument exactly once"
   in
+  Ok (participation_bps, schedules)
+
+let parse_execution_v2 instruments fields =
+  let* participation_bps, schedules =
+    parse_execution_common instruments fields
+  in
   Execution.create_v2 ~participation_bps ~fee_schedules:schedules
+
+let parse_conservative_execution instruments fields =
+  let* participation_bps, fee_schedules =
+    parse_execution_common instruments fields
+  in
+  let* spread_json = field fields "spread_model" in
+  let* spread_fields =
+    object_fields ~name:"spread model"
+      ~expected:[ "model"; "half_spread_bps" ]
+      spread_json
+  in
+  let* spread_name =
+    Result.bind (field spread_fields "model") (string ~name:"spread model")
+  in
+  let* () =
+    if String.equal spread_name "fixed_half_spread_v1" then Ok ()
+    else Error "unsupported spread model"
+  in
+  let* half_spread_bps =
+    Result.bind
+      (field spread_fields "half_spread_bps")
+      (integer ~name:"half_spread_bps")
+  in
+  let* impact_json = field fields "impact_model" in
+  let* impact_fields =
+    object_fields ~name:"impact model"
+      ~expected:[ "model"; "coefficient_bps"; "missing_volume_policy" ]
+      impact_json
+  in
+  let* impact_name =
+    Result.bind (field impact_fields "model") (string ~name:"impact model")
+  in
+  let* () =
+    if String.equal impact_name "linear_participation_v1" then Ok ()
+    else Error "unsupported impact model"
+  in
+  let* impact_coefficient_bps =
+    Result.bind
+      (field impact_fields "coefficient_bps")
+      (integer ~name:"impact coefficient_bps")
+  in
+  let* missing_name =
+    Result.bind
+      (field impact_fields "missing_volume_policy")
+      (string ~name:"missing_volume_policy")
+  in
+  let* missing_volume_policy =
+    match missing_name with
+    | "reject" -> Ok Execution.Reject_missing_volume
+    | "zero_impact" -> Ok Execution.Zero_impact
+    | _ -> Error "missing_volume_policy must be reject or zero_impact"
+  in
+  Execution.create_conservative ~participation_bps ~fee_schedules
+    ~half_spread_bps ~impact_coefficient_bps ~missing_volume_policy
 
 let parse_legacy_execution ~contract_version json =
   let* fields =
@@ -739,14 +799,20 @@ let parse_versioned_execution ~contract_version ~instruments json =
          model_name)
   else
     let* execution =
-      if String.equal version "2" then
+      if
+        List.mem model_name
+          [ "completed_bar_next_open_v1"; "completed_bar_adverse_touch_v1" ]
+      then parse_conservative_execution instruments configuration
+      else if String.equal version "2" then
         parse_execution_v2 instruments configuration
       else parse_execution_values configuration
     in
     Ok (execution_model, execution)
 
 let parse_execution ~contract_version ~instruments json =
-  if List.mem contract_version [ "12"; "11"; "10"; "9"; "8"; "7"; "6"; "5" ]
+  if
+    List.mem contract_version
+      [ "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6"; "5" ]
   then parse_versioned_execution ~contract_version ~instruments json
   else parse_legacy_execution ~contract_version json
 
@@ -795,7 +861,9 @@ let parse_portfolio_intent ~name ~parse_target make json =
   Ok (make targets)
 
 let parse_submit_intent ~contract_version json =
-  let versioned = List.mem contract_version [ "12"; "11"; "10"; "9"; "8" ] in
+  let versioned =
+    List.mem contract_version [ "13"; "12"; "11"; "10"; "9"; "8" ]
+  in
   let* fields =
     object_fields ~name:"submit_order intent"
       ~expected:
@@ -1532,16 +1600,18 @@ let parse_cash_rate_observation json =
 
 let parse_slice ~contract_version json =
   let financing_fields =
-    if List.mem contract_version [ "12"; "11"; "10" ] then
+    if List.mem contract_version [ "13"; "12"; "11"; "10" ] then
       [ "borrow_observations"; "cash_rate_observations" ]
     else []
   in
   let settlement_fields =
-    if List.mem contract_version [ "12"; "11" ] then [ "settlement_failures" ]
+    if List.mem contract_version [ "13"; "12"; "11" ] then
+      [ "settlement_failures" ]
     else []
   in
   let lifecycle_fields =
-    if String.equal contract_version "12" then [ "lifecycle_events" ] else []
+    if List.mem contract_version [ "13"; "12" ] then [ "lifecycle_events" ]
+    else []
   in
   let* fields =
     object_fields ~name:"market slice"
@@ -1578,7 +1648,7 @@ let parse_slice ~contract_version json =
   let* actions_json = field fields "corporate_actions" in
   let* actions_json = list ~name:"corporate_actions" actions_json in
   let* corporate_actions = map_list parse_corporate_action actions_json in
-  if List.mem contract_version [ "12"; "11"; "10" ] then
+  if List.mem contract_version [ "13"; "12"; "11"; "10" ] then
     let* borrow_json =
       Result.bind
         (field fields "borrow_observations")
@@ -1593,7 +1663,7 @@ let parse_slice ~contract_version json =
     let* cash_rate_observations =
       map_list parse_cash_rate_observation cash_json
     in
-    if List.mem contract_version [ "12"; "11" ] then
+    if List.mem contract_version [ "13"; "12"; "11" ] then
       let* failures_json =
         Result.bind
           (field fields "settlement_failures")
@@ -1602,15 +1672,19 @@ let parse_slice ~contract_version json =
       let* settlement_failures =
         map_list parse_settlement_failure failures_json
       in
-      if String.equal contract_version "12" then
+      if List.mem contract_version [ "13"; "12" ] then
         let* lifecycle_json =
           Result.bind
             (field fields "lifecycle_events")
             (list ~name:"lifecycle_events")
         in
         let* lifecycle_events = map_list parse_lifecycle_event lifecycle_json in
-        Market_slice.create_v12 ~slice_sequence ~start_at ~end_at ~available_at
-          ~received_at ~bars ~fx_rates ~corporate_actions ~borrow_observations
+        let create =
+          if String.equal contract_version "13" then Market_slice.create_v13
+          else Market_slice.create_v12
+        in
+        create ~slice_sequence ~start_at ~end_at ~available_at ~received_at
+          ~bars ~fx_rates ~corporate_actions ~borrow_observations
           ~cash_rate_observations ~settlement_failures ~lifecycle_events
       else
         Market_slice.create_v11 ~slice_sequence ~start_at ~end_at ~available_at
@@ -1655,7 +1729,9 @@ let construct_header ~root ~contract_path ~contract_version
       |> at (child root "base_currency")
     in
     let* initial_cash, initial_portfolio =
-      if List.mem contract_version [ "12"; "11"; "10"; "9"; "8"; "7"; "6" ] then
+      if
+        List.mem contract_version [ "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6" ]
+      then
         let* portfolio =
           parse_initial_portfolio ~base_currency shape.initial_state
           |> at (child root "initial_portfolio")
@@ -1724,7 +1800,8 @@ let construct_header ~root ~contract_path ~contract_version
       | _, _ -> Ok Financing.legacy_policy
     in
     let financing =
-      if List.mem contract_version [ "12"; "11"; "10" ] then Some financing
+      if List.mem contract_version [ "13"; "12"; "11"; "10" ] then
+        Some financing
       else None
     in
     let* settlement =

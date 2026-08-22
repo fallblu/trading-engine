@@ -2,7 +2,26 @@ type fee_configuration =
   | Legacy of { fixed_fee : Scalar.Money.t; fee_bps : int }
   | Schedules of Fee_schedule.t Id.Instrument.Map.t
 
-type t = { participation_bps : int; fee_configuration : fee_configuration }
+type missing_volume_policy = Reject_missing_volume | Zero_impact
+
+type cost_model = {
+  half_spread_bps : int;
+  impact_coefficient_bps : int;
+  missing_volume_policy : missing_volume_policy;
+}
+
+type t = {
+  participation_bps : int;
+  fee_configuration : fee_configuration;
+  cost_model : cost_model option;
+}
+
+type price_attribution = {
+  reference_price : Scalar.Price.t;
+  spread_adjustment : Scalar.Money.t;
+  impact_adjustment : Scalar.Money.t;
+  final_price : Scalar.Price.t;
+}
 
 type proposed_fill = {
   order_id : Id.Order.t;
@@ -12,6 +31,7 @@ type proposed_fill = {
   fee_components : Fee_schedule.calculated_component list;
   liquidity : Fee_schedule.liquidity;
   executed_at : Ptime.t;
+  price_attribution : price_attribution option;
 }
 
 type match_result = {
@@ -29,6 +49,9 @@ and step =
   | Triggered of Id.Order.t * Ptime.t * int64 * cursor
   | Proposed of proposed_fill * (Scalar.Quantity.t -> (cursor, string) result)
 
+let ( let* ) result function_ =
+  match result with Ok value -> function_ value | Error _ as error -> error
+
 let cursor next = Cursor (fun oms -> next ~oms)
 
 let create ~participation_bps ~fixed_fee ~fee_bps =
@@ -39,7 +62,12 @@ let create ~participation_bps ~fixed_fee ~fee_bps =
   else if fee_bps < 0 || fee_bps > 10_000 then
     Error "fee basis points must be between 0 and 10000"
   else
-    Ok { participation_bps; fee_configuration = Legacy { fixed_fee; fee_bps } }
+    Ok
+      {
+        participation_bps;
+        fee_configuration = Legacy { fixed_fee; fee_bps };
+        cost_model = None;
+      }
 
 let create_v2 ~participation_bps ~fee_schedules =
   if participation_bps < 0 || participation_bps > 10_000 then
@@ -59,8 +87,29 @@ let create_v2 ~participation_bps ~fee_schedules =
     in
     Result.map
       (fun schedules ->
-        { participation_bps; fee_configuration = Schedules schedules })
+        {
+          participation_bps;
+          fee_configuration = Schedules schedules;
+          cost_model = None;
+        })
       (List.fold_left add (Ok Id.Instrument.Map.empty) fee_schedules)
+
+let create_conservative ~participation_bps ~fee_schedules ~half_spread_bps
+    ~impact_coefficient_bps ~missing_volume_policy =
+  if half_spread_bps < 0 || half_spread_bps > 10_000 then
+    Error "half-spread basis points must be between 0 and 10000"
+  else if impact_coefficient_bps < 0 || impact_coefficient_bps > 10_000 then
+    Error "impact coefficient basis points must be between 0 and 10000"
+  else
+    Result.map
+      (fun state ->
+        {
+          state with
+          cost_model =
+            Some
+              { half_spread_bps; impact_coefficient_bps; missing_volume_policy };
+        })
+      (create_v2 ~participation_bps ~fee_schedules)
 
 let participation_bps state = state.participation_bps
 
@@ -78,6 +127,8 @@ let fee_schedules state =
   match state.fee_configuration with
   | Legacy _ -> []
   | Schedules schedules -> Id.Instrument.Map.bindings schedules |> List.map snd
+
+let cost_model state = state.cost_model
 
 let calculate_fee state ~instrument ~notional ~quantity ~liquidity ~fx_rates =
   match state.fee_configuration with
@@ -97,7 +148,19 @@ let calculate_fee state ~instrument ~notional ~quantity ~liquidity ~fx_rates =
             ~quote_currency:instrument.quote_currency ~notional ~quantity
             ~liquidity ~fx_rates)
 
-let execution_price order market_slice bar =
+type limit_fill_policy = Optimistic_touch | Next_open_only | Adverse_touch
+
+let checked_price_micros value =
+  if Z.fits_int64 value then Scalar.Price.of_micros (Z.to_int64 value)
+  else Error "execution price overflow"
+
+let adverse_reference side limit tick =
+  let limit = Z.of_int64 (Scalar.Price.to_micros limit) in
+  let tick = Z.of_int64 (Scalar.Price.to_micros tick) in
+  checked_price_micros
+    (match side with Order.Buy -> Z.sub limit tick | Sell -> Z.add limit tick)
+
+let execution_reference policy instrument order market_slice bar =
   match Order.effective_kind order with
   | None -> None
   | Some Order.Market ->
@@ -107,19 +170,125 @@ let execution_price order market_slice bar =
           Fee_schedule.Taker )
   | Some (Order.Limit limit) -> (
       match order.request.side with
-      | Order.Buy ->
+      | Order.Buy -> (
           if Scalar.Price.compare bar.open_price limit <= 0 then
             Some (bar.open_price, market_slice.start_at, Fee_schedule.Taker)
-          else if Scalar.Price.compare bar.low_price limit <= 0 then
-            Some (limit, market_slice.end_at, Fee_schedule.Maker)
-          else None
-      | Order.Sell ->
+          else
+            match policy with
+            | Optimistic_touch ->
+                if Scalar.Price.compare bar.low_price limit <= 0 then
+                  Some (limit, market_slice.end_at, Fee_schedule.Maker)
+                else None
+            | Next_open_only -> None
+            | Adverse_touch -> (
+                match
+                  adverse_reference Order.Buy limit
+                    instrument.Instrument.tick_size
+                with
+                | Error _ -> None
+                | Ok reference ->
+                    if Scalar.Price.compare bar.low_price reference <= 0 then
+                      Some (reference, market_slice.end_at, Fee_schedule.Maker)
+                    else None))
+      | Order.Sell -> (
           if Scalar.Price.compare bar.open_price limit >= 0 then
             Some (bar.open_price, market_slice.start_at, Fee_schedule.Taker)
-          else if Scalar.Price.compare bar.high_price limit >= 0 then
-            Some (limit, market_slice.end_at, Fee_schedule.Maker)
-          else None)
+          else
+            match policy with
+            | Optimistic_touch ->
+                if Scalar.Price.compare bar.high_price limit >= 0 then
+                  Some (limit, market_slice.end_at, Fee_schedule.Maker)
+                else None
+            | Next_open_only -> None
+            | Adverse_touch -> (
+                match
+                  adverse_reference Order.Sell limit instrument.tick_size
+                with
+                | Error _ -> None
+                | Ok reference ->
+                    if Scalar.Price.compare bar.high_price reference >= 0 then
+                      Some (reference, market_slice.end_at, Fee_schedule.Maker)
+                    else None)))
   | Some (Order.Stop _ | Order.Stop_limit _) -> None
+
+let ceil_div numerator denominator =
+  if Z.equal numerator Z.zero then Z.zero
+  else Z.div (Z.add numerator (Z.pred denominator)) denominator
+
+let round_up_to_tick value tick = Z.mul (ceil_div value tick) tick
+
+let price_adjustment reference bps =
+  ceil_div
+    (Z.mul (Z.of_int64 (Scalar.Price.to_micros reference)) (Z.of_int bps))
+    (Z.of_int 10_000)
+
+let impact_adjustment reference coefficient quantity volume =
+  ceil_div
+    (Z.mul
+       (Z.mul
+          (Z.of_int64 (Scalar.Price.to_micros reference))
+          (Z.of_int coefficient))
+       (Z.of_int64 (Scalar.Quantity.to_micros quantity)))
+    (Z.mul (Z.of_int 10_000) (Z.of_int64 (Scalar.Quantity.to_micros volume)))
+
+let apply_cost_model state instrument order bar quantity reference =
+  match state.cost_model with
+  | None -> Ok (Some (reference, None))
+  | Some model ->
+      let tick =
+        Z.of_int64 (Scalar.Price.to_micros instrument.Instrument.tick_size)
+      in
+      let spread =
+        price_adjustment reference model.half_spread_bps |> fun value ->
+        round_up_to_tick value tick
+      in
+      let* impact =
+        if model.impact_coefficient_bps = 0 then Ok Z.zero
+        else
+          match bar.Bar.volume with
+          | Some volume when not (Scalar.Quantity.is_zero volume) ->
+              Ok
+                ( impact_adjustment reference model.impact_coefficient_bps
+                    quantity volume
+                |> fun value -> round_up_to_tick value tick )
+          | Some _ | None -> (
+              match model.missing_volume_policy with
+              | Reject_missing_volume ->
+                  Error "impact model requires completed-bar volume"
+              | Zero_impact -> Ok Z.zero)
+      in
+      let adjustment = Z.add spread impact in
+      let reference_micros = Z.of_int64 (Scalar.Price.to_micros reference) in
+      let final_micros =
+        match order.Order.request.side with
+        | Buy -> Z.add reference_micros adjustment
+        | Sell -> Z.sub reference_micros adjustment
+      in
+      let* final_price = checked_price_micros final_micros in
+      let respects_limit =
+        match Order.effective_kind order with
+        | Some (Order.Limit limit) -> (
+            match order.request.side with
+            | Buy -> Scalar.Price.compare final_price limit <= 0
+            | Sell -> Scalar.Price.compare final_price limit >= 0)
+        | Some (Market | Stop _ | Stop_limit _) | None -> true
+      in
+      if not respects_limit then Ok None
+      else if not (Z.fits_int64 spread && Z.fits_int64 impact) then
+        Error "execution price adjustment overflow"
+      else
+        Ok
+          (Some
+             ( final_price,
+               Some
+                 {
+                   reference_price = reference;
+                   spread_adjustment =
+                     Scalar.Money.of_micros (Z.to_int64 spread);
+                   impact_adjustment =
+                     Scalar.Money.of_micros (Z.to_int64 impact);
+                   final_price;
+                 } ))
 
 let stop_trigger order market_slice bar =
   match (order.Order.request.kind, order.request.side) with
@@ -199,7 +368,8 @@ let compare_execution_order left right =
     in
     if sequence <> 0 then sequence else Id.Order.compare left.id right.id
 
-let start_slice state ~instruments ~oms (market_slice : Market_slice.t) =
+let start_slice_with_policy policy state ~instruments ~oms
+    (market_slice : Market_slice.t) =
   let ( let* ) result function_ =
     match result with Ok value -> function_ value | Error _ as error -> error
   in
@@ -280,11 +450,13 @@ let start_slice state ~instruments ~oms (market_slice : Market_slice.t) =
                      market_slice.slice_sequence,
                      make_cursor capacities remaining ))
         else
-          match execution_price order market_slice bar with
+          match
+            execution_reference policy instrument order market_slice bar
+          with
           | None ->
               let (Cursor next) = make_cursor capacities remaining in
               next current_oms
-          | Some (price, executed_at, liquidity) ->
+          | Some (reference_price, executed_at, liquidity) -> (
               let quantity =
                 available_quantity capacity (Order.remaining_quantity order)
               in
@@ -298,52 +470,73 @@ let start_slice state ~instruments ~oms (market_slice : Market_slice.t) =
                 let (Cursor next) = make_cursor capacities remaining in
                 next current_oms
               else
-                let* notional = Scalar.Money.notional price quantity in
-                let* fee_components, fee =
-                  calculate_fee state ~instrument ~notional ~quantity ~liquidity
-                    ~fx_rates:
-                      (List.map
-                         (fun mark -> (mark.Market_slice.currency, mark.rate))
-                         market_slice.fx_rates)
+                let* priced =
+                  apply_cost_model state instrument order bar quantity
+                    reference_price
                 in
-                let proposed =
-                  {
-                    order_id = order.id;
-                    quantity;
-                    price;
-                    fee;
-                    fee_components;
-                    liquidity;
-                    executed_at;
-                  }
-                in
-                let continue applied_quantity =
-                  if
-                    Scalar.Quantity.compare applied_quantity
-                      Scalar.Quantity.zero
-                    < 0
-                  then Error "applied fill quantity must be nonnegative"
-                  else if Scalar.Quantity.compare applied_quantity quantity > 0
-                  then
-                    Error "applied fill quantity exceeds the execution proposal"
-                  else if
-                    not
-                      (Scalar.Quantity.is_multiple applied_quantity
-                         ~lot:instrument.Instrument.lot_size)
-                  then
-                    Error
-                      "applied fill quantity is not aligned to the instrument \
-                       lot size"
-                  else
-                    let* capacity = consume capacity applied_quantity in
-                    let capacities =
-                      Id.Instrument.Map.add instrument_id capacity capacities
+                match priced with
+                | None ->
+                    let (Cursor next) = make_cursor capacities remaining in
+                    next current_oms
+                | Some (price, price_attribution) ->
+                    let* notional = Scalar.Money.notional price quantity in
+                    let* fee_components, fee =
+                      calculate_fee state ~instrument ~notional ~quantity
+                        ~liquidity
+                        ~fx_rates:
+                          (List.map
+                             (fun mark ->
+                               (mark.Market_slice.currency, mark.rate))
+                             market_slice.fx_rates)
                     in
-                    Ok (make_cursor capacities remaining)
-                in
-                Ok (Proposed (proposed, continue)))
+                    let proposed =
+                      {
+                        order_id = order.id;
+                        quantity;
+                        price;
+                        fee;
+                        fee_components;
+                        liquidity;
+                        executed_at;
+                        price_attribution;
+                      }
+                    in
+                    let continue applied_quantity =
+                      if
+                        Scalar.Quantity.compare applied_quantity
+                          Scalar.Quantity.zero
+                        < 0
+                      then Error "applied fill quantity must be nonnegative"
+                      else if
+                        Scalar.Quantity.compare applied_quantity quantity > 0
+                      then
+                        Error
+                          "applied fill quantity exceeds the execution proposal"
+                      else if
+                        not
+                          (Scalar.Quantity.is_multiple applied_quantity
+                             ~lot:instrument.Instrument.lot_size)
+                      then
+                        Error
+                          "applied fill quantity is not aligned to the \
+                           instrument lot size"
+                      else
+                        let* capacity = consume capacity applied_quantity in
+                        let capacities =
+                          Id.Instrument.Map.add instrument_id capacity
+                            capacities
+                        in
+                        Ok (make_cursor capacities remaining)
+                    in
+                    Ok (Proposed (proposed, continue))))
   in
   Ok (make_cursor capacities eligible_order_ids)
+
+let start_slice state = start_slice_with_policy Optimistic_touch state
+let start_slice_next_open state = start_slice_with_policy Next_open_only state
+
+let start_slice_adverse_touch state =
+  start_slice_with_policy Adverse_touch state
 
 let finished market_ioc_orders =
   cursor (fun ~oms:_ -> Ok (Finished market_ioc_orders))

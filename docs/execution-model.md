@@ -1,11 +1,12 @@
 # Execution model
 
 The engine selects a compiled execution module by the scenario's stable `execution.model` name.
-Contract v12 advertises and accepts `completed_bar_v1`; embedders can inject another module through
+Contract v13 advertises `completed_bar_v1`, `completed_bar_next_open_v1`, and
+`completed_bar_adverse_touch_v1`; embedders can inject another module through
 the typed engine configuration without introducing runtime shared-library loading. The selected
 name is repeated in both terminal audit records.
 
-Each compiled model owns a strict configuration contract. The v12 envelope separates selection from
+Each compiled model owns a strict configuration contract. The v13 envelope separates selection from
 model-specific parameters:
 
 ```json
@@ -44,6 +45,11 @@ therefore reject incompatible scenarios without guessing from a shared execution
 
 The completed-bar model consumes synchronized slices of OHLCV bars. Every slice contains exactly
 one bar for each configured instrument and produces one matching batch and one closing valuation.
+
+The conservative models use strict configuration version `"1"`. Both require `spread_model` with
+`model: "fixed_half_spread_v1"` and `half_spread_bps`, plus `impact_model` with
+`model: "linear_participation_v1"`, `coefficient_bps`, and `missing_volume_policy`. The latter is
+either `reject` or `zero_impact`; no ambient spread or volume data is inferred.
 
 ## Eligibility
 
@@ -104,8 +110,19 @@ For a buy limit `L`:
 3. Otherwise, do not fill.
 
 Sell limits use the symmetric open/high rule. Limit remainders remain GTC. The open rule gives
-deterministic gap improvement. The touch rule is optimistic because completed bars contain no
+deterministic gap improvement. The frozen `completed_bar_v1` touch rule is optimistic because completed bars contain no
 queue, path, or available-size evidence at the limit.
+
+`completed_bar_next_open_v1` fills a limit only at a later marketable open.
+`completed_bar_adverse_touch_v1` additionally permits maker fills after the completed bar trades
+through the limit by at least one instrument tick. Its pre-cost reference is that one-tick adverse
+price. A mere touch does not fill.
+
+For both conservative models, fixed half-spread and participation-linear impact are rounded away
+from the reference price to whole instrument ticks. Buy adjustments add and sell adjustments
+subtract. A cost-adjusted price that would violate a limit is ineligible. Before each fill the
+engine emits `execution_price_selected`, attributing reference price, spread adjustment, impact
+adjustment, and final executable price; the fill causally references that event.
 
 ## Capacity and priority
 
