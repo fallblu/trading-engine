@@ -6,6 +6,7 @@ type t = private {
   run_id : Id.Run.t;
   base_currency : string;
   initial_cash : (string * Scalar.Money.t) list;
+  initial_portfolio : Initial_portfolio.t option;
   instruments : Instrument.t list;
   venue_calendars : Venue_calendar.t list;
   risk : Risk.t;
@@ -22,6 +23,7 @@ type stream_header = private {
   run_id : Id.Run.t;
   base_currency : string;
   initial_cash : (string * Scalar.Money.t) list;
+  initial_portfolio : Initial_portfolio.t option;
   instruments : Instrument.t list;
   venue_calendars : Venue_calendar.t list;
   risk : Risk.t;

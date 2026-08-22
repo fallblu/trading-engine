@@ -117,7 +117,7 @@ let capabilities_describe_execution_contracts () =
     "configuration versions" [ "1" ]
     (strings "configuration_versions");
   Alcotest.(check (list string))
-    "scenario contracts" [ "5"; "4"; "3" ]
+    "scenario contracts" [ "6"; "5"; "4"; "3" ]
     (strings "scenario_contract_versions");
   Alcotest.(check (list string))
     "required fields"

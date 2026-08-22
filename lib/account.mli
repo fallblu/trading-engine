@@ -67,6 +67,7 @@ val create :
   initial_cash:(string * Scalar.Money.t) list ->
   (t, string) result
 
+val of_initial_portfolio : Initial_portfolio.t -> (t, string) result
 val base_currency : t -> string
 val initial_cash : t -> (string * Scalar.Money.t) list
 val cash_balances : t -> (string * Scalar.Money.t) list

@@ -121,7 +121,7 @@ def response(request: dict[str, object]) -> dict[str, object]:
         response_type = "error"
         payload = {"message": "unsupported request"}
     return {
-        "strategy_protocol_version": "3",
+        "strategy_protocol_version": "4",
         "strategy_sequence": sequence,
         "message_type": response_type,
         "payload": payload,

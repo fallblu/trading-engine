@@ -123,7 +123,7 @@ Running the same scenario bytes produces byte-identical audit lines.
 `Engine.Interactive` stops at each strategy request and exposes the immutable context and event.
 Its `resume` transition accepts typed intents and continues the same pure reducer. The scripted
 runner invokes an in-process callback at that boundary. The external runner serializes it through
-protocol v3. Reducer state never contains a process, clock, pipe, timeout, or file handle.
+protocol v4. Reducer state never contains a process, clock, pipe, timeout, or file handle.
 
 Each strategy callback carries an account valuation built at that reducer boundary. All callbacks
 for a slice use its receipt time, completed bars, and FX vector. A callback response is reduced

@@ -33,7 +33,7 @@ let supported = List.map name builtins
 let completed_bar_v1_contract =
   {
     version = "1";
-    scenario_contract_versions = [ "5"; "4"; "3" ];
+    scenario_contract_versions = [ "6"; "5"; "4"; "3" ];
     required_fields = [ "version"; "participation_bps"; "fixed_fee"; "fee_bps" ];
     supported_order_types = [ "market"; "limit" ];
     data_requirements = [ "completed_ohlcv_bars" ];

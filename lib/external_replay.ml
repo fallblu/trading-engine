@@ -63,6 +63,7 @@ let initialization_of_scenario ~scenario_sha256 (scenario : Scenario.t) =
       run_id = scenario.run_id;
       base_currency = scenario.base_currency;
       initial_cash = scenario.initial_cash;
+      initial_portfolio = scenario.initial_portfolio;
       instruments = scenario.instruments;
       risk = scenario.risk;
       execution_model = scenario.execution_model;
@@ -79,6 +80,7 @@ let initialization_of_header ~scenario_sha256 (header : Scenario.stream_header)
       run_id = header.run_id;
       base_currency = header.base_currency;
       initial_cash = header.initial_cash;
+      initial_portfolio = header.initial_portfolio;
       instruments = header.instruments;
       risk = header.risk;
       execution_model = header.execution_model;
@@ -86,13 +88,21 @@ let initialization_of_header ~scenario_sha256 (header : Scenario.stream_header)
     }
 
 let create_runner ~contract_version ~run_id ~scenario_sha256 ~risk
-    ~execution_model ~execution ~max_internal_events ~initial_cash =
+    ~execution_model ~execution ~max_internal_events ~initial_cash
+    ~initial_portfolio =
   let* config =
     Engine.config ~contract_version ~risk ~execution_model ~execution
       ~max_internal_events
     |> reducer_result
   in
-  Runner.create ~run_id ~scenario_sha256 ~config ~initial_cash |> reducer_result
+  match initial_portfolio with
+  | None ->
+      Runner.create ~run_id ~scenario_sha256 ~config ~initial_cash
+      |> reducer_result
+  | Some initial_portfolio ->
+      Runner.create_with_portfolio ~run_id ~scenario_sha256 ~config
+        ~initial_portfolio
+      |> reducer_result
 
 let append_events journal events =
   match journal with
@@ -170,6 +180,7 @@ let run ?(durability = Artifact_writer.Buffered) ~env ~scenario_sha256
         ~execution_model:scenario.execution_model ~execution:scenario.execution
         ~max_internal_events:scenario.max_internal_events
         ~initial_cash:scenario.initial_cash
+        ~initial_portfolio:scenario.initial_portfolio
     in
     let* journal, transcript =
       create_artifacts ~durability ~journal_path ~transcript_path
@@ -224,6 +235,7 @@ let validate_stream_pass ~scenario_sha256 channel =
           ~execution_model:header.execution_model ~execution:header.execution
           ~max_internal_events:header.max_internal_events
           ~initial_cash:header.initial_cash
+          ~initial_portfolio:header.initial_portfolio
       in
       Ok (runner, initialization_of_header ~scenario_sha256 header, 0L))
     ~step:(fun (runner, initialization, slice_count) item ->
@@ -252,6 +264,7 @@ let replay_stream_pass ~scenario_sha256 ~journal ~session channel =
           ~execution_model:header.execution_model ~execution:header.execution
           ~max_internal_events:header.max_internal_events
           ~initial_cash:header.initial_cash
+          ~initial_portfolio:header.initial_portfolio
       in
       Ok { runner; journal = Some journal; audit_count = 0L })
     ~step:(fun state item ->

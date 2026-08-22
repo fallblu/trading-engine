@@ -1,9 +1,12 @@
-let version = "5"
-let previous_version = "4"
-let legacy_journal_version = "3"
-let supported_versions = [ version; previous_version; legacy_journal_version ]
+let version = "6"
+let previous_version = "5"
+let legacy_journal_version = "4"
+
+let supported_versions =
+  [ version; previous_version; legacy_journal_version; "3" ]
+
 let is_supported version = List.mem version supported_versions
-let strategy_protocol_version = "3"
+let strategy_protocol_version = "4"
 let engine_version = "1.0.0"
 let strings values = `List (List.map (fun value -> `String value) values)
 

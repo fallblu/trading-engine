@@ -324,6 +324,7 @@ let initialization () =
       run_id = run_id "boundary-failure";
       base_currency = "USD";
       initial_cash = [ ("USD", money "10000") ];
+      initial_portfolio = None;
       instruments = [ instrument ];
       risk = risk ~instruments:[ instrument ] ();
       execution_model = T.Execution_model.find "completed_bar_v1" |> ok;

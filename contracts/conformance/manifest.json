@@ -147,6 +147,37 @@
       ]
     },
     {
+      "name": "scenario-v6",
+      "schema": "v6/scenario.schema.json",
+      "version_field": "contract_version",
+      "version": "6",
+      "sources": [
+        {"path": "v6/fixtures/demo.scenario.json", "format": "json"},
+        {"path": "v6/fixtures/fill-clipped.scenario.json", "format": "json"},
+        {"path": "strategy/v4/fixtures/external.scenario.json", "format": "json"}
+      ]
+    },
+    {
+      "name": "scenario-stream-v6",
+      "schema": "v6/scenario-stream.schema.json",
+      "version_field": "contract_version",
+      "version": "6",
+      "sources": [
+        {"path": "v6/fixtures/demo.scenario.jsonl", "format": "jsonl"},
+        {"path": "strategy/v4/fixtures/external.scenario.jsonl", "format": "jsonl"}
+      ]
+    },
+    {
+      "name": "journal-v6",
+      "schema": "v6/journal.schema.json",
+      "version_field": "contract_version",
+      "version": "6",
+      "sources": [
+        {"path": "v6/fixtures/demo.journal.jsonl", "format": "jsonl"},
+        {"path": "v6/fixtures/fill-clipped.journal.jsonl", "format": "jsonl"}
+      ]
+    },
+    {
       "name": "diagnostic-v1",
       "schema": "diagnostic/v1/diagnostic.schema.json",
       "version_field": "diagnostic_version",
@@ -207,6 +238,24 @@
       "version": "3",
       "sources": [
         {"path": "strategy/v3/fixtures/external.strategy.jsonl", "format": "jsonl"}
+      ]
+    },
+    {
+      "name": "strategy-message-v4",
+      "schema": "strategy/v4/message.schema.json",
+      "version_field": "strategy_protocol_version",
+      "version": "4",
+      "sources": [
+        {"path": "strategy/v4/fixtures/external.strategy.jsonl", "format": "jsonl", "extract": ["message"]}
+      ]
+    },
+    {
+      "name": "strategy-transcript-v4",
+      "schema": "strategy/v4/transcript.schema.json",
+      "version_field": "strategy_protocol_version",
+      "version": "4",
+      "sources": [
+        {"path": "strategy/v4/fixtures/external.strategy.jsonl", "format": "jsonl"}
       ]
     }
   ]

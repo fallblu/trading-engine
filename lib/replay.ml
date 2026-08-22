@@ -81,8 +81,13 @@ let run ~scenario_sha256 ?journal_path ?(durability = Artifact_writer.Buffered)
     |> reducer_result
   in
   let* initial =
-    Runner.create ~run_id:scenario.run_id ~scenario_sha256 ~config
-      ~initial_cash:scenario.initial_cash ~strategy_state
+    (match scenario.initial_portfolio with
+      | None ->
+          Runner.create ~run_id:scenario.run_id ~scenario_sha256 ~config
+            ~initial_cash:scenario.initial_cash ~strategy_state
+      | Some initial_portfolio ->
+          Runner.create_with_portfolio ~run_id:scenario.run_id ~scenario_sha256
+            ~config ~initial_portfolio ~strategy_state)
     |> reducer_result
   in
   let journal_result =
@@ -157,8 +162,15 @@ let run_stream_pass ~scenario_sha256 ~journal channel =
           | Error _ as error -> error
           | Ok config -> (
               match
-                Runner.create ~run_id:header.run_id ~scenario_sha256 ~config
-                  ~initial_cash:header.initial_cash ~strategy_state
+                (match header.initial_portfolio with
+                  | None ->
+                      Runner.create ~run_id:header.run_id ~scenario_sha256
+                        ~config ~initial_cash:header.initial_cash
+                        ~strategy_state
+                  | Some initial_portfolio ->
+                      Runner.create_with_portfolio ~run_id:header.run_id
+                        ~scenario_sha256 ~config ~initial_portfolio
+                        ~strategy_state)
                 |> reducer_result
               with
               | Error _ as error -> error
