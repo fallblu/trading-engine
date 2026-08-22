@@ -121,6 +121,19 @@ opam exec -- dune exec trading-engine -- \
   --journal demo.journal.jsonl
 ```
 
+Compose a JSON Lines producer and journal consumer without mixing streams:
+
+```sh
+produce-scenario | trading-engine --input - --input-format jsonl --journal - | consume-journal
+```
+
+Standard input is spooled to a private temporary file, limited to 1 GiB, then hashed and validated
+before replay. Standard output contains only journal records. The engine stages and verifies the
+complete journal before copying it to the pipe; its final `run_completed` record and a zero exit
+status signal completion. Pipe output cannot provide exclusive no-replace publication, atomic
+linking, retained partial files, directory synchronization, or restart-durability guarantees.
+`--durable-artifacts` is therefore invalid with `--journal -`.
+
 Run an external strategy against an empty-schedule scenario:
 
 ```sh
@@ -161,6 +174,13 @@ intent batches, and artifact records. Runtime failures can use the structured
 diagnostic contract identified by each diagnostic's `diagnostic_version`. Human diagnostics remain
 the default. Use `--diagnostic-format json` to receive one JSON diagnostic on standard error with a
 stable code, phase, typed context, and sanitized underlying cause.
+
+Use `--output-format json` for the versioned
+[CLI result contract](contracts/cli/v1/README.md). A success document includes the run identity,
+scenario and artifact hashes, replay counts, normalized current valuation, and artifact locations.
+This option also selects JSON failure diagnostics. For file journals the success document is written
+to standard output. With `--journal -`, the journal owns standard output and the success document
+moves to standard error.
 
 The final and `.partial` journal paths must not already exist. Batch JSON hashes the same complete
 document it parses. JSON Lines input is hashed and validated in a bounded-memory pass before the
@@ -238,6 +258,7 @@ do not provide reducer snapshots or restart recovery.
 - [Contributing](CONTRIBUTING.md)
 - [Architecture](docs/architecture.md)
 - [Diagnostic contract](docs/diagnostics.md)
+- [CLI result contract](contracts/cli/v1/README.md)
 - [Scenario contract](docs/scenario.md)
 - [Contract conformance corpus](contracts/conformance/README.md)
 - [Current contract v16 and conformance fixtures](contracts/v16/README.md)
@@ -246,6 +267,7 @@ do not provide reducer snapshots or restart recovery.
 - [Scenario JSON Schema](contracts/v16/scenario.schema.json)
 - [Scenario stream record JSON Schema](contracts/v16/scenario-stream.schema.json)
 - [Journal record JSON Schema](contracts/v16/journal.schema.json)
+- [CLI result JSON Schema](contracts/cli/v1/result.schema.json)
 - [External strategy protocol v14](contracts/strategy/v14/README.md)
 - [Historical strategy protocol v3](contracts/strategy/v3/README.md)
 - [Historical strategy protocol v2](contracts/strategy/v2/README.md)

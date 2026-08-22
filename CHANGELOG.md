@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add versioned machine-readable CLI success results and JSON failure diagnostics, plus bounded
+  JSON Lines standard-input spooling and unambiguous completed-journal standard-output pipelines.
 - Publish scenario/journal contract v16 and strategy protocol v14 with typed, dimensioned strategy
   metrics while retaining string-only metric compatibility through v15 and protocol v13.
 

@@ -755,3 +755,20 @@
   ../contracts/v9/fixtures/demo.scenario.json)
  (action
   (run python3 %{dep:test_benchmark_replay.py})))
+
+(rule
+ (alias runtest)
+ (deps
+  validate_cli_result.py
+  ../contracts/cli/v1/result.schema.json
+  ../contracts/v16/journal.schema.json
+  ../contracts/v16/fixtures/demo.scenario.json
+  ../bin/main.exe)
+ (action
+  (run
+   python3
+   %{dep:validate_cli_result.py}
+   %{dep:../contracts/cli/v1/result.schema.json}
+   %{dep:../contracts/v16/journal.schema.json}
+   %{dep:../bin/main.exe}
+   %{dep:../contracts/v16/fixtures/demo.scenario.json})))
