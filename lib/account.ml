@@ -31,8 +31,12 @@ type execution_fee_component_attribution = {
 type cash_attribution = {
   currency : string;
   amount : Scalar.Money.t;
+  settled_amount : Scalar.Money.t;
+  unsettled_amount : Scalar.Money.t;
   fx_rate : Scalar.Price.t;
   base_value : Scalar.Money.t;
+  base_settled_value : Scalar.Money.t;
+  base_unsettled_value : Scalar.Money.t;
   interest : Scalar.Money.t;
   base_interest : Scalar.Money.t;
 }
@@ -41,6 +45,8 @@ type position_attribution = {
   instrument_id : Id.Instrument.t;
   quote_currency : string;
   quantity : Scalar.Quantity.t;
+  settled_quantity : Scalar.Quantity.t;
+  unsettled_quantity : Scalar.Quantity.t;
   mark : Scalar.Price.t;
   fx_rate : Scalar.Price.t;
   market_value : Scalar.Money.t;
@@ -66,13 +72,17 @@ type t = {
   base_currency : string;
   initial_cash : Scalar.Money.t Currency_map.t;
   cash : Scalar.Money.t Currency_map.t;
+  settled_cash : Scalar.Money.t Currency_map.t;
   cash_interest : Scalar.Money.t Currency_map.t;
   positions : position Id.Instrument.Map.t;
+  settled_positions : Scalar.Quantity.t Id.Instrument.Map.t;
 }
 
 type valuation = {
   base_currency : string;
   cash : Scalar.Money.t;
+  settled_cash : Scalar.Money.t;
+  unsettled_cash : Scalar.Money.t;
   net_market_value : Scalar.Money.t;
   long_market_value : Scalar.Money.t;
   short_market_value : Scalar.Money.t;
@@ -138,8 +148,10 @@ let create ~base_currency ~initial_cash =
           base_currency;
           initial_cash = balances;
           cash = balances;
+          settled_cash = balances;
           cash_interest = Currency_map.map (fun _ -> Scalar.Money.zero) balances;
           positions = Id.Instrument.Map.empty;
+          settled_positions = Id.Instrument.Map.empty;
         }
 
 let of_initial_portfolio (initial : Initial_portfolio.t) =
@@ -170,14 +182,22 @@ let of_initial_portfolio (initial : Initial_portfolio.t) =
       base_currency = initial.base_currency;
       initial_cash = cash;
       cash;
+      settled_cash = cash;
       cash_interest = Currency_map.map (fun _ -> Scalar.Money.zero) cash;
       positions;
+      settled_positions =
+        Id.Instrument.Map.map
+          (fun (value : position) -> value.quantity)
+          positions;
     }
 
 let base_currency (state : t) = state.base_currency
 let initial_cash (state : t) = Currency_map.bindings state.initial_cash
 let cash_balances (state : t) = Currency_map.bindings state.cash
 let cash (state : t) currency = Currency_map.find_opt currency state.cash
+
+let settled_cash (state : t) currency =
+  Currency_map.find_opt currency state.settled_cash
 
 let position (state : t) instrument_id =
   Option.value
@@ -186,6 +206,11 @@ let position (state : t) instrument_id =
 
 let position_quantity (state : t) instrument_id =
   (position state instrument_id).quantity
+
+let settled_position_quantity (state : t) instrument_id =
+  Option.value
+    (Id.Instrument.Map.find_opt instrument_id state.settled_positions)
+    ~default:Scalar.Quantity.zero
 
 let positions (state : t) = Id.Instrument.Map.bindings state.positions
 
@@ -211,6 +236,27 @@ let adjust_cash (state : t) currency delta =
   | Some current ->
       let* amount = Scalar.Money.add current delta in
       Ok { state with cash = Currency_map.add currency amount state.cash }
+
+let adjust_settled_cash (state : t) currency delta =
+  match Currency_map.find_opt currency state.settled_cash with
+  | None -> Error ("missing settled cash ledger for currency " ^ currency)
+  | Some current ->
+      let* amount = Scalar.Money.add current delta in
+      Ok
+        {
+          state with
+          settled_cash = Currency_map.add currency amount state.settled_cash;
+        }
+
+let adjust_settled_position (state : t) instrument_id delta =
+  let current = settled_position_quantity state instrument_id in
+  let* quantity = Scalar.Quantity.add current delta in
+  let settled_positions =
+    if Scalar.Quantity.is_zero quantity then
+      Id.Instrument.Map.remove instrument_id state.settled_positions
+    else Id.Instrument.Map.add instrument_id quantity state.settled_positions
+  in
+  Ok { state with settled_positions }
 
 let add_fee_component (components : execution_fee_component list)
     (component : Fee_schedule.calculated_component) =
@@ -346,7 +392,7 @@ let apply_close_short (state : t) fill (current : position) projected =
       positions = update_position state.positions fill.instrument_id updated;
     }
 
-let apply_fill (state : t) fill =
+let apply_unsettled_fill (state : t) fill =
   let current = position state fill.Fill.instrument_id in
   match fill.side with
   | Order.Buy ->
@@ -361,6 +407,30 @@ let apply_fill (state : t) fill =
         apply_close_long state fill current projected
       else apply_open_short state fill current projected
 
+let settlement_movements (fill : Fill.t) =
+  match fill.side with
+  | Order.Buy ->
+      let* debit = Scalar.Money.add fill.notional fill.fee in
+      let* cash = Scalar.Money.negate debit in
+      Ok (cash, fill.quantity)
+  | Order.Sell ->
+      let* cash = Scalar.Money.subtract fill.notional fill.fee in
+      let* position = Scalar.Quantity.negate fill.quantity in
+      Ok (cash, position)
+
+let apply_settlement (state : t) (instruction : Settlement.instruction) =
+  let* state =
+    adjust_settled_cash state instruction.currency instruction.cash_movement
+  in
+  adjust_settled_position state instruction.instrument_id
+    instruction.position_movement
+
+let apply_fill (state : t) fill =
+  let* state = apply_unsettled_fill state fill in
+  let* cash_movement, position_movement = settlement_movements fill in
+  let* state = adjust_settled_cash state fill.quote_currency cash_movement in
+  adjust_settled_position state fill.instrument_id position_movement
+
 let apply_split (state : t) ~instrument_id ~numerator ~denominator =
   let current = position state instrument_id in
   if Scalar.Quantity.is_zero current.quantity then Ok state
@@ -371,7 +441,16 @@ let apply_split (state : t) ~instrument_id ~numerator ~denominator =
     let positions =
       update_position state.positions instrument_id { current with quantity }
     in
-    Ok { state with positions }
+    let settled = settled_position_quantity state instrument_id in
+    let* settled =
+      Scalar.Quantity.scale_ratio_exact settled ~numerator ~denominator
+    in
+    let settled_positions =
+      if Scalar.Quantity.is_zero settled then
+        Id.Instrument.Map.remove instrument_id state.settled_positions
+      else Id.Instrument.Map.add instrument_id settled state.settled_positions
+    in
+    Ok { state with positions; settled_positions }
 
 let apply_cash_dividend (state : t) ~instrument_id ~quote_currency
     ~amount_per_unit =
@@ -380,6 +459,7 @@ let apply_cash_dividend (state : t) ~instrument_id ~quote_currency
   else
     let* amount = Scalar.Money.for_quantity amount_per_unit current.quantity in
     let* state = adjust_cash state quote_currency amount in
+    let* state = adjust_settled_cash state quote_currency amount in
     let* realized_pnl = Scalar.Money.add current.realized_pnl amount in
     let* dividend_pnl = Scalar.Money.add current.dividend_pnl amount in
     let updated = { current with realized_pnl; dividend_pnl } in
@@ -398,6 +478,7 @@ let apply_borrow_fee (state : t) ~instrument_id ~quote_currency ~fee =
   else
     let* cash_delta = Scalar.Money.negate fee in
     let* state = adjust_cash state quote_currency cash_delta in
+    let* state = adjust_settled_cash state quote_currency cash_delta in
     let* realized_pnl = Scalar.Money.add current.realized_pnl cash_delta in
     let* borrow_fees = Scalar.Money.add current.borrow_fees fee in
     let updated = { current with realized_pnl; borrow_fees } in
@@ -411,6 +492,7 @@ let apply_cash_interest (state : t) ~currency ~interest =
   if Scalar.Money.equal interest Scalar.Money.zero then Ok state
   else
     let* state = adjust_cash state currency interest in
+    let* state = adjust_settled_cash state currency interest in
     let current =
       Option.value
         (Currency_map.find_opt currency state.cash_interest)
@@ -452,13 +534,37 @@ let value (state : t) ~instruments ~marks ~fx_rates =
   let cash_attribution (currency, amount) =
     let* fx_rate = fx currency in
     let* base_value = Scalar.Money.convert amount ~rate:fx_rate in
+    let settled_amount =
+      Option.value
+        (Currency_map.find_opt currency state.settled_cash)
+        ~default:Scalar.Money.zero
+    in
+    let* unsettled_amount = Scalar.Money.subtract amount settled_amount in
+    let* base_settled_value =
+      Scalar.Money.convert settled_amount ~rate:fx_rate
+    in
+    let* base_unsettled_value =
+      Scalar.Money.convert unsettled_amount ~rate:fx_rate
+    in
     let interest =
       Option.value
         (Currency_map.find_opt currency state.cash_interest)
         ~default:Scalar.Money.zero
     in
     let* base_interest = Scalar.Money.convert interest ~rate:fx_rate in
-    Ok { currency; amount; fx_rate; base_value; interest; base_interest }
+    Ok
+      {
+        currency;
+        amount;
+        settled_amount;
+        unsettled_amount;
+        fx_rate;
+        base_value;
+        base_settled_value;
+        base_unsettled_value;
+        interest;
+        base_interest;
+      }
   in
   let* cash_balances =
     Currency_map.bindings state.cash
@@ -473,6 +579,10 @@ let value (state : t) ~instruments ~marks ~fx_rates =
   let position_attribution instrument =
     let instrument_id = instrument.Instrument.id in
     let current = position state instrument_id in
+    let settled_quantity = settled_position_quantity state instrument_id in
+    let* unsettled_quantity =
+      Scalar.Quantity.subtract current.quantity settled_quantity
+    in
     let* mark =
       match Id.Instrument.Map.find_opt instrument_id mark_map with
       | Some value -> Ok value
@@ -525,6 +635,8 @@ let value (state : t) ~instruments ~marks ~fx_rates =
         instrument_id;
         quote_currency = instrument.quote_currency;
         quantity = current.quantity;
+        settled_quantity;
+        unsettled_quantity;
         mark;
         fx_rate;
         market_value;
@@ -612,6 +724,14 @@ let value (state : t) ~instruments ~marks ~fx_rates =
         add total item.base_value)
       (Ok Scalar.Money.zero) cash_balances
   in
+  let* settled_cash =
+    List.fold_left
+      (fun result item ->
+        let* total = result in
+        add total item.base_settled_value)
+      (Ok Scalar.Money.zero) cash_balances
+  in
+  let* unsettled_cash = Scalar.Money.subtract cash settled_cash in
   let* cash_interest =
     List.fold_left
       (fun result item ->
@@ -721,6 +841,8 @@ let value (state : t) ~instruments ~marks ~fx_rates =
     {
       base_currency = state.base_currency;
       cash;
+      settled_cash;
+      unsettled_cash;
       net_market_value;
       long_market_value;
       short_market_value;

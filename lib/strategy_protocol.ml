@@ -15,6 +15,7 @@ type initialization = {
   execution_model : Execution_model.t;
   execution : Execution.t;
   financing : Financing.policy option;
+  settlement : Settlement.policy option;
 }
 
 type identity = { name : Id.Strategy.t; version : string option }
@@ -102,7 +103,7 @@ let group_kind_to_string = function
 let nullable render = Option.fold ~none:`Null ~some:render
 
 let modern_protocol protocol_version =
-  List.mem protocol_version [ "8"; "7"; "6"; "5" ]
+  List.mem protocol_version [ "9"; "8"; "7"; "6"; "5" ]
 
 let financing_to_yojson policy =
   `Assoc
@@ -119,6 +120,36 @@ let financing_to_yojson policy =
         string (Financing.locate_policy_to_string policy.locate_policy) );
       ( "recall_policy",
         string (Financing.recall_policy_to_string policy.recall_policy) );
+    ]
+
+let settlement_to_yojson (policy : Settlement.policy) =
+  let calendar (calendar : Settlement.calendar) =
+    `Assoc
+      [
+        ("calendar_id", string calendar.calendar_id);
+        ("version", string calendar.version);
+        ("business_dates", `List (List.map string calendar.business_dates));
+      ]
+  in
+  let rule (rule : Settlement.rule) =
+    `Assoc
+      [
+        ("instrument_id", instrument_id rule.instrument_id);
+        ("calendar_id", string rule.calendar_id);
+        ("lag_business_days", `Int rule.lag_business_days);
+      ]
+  in
+  `Assoc
+    [
+      ( "cash_buying_power",
+        string (Settlement.cash_buying_power_to_string policy.cash_buying_power)
+      );
+      ( "position_availability",
+        string
+          (Settlement.position_availability_to_string
+             policy.position_availability) );
+      ("calendars", `List (List.map calendar policy.calendars));
+      ("rules", `List (List.map rule policy.rules));
     ]
 
 let instrument_policy_to_yojson (policy : Risk.instrument_policy) =
@@ -221,7 +252,7 @@ let execution_to_yojson ~protocol_version model execution =
                (Fee_schedule.components schedule)) );
       ]
   in
-  if List.mem protocol_version [ "8"; "7" ] then
+  if List.mem protocol_version [ "9"; "8"; "7" ] then
     `Assoc
       [
         ("model", string (Execution_model.name model));
@@ -260,6 +291,7 @@ let execution_to_yojson ~protocol_version model execution =
 
 let protocol_version initialization =
   match initialization.scenario_contract_version with
+  | "11" -> "9"
   | "10" -> "8"
   | "9" -> "7"
   | "8" -> "6"
@@ -304,7 +336,7 @@ let initialize_message ~sequence:message_sequence initialization =
     ]
   in
   let fields =
-    if List.mem protocol_version [ "8"; "7"; "6" ] then
+    if List.mem protocol_version [ "9"; "8"; "7"; "6" ] then
       let initial_portfolio =
         Option.fold ~none:`Null ~some:Codec.initial_portfolio_to_yojson
           initialization.initial_portfolio
@@ -317,11 +349,18 @@ let initialize_message ~sequence:message_sequence initialization =
             ( "venue_calendars",
               `List (List.map venue_calendar_to_yojson venue_calendars) );
           ];
-          (if String.equal protocol_version "8" then
+          (if List.mem protocol_version [ "9"; "8" ] then
              [
                ( "financing",
                  Option.fold ~none:`Null ~some:financing_to_yojson
                    initialization.financing );
+             ]
+           else []);
+          (if String.equal protocol_version "9" then
+             [
+               ( "settlement",
+                 Option.fold ~none:`Null ~some:settlement_to_yojson
+                   initialization.settlement );
              ]
            else []);
           List.drop 6 fields;
@@ -351,23 +390,39 @@ let cash_attribution_to_yojson ~protocol_version
        ("fx_rate", price balance.fx_rate);
        ("base_value", money balance.base_value);
      ]
+    @ (if List.mem protocol_version [ "9"; "8" ] then
+         [
+           ("interest", money balance.interest);
+           ("base_interest", money balance.base_interest);
+         ]
+       else [])
     @
-    if String.equal protocol_version "8" then
+    if String.equal protocol_version "9" then
       [
-        ("interest", money balance.interest);
-        ("base_interest", money balance.base_interest);
+        ("settled_amount", money balance.settled_amount);
+        ("unsettled_amount", money balance.unsettled_amount);
+        ("base_settled_value", money balance.base_settled_value);
+        ("base_unsettled_value", money balance.base_unsettled_value);
       ]
     else [])
 
-let marked_position_to_yojson (position : Strategy.marked_position) =
+let marked_position_to_yojson ~protocol_version
+    (position : Strategy.marked_position) =
   `Assoc
-    [
-      ("instrument_id", instrument_id position.instrument_id);
-      ("quantity", quantity position.quantity);
-      ("mark", price position.mark);
-      ("base_market_value", money position.base_market_value);
-      ("weight", Option.fold ~none:`Null ~some:weight position.weight);
-    ]
+    ([
+       ("instrument_id", instrument_id position.instrument_id);
+       ("quantity", quantity position.quantity);
+       ("mark", price position.mark);
+       ("base_market_value", money position.base_market_value);
+       ("weight", Option.fold ~none:`Null ~some:weight position.weight);
+     ]
+    @
+    if String.equal protocol_version "9" then
+      [
+        ("settled_quantity", quantity position.settled_quantity);
+        ("unsettled_quantity", quantity position.unsettled_quantity);
+      ]
+    else [])
 
 let group_exposure_to_yojson (exposure : Risk.group_exposure) =
   `Assoc
@@ -423,7 +478,9 @@ let context_to_yojson ~protocol_version context =
           (List.map
              (cash_attribution_to_yojson ~protocol_version)
              cash_balances) );
-      ("positions", `List (List.map marked_position_to_yojson positions));
+      ( "positions",
+        `List (List.map (marked_position_to_yojson ~protocol_version) positions)
+      );
     ]
   in
   let portfolio_fields =
@@ -443,7 +500,7 @@ let context_to_yojson ~protocol_version context =
       ( "working_orders",
         `List
           (List.map
-             (if List.mem protocol_version [ "8"; "7"; "6" ] then
+             (if List.mem protocol_version [ "9"; "8"; "7"; "6" ] then
                 Codec.order_to_yojson_v8
               else Codec.order_to_yojson)
              working_orders) );
@@ -456,7 +513,9 @@ let event_to_yojson ~protocol_version = function
         [
           ("type", string "market_slice_closed");
           ( "market_slice",
-            if String.equal protocol_version "8" then
+            if String.equal protocol_version "9" then
+              Codec.market_slice_to_yojson_v11 market_slice
+            else if String.equal protocol_version "8" then
               Codec.market_slice_to_yojson_v10 market_slice
             else Codec.market_slice_to_yojson market_slice );
         ]
@@ -465,7 +524,7 @@ let event_to_yojson ~protocol_version = function
         [
           ("type", string "fill_received");
           ( "fill",
-            if List.mem protocol_version [ "8"; "7" ] then
+            if List.mem protocol_version [ "9"; "8"; "7" ] then
               Codec.fill_to_yojson_v9 fill
             else Codec.fill_to_yojson fill );
         ]
@@ -474,7 +533,7 @@ let event_to_yojson ~protocol_version = function
         [
           ("type", string "order_updated");
           ( "order",
-            if List.mem protocol_version [ "8"; "7"; "6" ] then
+            if List.mem protocol_version [ "9"; "8"; "7"; "6" ] then
               Codec.order_to_yojson_v8 order
             else Codec.order_to_yojson order );
         ]
@@ -562,7 +621,8 @@ let parse_intents_payload ~protocol_version json =
           let* intent =
             Scenario.intent_of_yojson
               ~contract_version:
-                (if String.equal protocol_version "8" then "10"
+                (if String.equal protocol_version "9" then "11"
+                 else if String.equal protocol_version "8" then "10"
                  else if String.equal protocol_version "7" then "9"
                  else if String.equal protocol_version "6" then "8"
                  else "7")

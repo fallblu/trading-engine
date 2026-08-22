@@ -32,8 +32,12 @@ type position = private {
 type cash_attribution = private {
   currency : string;
   amount : Scalar.Money.t;
+  settled_amount : Scalar.Money.t;
+  unsettled_amount : Scalar.Money.t;
   fx_rate : Scalar.Price.t;
   base_value : Scalar.Money.t;
+  base_settled_value : Scalar.Money.t;
+  base_unsettled_value : Scalar.Money.t;
   interest : Scalar.Money.t;
   base_interest : Scalar.Money.t;
 }
@@ -42,6 +46,8 @@ type position_attribution = private {
   instrument_id : Id.Instrument.t;
   quote_currency : string;
   quantity : Scalar.Quantity.t;
+  settled_quantity : Scalar.Quantity.t;
+  unsettled_quantity : Scalar.Quantity.t;
   mark : Scalar.Price.t;
   fx_rate : Scalar.Price.t;
   market_value : Scalar.Money.t;
@@ -68,6 +74,8 @@ type t
 type valuation = private {
   base_currency : string;
   cash : Scalar.Money.t;
+  settled_cash : Scalar.Money.t;
+  unsettled_cash : Scalar.Money.t;
   net_market_value : Scalar.Money.t;
   long_market_value : Scalar.Money.t;
   short_market_value : Scalar.Money.t;
@@ -96,10 +104,14 @@ val base_currency : t -> string
 val initial_cash : t -> (string * Scalar.Money.t) list
 val cash_balances : t -> (string * Scalar.Money.t) list
 val cash : t -> string -> Scalar.Money.t option
+val settled_cash : t -> string -> Scalar.Money.t option
 val position : t -> Id.Instrument.t -> position
 val position_quantity : t -> Id.Instrument.t -> Scalar.Quantity.t
+val settled_position_quantity : t -> Id.Instrument.t -> Scalar.Quantity.t
 val positions : t -> (Id.Instrument.t * position) list
 val apply_fill : t -> Fill.t -> (t, string) result
+val apply_unsettled_fill : t -> Fill.t -> (t, string) result
+val apply_settlement : t -> Settlement.instruction -> (t, string) result
 
 val apply_split :
   t ->

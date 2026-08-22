@@ -17,6 +17,7 @@ type initialization = {
   execution_model : Execution_model.t;
   execution : Execution.t;
   financing : Financing.policy option;
+  settlement : Settlement.policy option;
 }
 
 type identity = private { name : Id.Strategy.t; version : string option }

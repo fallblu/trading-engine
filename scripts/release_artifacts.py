@@ -376,8 +376,8 @@ def verify_release(
         (
             "bin/trading-engine",
             "lib/trading_engine/opam",
-            "share/trading_engine/contracts/v10/scenario.schema.json",
-            "share/trading_engine/contracts/v10/fixtures/demo.scenario.json",
+            "share/trading_engine/contracts/v11/scenario.schema.json",
+            "share/trading_engine/contracts/v11/fixtures/demo.scenario.json",
             "doc/trading_engine/README.md",
         ),
         epoch,
@@ -388,7 +388,7 @@ def verify_release(
         (
             "trading_engine.opam",
             "contracts/v1/scenario.schema.json",
-            "contracts/v10/fixtures/demo.scenario.json",
+            "contracts/v11/fixtures/demo.scenario.json",
             "docs/architecture.md",
             ".github/workflows/release-candidate.yml",
         ),
@@ -400,8 +400,8 @@ def verify_release(
         (
             "contracts/conformance/manifest.json",
             "contracts/v1/scenario.schema.json",
-            "contracts/v10/fixtures/demo.scenario.json",
-            "contracts/strategy/v8/message.schema.json",
+            "contracts/v11/fixtures/demo.scenario.json",
+            "contracts/strategy/v9/message.schema.json",
         ),
         epoch,
     )
@@ -412,7 +412,7 @@ def verify_release(
             "index.html",
             "docs/architecture/index.html",
             "contracts/v1/index.html",
-            "contracts/v10/scenario.schema.json",
+            "contracts/v11/scenario.schema.json",
             "api/trading_engine/Trading_engine/index.html",
         ),
         epoch,

@@ -331,6 +331,7 @@ let initialization () =
       execution_model = T.Execution_model.find "completed_bar_v1" |> ok;
       execution = execution ();
       financing = None;
+      settlement = None;
     }
 
 let process_stages =
