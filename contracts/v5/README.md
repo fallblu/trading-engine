@@ -23,3 +23,8 @@ instrument coverage, unordered or overlapping phases, holidays with phases, and 
 without a regular phase.
 
 Every v5 scenario, stream record, and journal record carries `"contract_version": "5"`.
+
+The v5 `execution` object also namespaces strict configuration beneath the stable model name.
+`completed_bar_v1` configuration version `"1"` requires participation basis points, fixed fee,
+and fee basis points. Runtime capabilities describe its required fields, supported market and limit
+orders, completed-OHLCV data requirement, and numeric limits.

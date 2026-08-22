@@ -90,6 +90,46 @@ let capabilities_publish_versioned_resource_limits () =
     "resource diagnostic code" "resource.limit"
     (T.Diagnostic.code_to_string T.Diagnostic.Resource_limit)
 
+let capabilities_describe_execution_contracts () =
+  let model =
+    match
+      T.Contract.capabilities_to_yojson () |> field "execution_model_contracts"
+    with
+    | `List [ model ] -> model
+    | _ -> Alcotest.fail "expected one execution-model capability"
+  in
+  Alcotest.(check string)
+    "stable model name" "completed_bar_v1"
+    (match field "name" model with
+    | `String value -> value
+    | _ -> Alcotest.fail "expected execution-model name");
+  let strings name =
+    match field name model with
+    | `List values ->
+        List.map
+          (function
+            | `String value -> value
+            | _ -> Alcotest.fail (name ^ " must contain strings"))
+          values
+    | _ -> Alcotest.fail (name ^ " must be an array")
+  in
+  Alcotest.(check (list string))
+    "configuration versions" [ "1" ]
+    (strings "configuration_versions");
+  Alcotest.(check (list string))
+    "scenario contracts" [ "5"; "4"; "3" ]
+    (strings "scenario_contract_versions");
+  Alcotest.(check (list string))
+    "required fields"
+    [ "version"; "participation_bps"; "fixed_fee"; "fee_bps" ]
+    (strings "required_fields");
+  Alcotest.(check (list string))
+    "order types" [ "market"; "limit" ]
+    (strings "supported_order_types");
+  Alcotest.(check (list string))
+    "market data" [ "completed_ohlcv_bars" ]
+    (strings "data_requirements")
+
 let tests =
   [
     Alcotest.test_case "renders stable machine context" `Quick
@@ -98,4 +138,6 @@ let tests =
       preserves_sanitized_exception;
     Alcotest.test_case "versioned resource capabilities" `Quick
       capabilities_publish_versioned_resource_limits;
+    Alcotest.test_case "execution-model capabilities" `Quick
+      capabilities_describe_execution_contracts;
   ]

@@ -162,9 +162,18 @@
     "execution": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["model", "participation_bps", "fixed_fee", "fee_bps"],
+      "required": ["model", "configuration"],
       "properties": {
         "model": { "const": "completed_bar_v1" },
+        "configuration": { "$ref": "#/$defs/completedBarV1Configuration" }
+      }
+    },
+    "completedBarV1Configuration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "participation_bps", "fixed_fee", "fee_bps"],
+      "properties": {
+        "version": { "const": "1" },
         "participation_bps": { "type": "integer", "minimum": 0, "maximum": 10000 },
         "fixed_fee": { "$ref": "#/$defs/unsignedDecimal" },
         "fee_bps": { "type": "integer", "minimum": 0, "maximum": 10000 }

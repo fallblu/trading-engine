@@ -94,13 +94,17 @@ annualized `short_borrow_bps`. Initial margin cannot be below maintenance margin
 quantity limit must cover at least one lot for every instrument. Orders that increase gross
 exposure must satisfy every applicable limit; exposure-reducing orders remain admissible.
 
-Execution contains:
+Contract v5 execution contains a stable `model` and a model-owned `configuration`. For
+`completed_bar_v1`, configuration version `"1"` contains:
 
-- `model`, the compiled execution module selected by contract name; v5 supports
-  `completed_bar_v1`
+- `version`, the strict model-configuration contract version
 - `participation_bps`, from 0 through 10,000
 - `fixed_fee`, a nonnegative money string
 - `fee_bps`, from 0 through 10,000
+
+The engine advertises each model's scenario and configuration versions, required fields, supported
+order types, data requirements, and limits through `--capabilities.execution_model_contracts`. The
+v3 and v4 scenario contracts preserve their flat execution object unchanged.
 
 ## Schedule and intents
 
