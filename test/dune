@@ -39,6 +39,19 @@
   eio
   eio_main))
 
+(executable
+ (name fuzz_protocol)
+ (modules fuzz_protocol)
+ (libraries trading_engine yojson unix))
+
+(rule
+ (alias runtest)
+ (deps
+  fuzz_protocol.exe
+  (source_tree ../contracts))
+ (action
+  (run ./fuzz_protocol.exe --seed 20260821 --cases 256)))
+
 (cram
  (deps
   ../bin/main.exe
