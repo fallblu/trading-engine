@@ -1,0 +1,49 @@
+#!/bin/sh
+
+set -eu
+
+repository_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+local_switch="$repository_root/_opam"
+schema_python="$repository_root/.venv-schema/bin/python"
+
+fail() {
+  printf '%s\n' "error: $1" >&2
+  printf '%s\n' "run 'make bootstrap' to create or update the local environment" >&2
+  exit 1
+}
+
+command -v opam >/dev/null 2>&1 || fail "opam is not installed"
+command -v uv >/dev/null 2>&1 || fail "uv is not installed"
+
+if [ ! -f "$local_switch/.opam-switch/switch-config" ]; then
+  fail "the repository-local opam switch is missing"
+fi
+
+actual_switch=$(opam var prefix --switch "$repository_root" 2>/dev/null) ||
+  fail "opam cannot read the repository-local switch"
+if [ "$actual_switch" != "$local_switch" ]; then
+  fail "opam selected '$actual_switch' instead of '$local_switch'"
+fi
+
+if ! missing_dependencies=$(
+  opam install "$repository_root" \
+    --deps-only \
+    --with-test \
+    --with-doc \
+    --locked \
+    --check \
+    --switch "$repository_root" 2>&1
+); then
+  printf '%s\n' "$missing_dependencies" >&2
+  fail "locked OCaml development dependencies are missing"
+fi
+
+if [ ! -x "$schema_python" ]; then
+  fail "the repository-local schema environment is missing"
+fi
+
+if ! "$schema_python" "$repository_root/scripts/check-schema-environment.py"; then
+  fail "the schema environment does not match requirements/schema.lock"
+fi
+
+printf '%s\n' "Development environment is ready."
