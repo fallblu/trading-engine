@@ -820,6 +820,85 @@
       "schema_expectation": "accept",
       "runtime_expectation": "accept",
       "rule": "structural"
+    },
+    {
+      "name": "scenario-v11-valid",
+      "artifact": "scenario-v11",
+      "kind": "scenario",
+      "source": "v11/fixtures/demo.scenario.json",
+      "mutations": [],
+      "schema_expectation": "accept",
+      "runtime_expectation": "accept",
+      "rule": "structural"
+    },
+    {
+      "name": "scenario-stream-v11-valid",
+      "artifact": "scenario-stream-v11",
+      "kind": "scenario_stream",
+      "source": "v11/fixtures/demo.scenario.jsonl",
+      "mutations": [],
+      "schema_expectation": "accept",
+      "runtime_expectation": "accept",
+      "rule": "structural"
+    },
+    {
+      "name": "strategy-ready-valid-v9",
+      "artifact": "strategy-message-v9",
+      "kind": "strategy_response",
+      "source": "strategy/v9/fixtures/external.strategy.jsonl",
+      "record": 2,
+      "extract": ["message"],
+      "expected_sequence": "1",
+      "protocol_version": "9",
+      "mutations": [],
+      "schema_expectation": "accept",
+      "runtime_expectation": "accept",
+      "rule": "structural"
+    },
+    {
+      "name": "strategy-intents-valid-v9",
+      "artifact": "strategy-message-v9",
+      "kind": "strategy_response",
+      "source": "strategy/v9/fixtures/external.strategy.jsonl",
+      "record": 4,
+      "extract": ["message"],
+      "expected_sequence": "2",
+      "protocol_version": "9",
+      "mutations": [],
+      "schema_expectation": "accept",
+      "runtime_expectation": "accept",
+      "rule": "structural"
+    },
+    {
+      "name": "strategy-stopped-valid-v9",
+      "artifact": "strategy-message-v9",
+      "kind": "strategy_response",
+      "source": "strategy/v9/fixtures/external.strategy.jsonl",
+      "record": 14,
+      "extract": ["message"],
+      "expected_sequence": "7",
+      "protocol_version": "9",
+      "mutations": [],
+      "schema_expectation": "accept",
+      "runtime_expectation": "accept",
+      "rule": "structural"
+    },
+    {
+      "name": "strategy-error-valid-v9",
+      "artifact": "strategy-message-v9",
+      "kind": "strategy_response",
+      "source": "strategy/v9/fixtures/external.strategy.jsonl",
+      "record": 14,
+      "extract": ["message"],
+      "expected_sequence": "7",
+      "protocol_version": "9",
+      "mutations": [
+        { "op": "replace", "path": ["message_type"], "value": "error" },
+        { "op": "replace", "path": ["payload"], "value": { "message": "fixture failure" } }
+      ],
+      "schema_expectation": "accept",
+      "runtime_expectation": "accept",
+      "rule": "structural"
     }
   ],
   "schema_only_cases": [
@@ -1084,6 +1163,33 @@
       "mutations": [],
       "schema_expectation": "accept",
       "source": "strategy/v8/fixtures/external.strategy.jsonl"
+    },
+    {
+      "name": "strategy-v9-rejected-response-branch",
+      "artifact": "strategy-transcript-v9",
+      "instance": {
+        "strategy_diagnostic_version": "1",
+        "transcript_sequence": "2",
+        "record_type": "rejected_strategy_response",
+        "expected_strategy_sequence": "1",
+        "diagnostic": {
+          "diagnostic_version": "1",
+          "code": "strategy.protocol",
+          "phase": "strategy",
+          "message": "strategy initialization: invalid strategy response JSON",
+          "context": { "json_path": "$", "sequence": "1" },
+          "cause": null
+        },
+        "evidence": {
+          "encoding": "hex",
+          "prefix": "7b",
+          "observed_bytes": 1,
+          "truncated": false
+        }
+      },
+      "mutations": [],
+      "schema_expectation": "accept",
+      "source": "strategy/v9/fixtures/external.strategy.jsonl"
     }
   ]
 }

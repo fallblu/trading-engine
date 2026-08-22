@@ -5,6 +5,8 @@ type context
 type marked_position = private {
   instrument_id : Id.Instrument.t;
   quantity : Scalar.Quantity.t;
+  settled_quantity : Scalar.Quantity.t;
+  unsettled_quantity : Scalar.Quantity.t;
   mark : Scalar.Price.t;
   base_market_value : Scalar.Money.t;
   weight : Scalar.Weight.t option;

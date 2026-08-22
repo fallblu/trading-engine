@@ -60,7 +60,7 @@ scenario slices and scheduled or external intents
   fee-component attribution
 - Deterministic event IDs, ordered causal references, and order-creation attribution
 - Contract-selected compiled execution modules with versioned model-owned configuration and
-  capability descriptors; v10 currently exposes `completed_bar_v1` configuration v2
+  capability descriptors; v11 currently exposes `completed_bar_v1` configuration v2
 - Strict batch JSON and bounded-memory JSON Lines scenario parsing with JSON Schemas
 - Versioned synchronous JSON Lines strategy processes with per-request timeouts and strict
   lifecycle supervision
@@ -90,7 +90,7 @@ Validate the included scenario with an in-memory replay:
 
 ```sh
 opam exec -- dune exec trading-engine -- \
-  --input contracts/v10/fixtures/demo.scenario.json \
+  --input contracts/v11/fixtures/demo.scenario.json \
   --validate-only
 ```
 
@@ -98,7 +98,7 @@ Run it and create a journal:
 
 ```sh
 opam exec -- dune exec trading-engine -- \
-  --input contracts/v10/fixtures/demo.scenario.json \
+  --input contracts/v11/fixtures/demo.scenario.json \
   --journal demo.journal.jsonl
 ```
 
@@ -106,7 +106,7 @@ For larger histories, validate and replay the equivalent stream one slice at a t
 
 ```sh
 opam exec -- dune exec trading-engine -- \
-  --input contracts/v10/fixtures/demo.scenario.jsonl \
+  --input contracts/v11/fixtures/demo.scenario.jsonl \
   --input-format jsonl \
   --journal demo.journal.jsonl
 ```
@@ -115,7 +115,7 @@ Run an external strategy against an empty-schedule scenario:
 
 ```sh
 opam exec -- dune exec trading-engine -- \
-  --input contracts/strategy/v8/fixtures/external.scenario.json \
+  --input contracts/strategy/v9/fixtures/external.scenario.json \
   --journal external.journal.jsonl \
   --strategy-executable ./my-strategy \
   --strategy-arg=config.toml \
@@ -226,19 +226,19 @@ do not provide reducer snapshots or restart recovery.
 - [Diagnostic contract](docs/diagnostics.md)
 - [Scenario contract](docs/scenario.md)
 - [Contract conformance corpus](contracts/conformance/README.md)
-- [Current contract v10 and conformance fixtures](contracts/v10/README.md)
+- [Current contract v11 and conformance fixtures](contracts/v11/README.md)
 - [Frozen contract v2](contracts/v2/README.md)
 - [Historical contract v1](contracts/v1/README.md)
-- [Scenario JSON Schema](contracts/v10/scenario.schema.json)
-- [Scenario stream record JSON Schema](contracts/v10/scenario-stream.schema.json)
-- [Journal record JSON Schema](contracts/v10/journal.schema.json)
-- [External strategy protocol v8](contracts/strategy/v8/README.md)
+- [Scenario JSON Schema](contracts/v11/scenario.schema.json)
+- [Scenario stream record JSON Schema](contracts/v11/scenario-stream.schema.json)
+- [Journal record JSON Schema](contracts/v11/journal.schema.json)
+- [External strategy protocol v9](contracts/strategy/v9/README.md)
 - [Historical strategy protocol v3](contracts/strategy/v3/README.md)
 - [Historical strategy protocol v2](contracts/strategy/v2/README.md)
 - [Historical strategy protocol v1](contracts/strategy/v1/README.md)
 - [Persistra compatibility](docs/persistra.md)
-- [Strategy message JSON Schema](contracts/strategy/v8/message.schema.json)
-- [Strategy transcript JSON Schema](contracts/strategy/v8/transcript.schema.json)
+- [Strategy message JSON Schema](contracts/strategy/v9/message.schema.json)
+- [Strategy transcript JSON Schema](contracts/strategy/v9/transcript.schema.json)
 - [Execution model](docs/execution-model.md)
 - [OCaml coverage](docs/coverage.md)
 - [Continuous integration and portability matrix](docs/continuous-integration.md)

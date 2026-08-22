@@ -4,8 +4,8 @@ A replay scenario uses either one strict JSON object or a strict JSON Lines stre
 weights, quantities, money, and sequences are canonical JSON strings. Counts and basis points are
 JSON integers. Unknown, missing, duplicate, noncanonical, and non-finite values fail parsing.
 
-Use [the v10 demo](../contracts/v10/fixtures/demo.scenario.json) as the canonical complete example.
-The [scenario JSON Schema](../contracts/v10/scenario.schema.json) provides structural validation.
+Use [the v11 demo](../contracts/v11/fixtures/demo.scenario.json) as the canonical complete example.
+The [scenario JSON Schema](../contracts/v11/scenario.schema.json) provides structural validation.
 The engine parser also enforces cross-field and cross-record invariants. Diagnostics identify the
 failed field or array item. Stream diagnostics additionally retain the record line and sequence.
 
@@ -32,8 +32,8 @@ The batch object and stream header share one domain-construction path and the sa
 checks. Stream items reuse the batch slice and intent validators directly; no synthetic batch
 scenario is constructed.
 
-The [stream record JSON Schema](../contracts/v10/scenario-stream.schema.json) validates each line,
-and [the v10 stream fixture](../contracts/v10/fixtures/demo.scenario.jsonl) is the canonical example.
+The [stream record JSON Schema](../contracts/v11/scenario-stream.schema.json) validates each line,
+and [the v11 stream fixture](../contracts/v11/fixtures/demo.scenario.jsonl) is the canonical example.
 The engine validates the entire stream before creating a journal. It then replays one record at a
 time without retaining prior slices, scheduled batches, or audit events. Reducer state still
 retains current account, order, target, and latest-bar state required by execution semantics.
@@ -42,7 +42,7 @@ retains current account, order, target, and latest-bar state required by executi
 
 | Field | Meaning |
 |---|---|
-| `contract_version` | Required string identifying this file contract; v10 is `"10"` |
+| `contract_version` | Required string identifying this file contract; v11 is `"11"` |
 | `metadata` | Required arbitrary JSON object preserved for provenance and ignored by execution |
 | `run_id` | Stable identity used in generated IDs |
 | `base_currency` | Reporting currency used for aggregate risk and valuation |
@@ -52,6 +52,7 @@ retains current account, order, target, and latest-bar state required by executi
 | `risk` | Signed position, exposure, leverage, margin, and borrow policy |
 | `execution` | Capacity and fee configuration |
 | `financing` | Borrow/cash day-count, compounding, locate, recall, and missing-data policies |
+| `settlement` | Business-date calendars, per-instrument lags, and cash/position availability policies |
 | `max_internal_events` | Positive reducer feedback cap, at most 100,000 |
 | `schedule` | Intents emitted after named slices, at most 4,096 per batch |
 | `slices` | Complete synchronized market observations |
@@ -201,7 +202,8 @@ Audit timestamps use the same boundary.
   ],
   "cash_rate_observations": [
     { "currency": "USD", "effective_at": "2026-01-02T14:30:00Z", "credit_rate_bps": 100, "debit_rate_bps": 200 }
-  ]
+  ],
+  "settlement_failures": []
 }
 ```
 
@@ -220,6 +222,14 @@ has zero available quantity. The latest observation remains active until replace
 missing-data handling, `reject_order` or `clip_fill` locate behavior, and
 `reject_new_shorts` or `close_out` recall behavior.
 
+The v11 `settlement` object selects `total_cash` or `settled_cash` buying power and
+`total_positions` or `settled_positions` availability. Its immutable calendars contain ordered
+canonical business dates, and each instrument has exactly one calendar and a lag from zero through
+30 business days. A fill updates economic accounting immediately and creates a deterministic
+instruction. Pending cash and quantity appear as unsettled attribution until the first slice on or
+after the due date. A due instruction named in that slice's `settlement_failures` becomes failed
+instead, retains its unsettled balances, and records the supplied reason.
+
 Supported corporate actions are exact-ratio `split` and per-unit `cash_dividend` records. Action
 IDs are unique across the scenario. Actions are applied in canonical ID order before borrow fees
 and matching. A split rescales the position, persistent target, and active orders while preserving
@@ -234,7 +244,7 @@ than the next slice `start_at`.
 
 ## Audit journal
 
-The [journal JSON Schema](../contracts/v10/journal.schema.json) validates each JSON Lines record.
+The [journal JSON Schema](../contracts/v11/journal.schema.json) validates each JSON Lines record.
 Every record contains `contract_version`, `engine_sequence`, deterministic `event_id`, ordered
 `causation_ids`, `run_id`, `recorded_at`, `event_type`, and an event-specific `payload`. Causal
 references are unique prior event IDs from the same run. The version is repeated on every record
