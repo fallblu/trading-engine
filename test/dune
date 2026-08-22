@@ -155,6 +155,12 @@
 
 (rule
  (alias runtest)
+ (deps test_documentation.py ../scripts/check-documentation.py)
+ (action
+  (run python3 %{dep:test_documentation.py})))
+
+(rule
+ (alias runtest)
  (deps
   validate_contract_conformance.py
   (source_tree ../contracts))

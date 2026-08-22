@@ -40,6 +40,11 @@ journal bytes on Linux and macOS. See [Continuous integration](docs/continuous-i
 the required and informational cells. Use `make dependency-band-check` only after bootstrapping a
 nonlocked CI band; normal development continues to use `make check` and the exact lock.
 
+Run `make docs-build` to create the strict local site under `site/`. It installs only the locked
+documentation tools in `.venv-docs`, stages versioned contracts without modifying them, generates
+the public OCaml interfaces, and validates the complete output. See the
+[documentation platform](docs/documentation-platform.md) for publication and link-checking policy.
+
 The gate formats a copy check, builds every target, and runs all tests. Keep commits small,
 coherent, and working. Use subject-only conventional commit messages such as
 `feat: implement deterministic order matching`.
