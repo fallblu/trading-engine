@@ -10,10 +10,15 @@ generated_api="$repository_root/_build/default/_doc/_html"
 rm -rf -- "$documentation_source" "$documentation_site"
 mkdir -p "$documentation_source"
 
-sed 's#(.github/SUPPORT.md)#(SUPPORT.md)#g' \
+sed \
+  -e 's#(.github/SUPPORT.md)#(SUPPORT.md)#g' \
+  -e 's#(.github/SECURITY.md)#(SECURITY.md)#g' \
   "$repository_root/README.md" >"$documentation_source/index.md"
-cp "$repository_root/CONTRIBUTING.md" "$documentation_source/CONTRIBUTING.md"
+sed 's#(.github/SECURITY.md)#(SECURITY.md)#g' \
+  "$repository_root/CONTRIBUTING.md" >"$documentation_source/CONTRIBUTING.md"
 cp "$repository_root/CHANGELOG.md" "$documentation_source/CHANGELOG.md"
+sed 's#(../docs/#(docs/#g' \
+  "$repository_root/.github/SECURITY.md" >"$documentation_source/SECURITY.md"
 sed \
   -e 's#(../README.md)#(index.md)#g' \
   -e 's#(../docs/#(docs/#g' \
