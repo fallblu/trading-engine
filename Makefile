@@ -1,6 +1,6 @@
 export PATH := $(CURDIR)/.venv-schema/bin:$(PATH)
 
-.PHONY: bootstrap environment-check build test metadata-check coverage benchmark-smoke benchmark fuzz-smoke fuzz fmt-check check
+.PHONY: bootstrap environment-check build test metadata-check determinism-check dependency-band-check coverage benchmark-smoke benchmark fuzz-smoke fuzz fmt-check check
 
 FUZZ_SEED ?= 20260821
 FUZZ_CASES ?= 10000
@@ -21,6 +21,11 @@ test:
 metadata-check:
 	python3 test/test_repository_metadata.py
 
+determinism-check: build
+	@./scripts/check-deterministic-journals
+
+dependency-band-check: fmt-check build test metadata-check determinism-check benchmark-smoke
+
 coverage: environment-check
 	@./scripts/check-ocaml-coverage
 
@@ -39,4 +44,4 @@ fuzz:
 fmt-check:
 	opam exec -- dune build @fmt
 
-check: environment-check fmt-check build test metadata-check benchmark-smoke
+check: environment-check fmt-check build test metadata-check determinism-check benchmark-smoke

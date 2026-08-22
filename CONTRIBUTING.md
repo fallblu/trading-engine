@@ -35,6 +35,11 @@ Run `make coverage` to enforce the OCaml coverage floor and generate per-module,
 HTML, and Cobertura reports. See [OCaml coverage](docs/coverage.md) for report locations,
 instrumentation scope, and the explained-threshold-change policy.
 
+CI additionally resolves the lowest and highest supported dependency bands and compares canonical
+journal bytes on Linux and macOS. See [Continuous integration](docs/continuous-integration.md) for
+the required and informational cells. Use `make dependency-band-check` only after bootstrapping a
+nonlocked CI band; normal development continues to use `make check` and the exact lock.
+
 The gate formats a copy check, builds every target, and runs all tests. Keep commits small,
 coherent, and working. Use subject-only conventional commit messages such as
 `feat: implement deterministic order matching`.
