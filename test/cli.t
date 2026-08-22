@@ -2,22 +2,22 @@
   1.0.0
 
   $ ../bin/main.exe --capabilities
-  {"engine_version":"1.0.0","scenario_contract_versions":["4","3"],"journal_contract_versions":["4","3"],"scenario_formats":["json","jsonl"],"journal_formats":["jsonl"],"execution_models":["completed_bar_v1"],"strategy_protocol_versions":["3"],"resource_limits":{"version":"1","scenario_record_bytes":1048576,"strategy_message_bytes":1048576,"internal_events":100000,"catalog_instruments":4096,"intents_per_batch":4096,"artifact_record_bytes":2097152}}
+  {"engine_version":"1.0.0","scenario_contract_versions":["5","4","3"],"journal_contract_versions":["5","4","3"],"scenario_formats":["json","jsonl"],"journal_formats":["jsonl"],"execution_models":["completed_bar_v1"],"strategy_protocol_versions":["3"],"resource_limits":{"version":"1","scenario_record_bytes":1048576,"strategy_message_bytes":1048576,"internal_events":100000,"catalog_instruments":4096,"intents_per_batch":4096,"artifact_record_bytes":2097152}}
 
-  $ ../bin/main.exe --validate-only --input ../contracts/v4/fixtures/demo.scenario.json
-  valid run=demo instruments=1 schedule=2 slices=4 scenario_sha256=991890e8c1cc839a0c321a6d30b2ba20a8b588d4135310f43a548fbc929e9fcf
+  $ ../bin/main.exe --validate-only --input ../contracts/v5/fixtures/demo.scenario.json
+  valid run=demo instruments=1 schedule=2 slices=4 scenario_sha256=4ec24403fa1f8725edcc399c608ad0bbaca5c17981e32c8e44f7347a4dd65b85
 
-  $ ../bin/main.exe --validate-only --input-format jsonl --input ../contracts/v4/fixtures/demo.scenario.jsonl
-  valid run=demo instruments=1 schedule=2 slices=4 scenario_sha256=6afe9bbda482265cfa24c35167150f02eea1a457aa5025143f3556b8046ae91b
+  $ ../bin/main.exe --validate-only --input-format jsonl --input ../contracts/v5/fixtures/demo.scenario.jsonl
+  valid run=demo instruments=1 schedule=2 slices=4 scenario_sha256=793deb0f4bbf6f4192c283534e031da05a8c02071021f523ef6523763bc1904b
 
-  $ ../bin/main.exe --input-format jsonl --input ../contracts/v4/fixtures/demo.scenario.jsonl --journal streamed.journal.jsonl --durable-artifacts
+  $ ../bin/main.exe --input-format jsonl --input ../contracts/v5/fixtures/demo.scenario.jsonl --journal streamed.journal.jsonl --durable-artifacts
   run=demo audits=20 orders=3 active=0 filled=2 rejected=0
   cash=9739.76812 equity=10004.76812 gross=265 realized=1.419136 unrealized=3.348984 fees=2.50188
   journal=streamed.journal.jsonl
   $ wc -l < streamed.journal.jsonl
   20
 
-  $ head -n 5 ../contracts/v4/fixtures/demo.scenario.jsonl > truncated.scenario.jsonl
+  $ head -n 5 ../contracts/v5/fixtures/demo.scenario.jsonl > truncated.scenario.jsonl
   $ ../bin/main.exe --validate-only --input-format jsonl --input truncated.scenario.jsonl
   trading-engine: scenario_end must terminate the scenario stream
   [123]
@@ -32,26 +32,26 @@
   1 scenario_stream.invalid validation
   6 6 None
 
-  $ sed 's/"open": "100"/"open": "100.001"/' ../contracts/v4/fixtures/demo.scenario.json > invalid-tick.json
+  $ sed 's/"open": "100"/"open": "100.001"/' ../contracts/v5/fixtures/demo.scenario.json > invalid-tick.json
   $ ../bin/main.exe --validate-only --input invalid-tick.json
   trading-engine: market prices and volumes must align with instrument increments
   [123]
 
-  $ ../bin/main.exe --input ../contracts/v4/fixtures/demo.scenario.json
+  $ ../bin/main.exe --input ../contracts/v5/fixtures/demo.scenario.json
   trading-engine: --journal is required unless --validate-only is set
   [123]
 
-  $ ../bin/main.exe --validate-only --input ../contracts/v4/fixtures/demo.scenario.json --journal validation.journal.jsonl
+  $ ../bin/main.exe --validate-only --input ../contracts/v5/fixtures/demo.scenario.json --journal validation.journal.jsonl
   trading-engine: --journal cannot be used with --validate-only
   [123]
 
   $ test ! -e validation.journal.jsonl
 
-  $ ../bin/main.exe --validate-only --durable-artifacts --input ../contracts/v4/fixtures/demo.scenario.json
+  $ ../bin/main.exe --validate-only --durable-artifacts --input ../contracts/v5/fixtures/demo.scenario.json
   trading-engine: --durable-artifacts cannot be used with --validate-only
   [123]
 
-  $ ../bin/main.exe --input ../contracts/v4/fixtures/demo.scenario.json --journal ignored.journal.jsonl --strategy-timeout 5
+  $ ../bin/main.exe --input ../contracts/v5/fixtures/demo.scenario.json --journal ignored.journal.jsonl --strategy-timeout 5
   trading-engine: --strategy-arg, --strategy-timeout, and --strategy-transcript require --strategy-executable
   [123]
   $ test ! -e ignored.journal.jsonl

@@ -21,3 +21,5 @@ module Fill : S
 module Strategy : S
 module Event : S
 module Corporate_action : S
+module Venue : S
+module Venue_calendar : S

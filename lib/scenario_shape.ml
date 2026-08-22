@@ -6,6 +6,7 @@ type common = {
   base_currency : Yojson.Safe.t;
   initial_cash : Yojson.Safe.t;
   instruments : Yojson.Safe.t;
+  venue_calendars : Yojson.Safe.t option;
   risk : Yojson.Safe.t;
   execution : Yojson.Safe.t;
   max_internal_events : Yojson.Safe.t;
@@ -62,12 +63,17 @@ let field ~root fields name =
       Error
         (error ~json_path:(root ^ "." ^ name) ("missing JSON field: " ^ name))
 
-let common ~root fields =
+let common ~root ~contract_version fields =
   let* metadata = field ~root fields "metadata" in
   let* run_id = field ~root fields "run_id" in
   let* base_currency = field ~root fields "base_currency" in
   let* initial_cash = field ~root fields "initial_cash" in
   let* instruments = field ~root fields "instruments" in
+  let venue_calendars =
+    if String.equal contract_version "5" then
+      List.assoc_opt "venue_calendars" fields
+    else None
+  in
   let* risk = field ~root fields "risk" in
   let* execution = field ~root fields "execution" in
   let* max_internal_events = field ~root fields "max_internal_events" in
@@ -78,6 +84,7 @@ let common ~root fields =
       base_currency;
       initial_cash;
       instruments;
+      venue_calendars;
       risk;
       execution;
       max_internal_events;
@@ -85,48 +92,64 @@ let common ~root fields =
 
 let batch json =
   let root = "$" in
+  let* preliminary =
+    match json with
+    | `Assoc fields -> field ~root fields "contract_version"
+    | _ -> Error (error ~json_path:root "scenario must be a JSON object")
+  in
+  let contract_version =
+    match preliminary with `String value -> value | _ -> ""
+  in
+  let calendar_fields =
+    if String.equal contract_version "5" then [ "venue_calendars" ] else []
+  in
   let* fields =
     object_fields ~json_path:root ~name:"scenario"
       ~expected:
-        [
-          "contract_version";
-          "metadata";
-          "run_id";
-          "base_currency";
-          "initial_cash";
-          "instruments";
-          "risk";
-          "execution";
-          "max_internal_events";
-          "schedule";
-          "slices";
-        ]
+        ([
+           "contract_version";
+           "metadata";
+           "run_id";
+           "base_currency";
+           "initial_cash";
+           "instruments";
+           "risk";
+           "execution";
+           "max_internal_events";
+           "schedule";
+           "slices";
+         ]
+        @ calendar_fields)
       json
   in
-  let* contract_version = field ~root fields "contract_version" in
-  let* common = common ~root fields in
+  let* contract_version_json = field ~root fields "contract_version" in
+  let* common = common ~root ~contract_version fields in
   let* schedule = field ~root fields "schedule" in
   let* slices = field ~root fields "slices" in
-  Ok { contract_version; common; schedule; slices }
+  Ok { contract_version = contract_version_json; common; schedule; slices }
 
-let stream_header json =
+let stream_header ~contract_version json =
   let root = "$.payload" in
+  let calendar_fields =
+    if String.equal contract_version "5" then [ "venue_calendars" ] else []
+  in
   let* fields =
     object_fields ~json_path:root ~name:"scenario stream header payload"
       ~expected:
-        [
-          "metadata";
-          "run_id";
-          "base_currency";
-          "initial_cash";
-          "instruments";
-          "risk";
-          "execution";
-          "max_internal_events";
-        ]
+        ([
+           "metadata";
+           "run_id";
+           "base_currency";
+           "initial_cash";
+           "instruments";
+           "risk";
+           "execution";
+           "max_internal_events";
+         ]
+        @ calendar_fields)
       json
   in
-  common ~root fields
+  common ~root ~contract_version fields
 
 let stream_item json =
   let root = "$.payload" in

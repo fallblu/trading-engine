@@ -118,6 +118,35 @@
       ]
     },
     {
+      "name": "scenario-v5",
+      "schema": "v5/scenario.schema.json",
+      "version_field": "contract_version",
+      "version": "5",
+      "sources": [
+        {"path": "v5/fixtures/demo.scenario.json", "format": "json"},
+        {"path": "v5/fixtures/fill-clipped.scenario.json", "format": "json"}
+      ]
+    },
+    {
+      "name": "scenario-stream-v5",
+      "schema": "v5/scenario-stream.schema.json",
+      "version_field": "contract_version",
+      "version": "5",
+      "sources": [
+        {"path": "v5/fixtures/demo.scenario.jsonl", "format": "jsonl"}
+      ]
+    },
+    {
+      "name": "journal-v5",
+      "schema": "v5/journal.schema.json",
+      "version_field": "contract_version",
+      "version": "5",
+      "sources": [
+        {"path": "v5/fixtures/demo.journal.jsonl", "format": "jsonl"},
+        {"path": "v5/fixtures/fill-clipped.journal.jsonl", "format": "jsonl"}
+      ]
+    },
+    {
       "name": "diagnostic-v1",
       "schema": "diagnostic/v1/diagnostic.schema.json",
       "version_field": "diagnostic_version",

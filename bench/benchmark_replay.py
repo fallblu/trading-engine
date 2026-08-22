@@ -23,7 +23,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_EXECUTABLE = ROOT / "_build/default/bin/main.exe"
 DEFAULT_BASELINE = ROOT / "bench/baselines/linux-x86_64.json"
-FIXTURE = ROOT / "contracts/v4/fixtures/demo.scenario.json"
+FIXTURE = ROOT / "contracts/v5/fixtures/demo.scenario.json"
 STRATEGY = ROOT / "bench/latency_strategy.py"
 SUMMARY_PATTERN = re.compile(
     r"\baudits=(?P<audits>[0-9]+).*\bactive=(?P<active>[0-9]+)"
@@ -164,6 +164,29 @@ def build_scenario(case: BenchmarkCase) -> dict[str, object]:
             },
             "run_id": f"benchmark-{case.name}",
             "instruments": instruments,
+            "venue_calendars": [
+                {
+                    "calendar_id": "benchmark-venue-calendar",
+                    "calendar_version": "1",
+                    "venue_id": "BENCHMARK",
+                    "instrument_ids": [
+                        instrument["instrument_id"] for instrument in instruments
+                    ],
+                    "sessions": [
+                        {
+                            "session_date": "2026-02-01",
+                            "policy": "regular",
+                            "phases": [
+                                {
+                                    "phase": "regular",
+                                    "opens_at": "2026-02-01T00:00:00Z",
+                                    "closes_at": "2026-02-02T00:00:00Z",
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
             "risk": {
                 "max_order_quantity": "1000000",
                 "max_long_position": "1000000",
@@ -200,6 +223,7 @@ def stream_records(document: dict[str, object]) -> list[dict[str, object]]:
         "base_currency",
         "initial_cash",
         "instruments",
+        "venue_calendars",
         "risk",
         "execution",
         "max_internal_events",

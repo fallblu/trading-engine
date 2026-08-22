@@ -11,5 +11,6 @@ let () =
       ("strategy-protocol", Test_strategy_protocol.tests);
       ("contract-conformance", Test_contract_conformance.tests);
       ("boundary-failures", Test_boundary_failures.tests);
+      ("venue-calendar", Test_venue_calendar.tests);
       ("scenario", Test_scenario.tests);
     ]

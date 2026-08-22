@@ -5,6 +5,7 @@ type t = {
   base_currency : string;
   initial_cash : (string * Scalar.Money.t) list;
   instruments : Instrument.t list;
+  venue_calendars : Venue_calendar.t list;
   risk : Risk.t;
   execution_model : Execution_model.t;
   execution : Execution.t;
@@ -20,6 +21,7 @@ type stream_header = {
   base_currency : string;
   initial_cash : (string * Scalar.Money.t) list;
   instruments : Instrument.t list;
+  venue_calendars : Venue_calendar.t list;
   risk : Risk.t;
   execution_model : Execution_model.t;
   execution : Execution.t;
@@ -211,6 +213,70 @@ let parse_cash_balance json =
 let parse_timestamp ~name json =
   let* value = string ~name json in
   Codec.ptime_of_string value
+
+let parse_venue_phase json =
+  let* fields =
+    object_fields ~name:"venue phase"
+      ~expected:[ "phase"; "opens_at"; "closes_at" ]
+      json
+  in
+  let* kind_json = field fields "phase" in
+  let* kind_name = string ~name:"venue phase" kind_json in
+  let* kind = Venue_calendar.phase_kind_of_string kind_name in
+  let* opens_json = field fields "opens_at" in
+  let* opens_at = parse_timestamp ~name:"venue phase opens_at" opens_json in
+  let* closes_json = field fields "closes_at" in
+  let* closes_at = parse_timestamp ~name:"venue phase closes_at" closes_json in
+  Venue_calendar.create_phase ~kind ~opens_at ~closes_at
+
+let parse_venue_session json =
+  let* fields =
+    object_fields ~name:"venue session policy"
+      ~expected:[ "session_date"; "policy"; "phases" ]
+      json
+  in
+  let* date_json = field fields "session_date" in
+  let* session_date = string ~name:"session_date" date_json in
+  let* policy_json = field fields "policy" in
+  let* policy_name = string ~name:"session policy" policy_json in
+  let* kind = Venue_calendar.session_kind_of_string policy_name in
+  let* phases_json = field fields "phases" in
+  let* phases_json = list ~name:"venue phases" phases_json in
+  let* phases = map_list parse_venue_phase phases_json in
+  Venue_calendar.create_session ~session_date ~kind ~phases
+
+let parse_venue_calendar json =
+  let* fields =
+    object_fields ~name:"venue calendar"
+      ~expected:
+        [
+          "calendar_id";
+          "calendar_version";
+          "venue_id";
+          "instrument_ids";
+          "sessions";
+        ]
+      json
+  in
+  let* id_json = field fields "calendar_id" in
+  let* id = parse_id Id.Venue_calendar.of_string ~name:"calendar_id" id_json in
+  let* version_json = field fields "calendar_version" in
+  let* version = string ~name:"calendar_version" version_json in
+  let* venue_json = field fields "venue_id" in
+  let* venue_id = parse_id Id.Venue.of_string ~name:"venue_id" venue_json in
+  let* instruments_json = field fields "instrument_ids" in
+  let* instruments_json =
+    list ~name:"calendar instrument_ids" instruments_json
+  in
+  let* instrument_ids =
+    map_list
+      (parse_id Id.Instrument.of_string ~name:"calendar instrument_id")
+      instruments_json
+  in
+  let* sessions_json = field fields "sessions" in
+  let* sessions_json = list ~name:"venue sessions" sessions_json in
+  let* sessions = map_list parse_venue_session sessions_json in
+  Venue_calendar.create ~id ~version ~venue_id ~instrument_ids ~sessions
 
 let rec validate_metadata = function
   | `Assoc fields ->
@@ -629,13 +695,25 @@ let construct_header ~root ~contract_path ~contract_version
     let* instruments =
       map_list_at (child root "instruments") parse_instrument instruments_json
     in
+    let* venue_calendars =
+      match shape.venue_calendars with
+      | None -> Ok []
+      | Some calendars_json ->
+          let* calendars_json =
+            list ~name:"venue_calendars" calendars_json
+            |> at (child root "venue_calendars")
+          in
+          map_list_at
+            (child root "venue_calendars")
+            parse_venue_calendar calendars_json
+    in
     let* max_internal_events =
       integer ~name:"max_internal_events" shape.max_internal_events
       |> at (child root "max_internal_events")
     in
     let* currencies, catalog =
-      Scenario_validation.header ~root ~base_currency ~initial_cash ~instruments
-        ~max_internal_events
+      Scenario_validation.header ~root ~contract_version ~base_currency
+        ~initial_cash ~instruments ~venue_calendars ~max_internal_events
     in
     let* risk =
       parse_risk base_currency instruments shape.risk |> at (child root "risk")
@@ -651,6 +729,7 @@ let construct_header ~root ~contract_path ~contract_version
         base_currency;
         initial_cash;
         instruments;
+        venue_calendars;
         risk;
         execution_model;
         execution;
@@ -687,6 +766,7 @@ let construct_batch (shape : Scenario_shape.batch) =
       base_currency = header.base_currency;
       initial_cash = header.initial_cash;
       instruments = header.instruments;
+      venue_calendars = header.venue_calendars;
       risk = header.risk;
       execution_model = header.execution_model;
       execution = header.execution;
@@ -700,15 +780,24 @@ let diagnostic code (error : Scenario_shape.error) =
     error.message
 
 let of_yojson json =
-  let code =
+  let supplied_version =
     match json with
-    | `Assoc fields -> (
-        match List.assoc_opt "contract_version" fields with
-        | Some (`String supplied) when not (Contract.is_supported supplied) ->
-            Diagnostic.Scenario_unsupported_contract
-        | _ -> Diagnostic.Scenario_invalid)
-    | _ -> Diagnostic.Scenario_invalid
+    | `Assoc fields -> List.assoc_opt "contract_version" fields
+    | _ -> None
   in
+  let* () =
+    match supplied_version with
+    | Some (`String supplied) when not (Contract.is_supported supplied) ->
+        Error
+          (Diagnostic.make ~code:Diagnostic.Scenario_unsupported_contract
+             ~phase:Diagnostic.Validation ~json_path:"$.contract_version"
+             (Printf.sprintf
+                "unsupported scenario contract_version %S (expected one of %s)"
+                supplied
+                (String.concat ", " Contract.supported_versions)))
+    | _ -> Ok ()
+  in
+  let code = Diagnostic.Scenario_invalid in
   let* () = check_batch_limits json in
   let* shape =
     Scenario_shape.batch json |> Result.map_error (diagnostic code)
@@ -740,7 +829,8 @@ let stream_header_of_yojson ~contract_version json =
   in
   let* () = check_stream_header_limits json in
   let* shape =
-    Scenario_shape.stream_header json |> Result.map_error (diagnostic code)
+    Scenario_shape.stream_header ~contract_version json
+    |> Result.map_error (diagnostic code)
   in
   construct_header ~root:"$.payload" ~contract_path:"$.contract_version"
     ~contract_version shape
