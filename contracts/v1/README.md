@@ -1,8 +1,8 @@
 # Trading Engine contract v1
 
 This frozen directory preserves the historical v1 process and file contract. The current runtime
-emits and advertises v3 only; these artifacts remain available for provenance and compatibility
-testing by older consumers.
+advertises v4 and v3 only; these artifacts remain available for provenance and schema-only
+compatibility testing by older consumers.
 
 - `scenario.schema.json` validates batch replay inputs.
 - `scenario-stream.schema.json` validates each JSON Lines scenario-stream record.
