@@ -34,6 +34,7 @@ scenario slices and scheduled or external intents
 - Separate market event, availability, receipt, slice, and engine ordering
 - Pure strategy callbacks with causal, immutable context snapshots
 - Pure suspend/resume strategy requests with equivalent scripted and external reducers
+- Explicit immutable reducer phases behind one internal transition contract
 - Portfolio weight and quantity targets covering the complete instrument catalog
 - Current-equity weight sizing at synchronized closing marks with lot rounding
 - Persistent target reconciliation through bounded market-order attempts

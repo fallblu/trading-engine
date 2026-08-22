@@ -1313,100 +1313,27 @@ module Interactive = struct
           (Option.to_list reduction.slice_event_id)
     else Ok reduction
 
-  type phase =
-    | Match_slice of Market_slice.t * Execution.cursor
-    | Reconcile_targets
-    | Finish_slice
+  module Validation_phase = struct
+    let run state market_slice =
+      if state.completed then
+        Error "completed engine cannot process another market slice"
+      else validate_slice state market_slice
+  end
 
-  type progress =
-    | Awaiting_strategy of {
-        reduction : reduction;
-        phase : phase;
-        causation_ids : Id.Event.t list;
-        context : Strategy.context;
-        event : Strategy.event;
-      }
-    | Slice_completed of t * Audit.t list
-
-  let rec continue phase reduction =
-    let* drained = drain reduction in
-    match drained with
-    | Strategy_requested { reduction; causation_ids; context; event } ->
-        Ok
-          (Awaiting_strategy { reduction; phase; causation_ids; context; event })
-    | Drained reduction -> (
-        match phase with
-        | Match_slice (market_slice, cursor) -> (
-            match Execution.next cursor ~oms:reduction.state.oms with
-            | Error _ as error -> error
-            | Ok (Execution.Proposed (proposed, advance)) ->
-                let* reduction, applied_quantity =
-                  apply_proposed_fill reduction market_slice proposed
-                in
-                let* cursor = advance applied_quantity in
-                continue (Match_slice (market_slice, cursor)) reduction
-            | Ok (Execution.Finished market_ioc_orders) ->
-                let* slice_event_id =
-                  match reduction.slice_event_id with
-                  | Some value -> Ok value
-                  | None -> Error "matching slice has no audit event"
-                in
-                let reduction = with_causes reduction [ slice_event_id ] in
-                let* reduction =
-                  cancel_market_remainders reduction market_ioc_orders
-                in
-                let* pending =
-                  notification reduction ~causation_ids:[ slice_event_id ]
-                    (Strategy.Market_slice_closed market_slice)
-                in
-                continue Reconcile_targets (enqueue reduction [ pending ]))
-        | Reconcile_targets ->
-            let* reduction = reconcile_targets reduction in
-            continue Finish_slice reduction
-        | Finish_slice ->
-            let* reduction = assess_margin reduction in
-            if Pending_queue.is_empty reduction.pending then
-              let* reduction = valuation reduction in
-              Ok
-                (Slice_completed (reduction.state, List.rev reduction.audits_rev))
-            else continue Finish_slice reduction)
-
-  let strategy_request = function
-    | Awaiting_strategy { context; event; _ } -> Some (context, event)
-    | Slice_completed _ -> None
-
-  let slice_result = function
-    | Awaiting_strategy _ -> None
-    | Slice_completed (state, audits) -> Some (state, audits)
-
-  let resume progress intents =
-    match progress with
-    | Slice_completed _ ->
-        Error "completed slice cannot accept strategy intents"
-    | Awaiting_strategy { reduction; phase; causation_ids; _ } ->
-        let actions =
-          List.map (fun intent -> Act (causation_ids, intent)) intents
-        in
-        continue phase (prepend reduction actions)
-
-  let process_slice state market_slice =
-    if state.completed then
-      Error "completed engine cannot process another market slice"
-    else
-      let* () = validate_slice state market_slice in
+  module Initialize_phase = struct
+    let run state market_slice =
+      let applied_action_ids =
+        List.fold_left
+          (fun ids action ->
+            Id.Corporate_action.Set.add action.Corporate_action.id ids)
+          state.applied_action_ids market_slice.Market_slice.corporate_actions
+      in
+      let latest_bars =
+        List.fold_left
+          (fun bars bar -> Id.Instrument.Map.add bar.Bar.instrument_id bar bars)
+          state.latest_bars market_slice.bars
+      in
       let state =
-        let applied_action_ids =
-          List.fold_left
-            (fun ids action ->
-              Id.Corporate_action.Set.add action.Corporate_action.id ids)
-            state.applied_action_ids market_slice.corporate_actions
-        in
-        let latest_bars =
-          List.fold_left
-            (fun bars bar ->
-              Id.Instrument.Map.add bar.Bar.instrument_id bar bars)
-            state.latest_bars market_slice.bars
-        in
         {
           state with
           last_slice_sequence = Some market_slice.slice_sequence;
@@ -1437,24 +1364,131 @@ module Interactive = struct
         emit_with_id (with_causes reduction [])
           (Audit.Market_slice_received market_slice)
       in
-      let reduction =
+      Ok
         {
           reduction with
           slice_event_id = Some slice_event_id;
           causation_ids = [ slice_event_id ];
         }
+  end
+
+  module Actions_phase = struct
+    let run market_slice reduction =
+      apply_corporate_actions reduction
+        market_slice.Market_slice.corporate_actions
+  end
+
+  module Borrow_phase = struct
+    let run market_slice reduction = apply_borrow_fees reduction market_slice
+  end
+
+  module Notifications_phase = struct
+    type request = {
+      reduction : reduction;
+      causation_ids : Id.Event.t list;
+      context : Strategy.context;
+      event : Strategy.event;
+    }
+
+    type outcome = Drained of reduction | Awaiting of request
+
+    let run reduction =
+      match drain reduction with
+      | Error _ as error -> error
+      | Ok result -> (
+          match (result : drain_result) with
+          | Drained reduction -> Ok (Drained reduction)
+          | Strategy_requested { reduction; causation_ids; context; event } ->
+              Ok (Awaiting { reduction; causation_ids; context; event }))
+
+    let has_pending reduction = not (Pending_queue.is_empty reduction.pending)
+    let payload request = (request.context, request.event)
+
+    let resume request intents =
+      let actions =
+        List.map (fun intent -> Act (request.causation_ids, intent)) intents
       in
-      let* reduction =
-        apply_corporate_actions reduction market_slice.corporate_actions
-      in
-      let* reduction = apply_borrow_fees reduction market_slice in
-      let* cursor =
-        Execution_model.start_slice reduction.state.config.execution_model
-          reduction.state.config.execution
-          ~instruments:(configured_instruments reduction.state)
-          ~oms:reduction.state.oms market_slice
-      in
-      continue (Match_slice (market_slice, cursor)) reduction
+      prepend request.reduction actions
+  end
+
+  module Matching_phase = struct
+    type outcome =
+      | Continue of reduction * Execution.cursor
+      | Complete of reduction
+
+    let start market_slice reduction =
+      Execution_model.start_slice reduction.state.config.execution_model
+        reduction.state.config.execution
+        ~instruments:(configured_instruments reduction.state)
+        ~oms:reduction.state.oms market_slice
+
+    let run market_slice cursor reduction =
+      match Execution.next cursor ~oms:reduction.state.oms with
+      | Error _ as error -> error
+      | Ok (Execution.Proposed (proposed, advance)) ->
+          let* reduction, applied_quantity =
+            apply_proposed_fill reduction market_slice proposed
+          in
+          let* cursor = advance applied_quantity in
+          Ok (Continue (reduction, cursor))
+      | Ok (Execution.Finished market_ioc_orders) ->
+          let* slice_event_id =
+            match reduction.slice_event_id with
+            | Some value -> Ok value
+            | None -> Error "matching slice has no audit event"
+          in
+          let reduction = with_causes reduction [ slice_event_id ] in
+          let* reduction =
+            cancel_market_remainders reduction market_ioc_orders
+          in
+          let* pending =
+            notification reduction ~causation_ids:[ slice_event_id ]
+              (Strategy.Market_slice_closed market_slice)
+          in
+          Ok (Complete (enqueue reduction [ pending ]))
+  end
+
+  module Targets_phase = struct
+    let run = reconcile_targets
+  end
+
+  module Margin_phase = struct
+    let run = assess_margin
+  end
+
+  module Valuation_phase = struct
+    let run reduction =
+      let* reduction = valuation reduction in
+      Ok (reduction.state, List.rev reduction.audits_rev)
+  end
+
+  module Phase_machine = Reducer_phases.Make (struct
+    type nonrec state = t
+    type nonrec reduction = reduction
+    type market_slice = Market_slice.t
+    type cursor = Execution.cursor
+    type audit = Audit.t
+    type context = Strategy.context
+    type event = Strategy.event
+    type intent = Strategy.intent
+
+    module Validation = Validation_phase
+    module Initialize = Initialize_phase
+    module Actions = Actions_phase
+    module Borrow = Borrow_phase
+    module Notifications = Notifications_phase
+    module Matching = Matching_phase
+    module Targets = Targets_phase
+    module Margin = Margin_phase
+    module Valuation = Valuation_phase
+  end)
+
+  type progress = Phase_machine.progress
+
+  let strategy_request = Phase_machine.strategy_request
+  let slice_result = Phase_machine.slice_result
+  let resume = Phase_machine.resume
+  let process_slice = Phase_machine.process_slice
 
   let order_counts orders =
     List.fold_left

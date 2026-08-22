@@ -42,6 +42,14 @@ writes, without introducing files, pipes, processes, or fault state into the red
 
 ## Reducer phases
 
+The private `Reducer_phases` transition contract gives each phase an opaque immutable state input
+and an explicit result. Validation, initialization, corporate actions, borrow accrual,
+notifications, matching, target reconciliation, margin, and valuation are separate phase modules.
+The transition machine is the only layer that selects the next phase or resumes a suspended
+strategy request; individual phase modules cannot select, skip, or reorder their neighbors.
+`Engine` retains the existing scripted and interactive APIs while supplying the domain operations
+behind that contract.
+
 For each synchronized market slice, the engine:
 
 1. Validates catalog coverage, slice order, receipt order, and market time.
