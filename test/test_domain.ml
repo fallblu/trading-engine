@@ -100,6 +100,74 @@ let market_slice_validation () =
   Alcotest.(check bool)
     "premature availability rejected" true (Result.is_error result)
 
+let bar_validation_boundaries () =
+  let instrument_id = instrument_id "bar-validation" in
+  let create ?(open_price = "100") ?(high_price = "110") ?(low_price = "90")
+      ?(close_price = "105") ?(volume = Some "10") () =
+    T.Bar.create ~instrument_id ~open_price:(price open_price)
+      ~high_price:(price high_price) ~low_price:(price low_price)
+      ~close_price:(price close_price)
+      ~volume:(Option.map quantity volume)
+  in
+  let rejects label expected result =
+    Alcotest.(check string) label expected (error result)
+  in
+  rejects "inverted range" "bar low must not exceed its high"
+    (create ~high_price:"90" ~low_price:"100" ());
+  rejects "open below range" "bar open must lie inside its low-high range"
+    (create ~open_price:"89" ());
+  rejects "open above range" "bar open must lie inside its low-high range"
+    (create ~open_price:"111" ());
+  rejects "close below range" "bar close must lie inside its low-high range"
+    (create ~close_price:"89" ());
+  rejects "close above range" "bar close must lie inside its low-high range"
+    (create ~close_price:"111" ());
+  rejects "negative volume" "bar volume must be nonnegative"
+    (create ~volume:(Some "-1") ());
+  let valid = create ~volume:None () |> ok in
+  Alcotest.(check string)
+    "rendered close" "bar[bar-validation] close=105"
+    (Format.asprintf "%a" T.Bar.pp valid)
+
+let corporate_action_validation_boundaries () =
+  let id value = T.Id.Corporate_action.of_string_exn value in
+  let instrument_id = instrument_id "action-validation" in
+  let split ?(numerator = 2L) ?(denominator = 1L) action_id =
+    T.Corporate_action.split ~id:(id action_id) ~instrument_id ~numerator
+      ~denominator
+  in
+  Alcotest.(check string)
+    "zero numerator" "split numerator and denominator must be positive"
+    (error (split ~numerator:0L "zero-numerator"));
+  Alcotest.(check string)
+    "zero denominator" "split numerator and denominator must be positive"
+    (error (split ~denominator:0L "zero-denominator"));
+  Alcotest.(check string)
+    "unchanged units" "split ratio must change the instrument units"
+    (error (split ~numerator:1L "identity-split"));
+  let split_action = split "split" |> ok in
+  let invalid_dividend =
+    T.Corporate_action.cash_dividend ~id:(id "invalid-dividend") ~instrument_id
+      ~amount_per_unit:(money "0")
+  in
+  Alcotest.(check string)
+    "zero dividend" "cash dividend amount per unit must be positive"
+    (error invalid_dividend);
+  let dividend =
+    T.Corporate_action.cash_dividend ~id:(id "dividend") ~instrument_id
+      ~amount_per_unit:(money "0.25")
+    |> ok
+  in
+  Alcotest.(check bool)
+    "actions compare by ID" true
+    (T.Corporate_action.compare dividend split_action < 0);
+  Alcotest.(check string)
+    "split rendering" "split split 2:1 action-validation"
+    (Format.asprintf "%a" T.Corporate_action.pp split_action);
+  Alcotest.(check string)
+    "dividend rendering" "dividend dividend 0.25 action-validation"
+    (Format.asprintf "%a" T.Corporate_action.pp dividend)
+
 let sha256_vectors () =
   Alcotest.(check string)
     "empty" "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -230,6 +298,10 @@ let tests =
     Alcotest.test_case "portfolio weight rounds toward zero" `Quick
       portfolio_weight_rounds_toward_zero;
     Alcotest.test_case "market slice validation" `Quick market_slice_validation;
+    Alcotest.test_case "bar validation boundaries" `Quick
+      bar_validation_boundaries;
+    Alcotest.test_case "corporate action validation boundaries" `Quick
+      corporate_action_validation_boundaries;
     Alcotest.test_case "SHA-256 vectors" `Quick sha256_vectors;
     Alcotest.test_case "OMS partial and duplicate fills" `Quick
       oms_partial_fill_and_duplicate;
