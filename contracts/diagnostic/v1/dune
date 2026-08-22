@@ -1,0 +1,8 @@
+(install
+ (section share)
+ (package trading_engine)
+ (files
+  (diagnostic.schema.json as contracts/diagnostic/v1/diagnostic.schema.json)
+  (fixtures/strategy-protocol.json
+   as
+   contracts/diagnostic/v1/fixtures/strategy-protocol.json)))

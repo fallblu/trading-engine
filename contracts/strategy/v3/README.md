@@ -32,7 +32,10 @@ External replay requires an empty batch schedule and empty streamed intent batch
 records accepted messages in both directions in a deterministic transcript. A response rejected
 for invalid JSON, fields, version, sequence, EOF, or size is never stored as an accepted exchange.
 Instead, the partial transcript ends with a `rejected_strategy_response` diagnostic record. Version
-1 includes the structured rejection diagnostic and at most the first 256 raw response bytes encoded
+1 rejection diagnostics use the shared
+[`diagnostic/v1`](../../diagnostic/v1/README.md) contract. The transcript schema narrows that
+contract to the `strategy.protocol` and `resource.limit` codes in the `strategy` phase. The record
+includes the structured rejection diagnostic and at most the first 256 raw response bytes encoded
 as lowercase hexadecimal. `observed_bytes` counts bytes available when the engine rejected the
 response, and `truncated` reports whether the prefix omits observed bytes. The transcript and audit
 journal retain partial files after failure and finalize only after their respective success checks.

@@ -48,48 +48,17 @@
       }
     },
     "diagnostic": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["diagnostic_version", "code", "phase", "message", "context", "cause"],
-      "properties": {
-        "diagnostic_version": { "const": "1" },
-        "code": { "enum": ["strategy.protocol", "resource.limit"] },
-        "phase": { "const": "strategy" },
-        "message": { "type": "string", "minLength": 1 },
-        "context": { "$ref": "#/$defs/diagnosticContext" },
-        "cause": {
-          "oneOf": [
-            { "type": "null" },
-            { "$ref": "#/$defs/diagnosticCause" }
-          ]
+      "allOf": [
+        {
+          "$ref": "https://github.com/fallblu/trading-engine/contracts/diagnostic/v1/diagnostic.schema.json"
+        },
+        {
+          "properties": {
+            "code": { "enum": ["strategy.protocol", "resource.limit"] },
+            "phase": { "const": "strategy" }
+          }
         }
-      }
-    },
-    "diagnosticContext": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "json_path": { "type": "string" },
-        "line": { "type": "integer" },
-        "sequence": { "$ref": "#/$defs/canonicalSequence" },
-        "event_id": { "type": "string" },
-        "order_id": { "type": "string" },
-        "causation_ids": {
-          "type": "array",
-          "items": { "type": "string" }
-        }
-      }
-    },
-    "diagnosticCause": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["kind", "message"],
-      "properties": {
-        "kind": { "type": "string", "minLength": 1 },
-        "message": { "type": "string" },
-        "operation": { "type": "string" },
-        "target": { "type": "string" }
-      }
+      ]
     },
     "evidence": {
       "type": "object",
