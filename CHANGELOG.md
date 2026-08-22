@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add explicit GTC, IOC, FOK, DAY, and GTD order lifetimes plus completed-bar stop and stop-limit
+  activation in scenario contract v8 and external strategy protocol v6.
+
+## Unreleased
+
 - Add contract v7 exact per-instrument risk policies, versioned overlapping exposure groups,
   reservation-aware admission and fill clipping, group diagnostics, and strategy protocol v5.
 

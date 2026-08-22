@@ -12,6 +12,7 @@ type initialization = {
   initial_cash : (string * Scalar.Money.t) list;
   initial_portfolio : Initial_portfolio.t option;
   instruments : Instrument.t list;
+  venue_calendars : Venue_calendar.t list;
   risk : Risk.t;
   execution_model : Execution_model.t;
   execution : Execution.t;

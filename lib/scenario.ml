@@ -550,7 +550,7 @@ let parse_v7_risk base_currency instruments json =
     ~max_gross_exposure ~max_leverage ~short_borrow_bps
 
 let parse_risk ~contract_version base_currency instruments json =
-  if String.equal contract_version "7" then
+  if List.mem contract_version [ "8"; "7" ] then
     parse_v7_risk base_currency instruments json
   else parse_legacy_risk base_currency instruments json
 
@@ -623,7 +623,7 @@ let parse_versioned_execution ~contract_version json =
     Ok (execution_model, execution)
 
 let parse_execution ~contract_version json =
-  if List.mem contract_version [ "7"; "6"; "5" ] then
+  if List.mem contract_version [ "8"; "7"; "6"; "5" ] then
     parse_versioned_execution ~contract_version json
   else parse_legacy_execution ~contract_version json
 
@@ -671,18 +671,34 @@ let parse_portfolio_intent ~name ~parse_target make json =
   let* targets = map_list parse_target targets_json in
   Ok (make targets)
 
-let parse_submit_intent json =
+let parse_submit_intent ~contract_version json =
+  let versioned = String.equal contract_version "8" in
   let* fields =
     object_fields ~name:"submit_order intent"
       ~expected:
-        [
-          "type";
-          "instrument_id";
-          "side";
-          "quantity";
-          "order_kind";
-          "limit_price";
-        ]
+        (if versioned then
+           [
+             "type";
+             "instrument_id";
+             "side";
+             "quantity";
+             "order_kind";
+             "trigger_price";
+             "limit_price";
+             "time_in_force";
+             "venue_id";
+             "calendar_id";
+             "expires_at";
+           ]
+         else
+           [
+             "type";
+             "instrument_id";
+             "side";
+             "quantity";
+             "order_kind";
+             "limit_price";
+           ])
       json
   in
   let* instrument_json = field fields "instrument_id" in
@@ -696,17 +712,53 @@ let parse_submit_intent json =
   let* kind_json = field fields "order_kind" in
   let* kind_name = string ~name:"order_kind" kind_json in
   let* limit_json = field fields "limit_price" in
+  let* trigger_json =
+    if versioned then field fields "trigger_price" else Ok `Null
+  in
   let* kind =
-    match (kind_name, limit_json) with
-    | "market", `Null -> Ok Order.Market
-    | "limit", value ->
+    match (kind_name, trigger_json, limit_json) with
+    | "market", `Null, `Null -> Ok Order.Market
+    | "limit", `Null, value ->
         let* limit = parse_price ~name:"limit_price" value in
         Ok (Order.Limit limit)
-    | "market", _ -> Error "market order limit_price must be null"
+    | "stop", trigger, `Null when versioned ->
+        let* trigger = parse_price ~name:"trigger_price" trigger in
+        Ok (Order.Stop trigger)
+    | "stop_limit", trigger, limit when versioned ->
+        let* trigger_price = parse_price ~name:"trigger_price" trigger in
+        let* limit_price = parse_price ~name:"limit_price" limit in
+        Ok (Order.Stop_limit { trigger_price; limit_price })
+    | "market", _, _ ->
+        Error "market order trigger_price and limit_price must be null"
     | _ -> Error "invalid order_kind"
   in
+  let* time_in_force =
+    if not versioned then Ok (Order.compatibility_time_in_force kind)
+    else
+      let* tif_json = field fields "time_in_force" in
+      let* tif = string ~name:"time_in_force" tif_json in
+      let* venue_json = field fields "venue_id" in
+      let* calendar_json = field fields "calendar_id" in
+      let* expires_json = field fields "expires_at" in
+      match (tif, venue_json, calendar_json, expires_json) with
+      | "gtc", `Null, `Null, `Null -> Ok Order.Gtc
+      | "ioc", `Null, `Null, `Null -> Ok Order.Ioc
+      | "fok", `Null, `Null, `Null -> Ok Order.Fok
+      | "day", venue, calendar, `Null ->
+          let* venue_id = parse_id Id.Venue.of_string ~name:"venue_id" venue in
+          let* calendar_id =
+            parse_id Id.Venue_calendar.of_string ~name:"calendar_id" calendar
+          in
+          Ok (Order.Day { venue_id; calendar_id })
+      | "gtd", `Null, `Null, expires ->
+          let* value = string ~name:"expires_at" expires in
+          let* expires_at = Codec.ptime_of_string value in
+          Ok (Order.Gtd expires_at)
+      | _ -> Error "time_in_force companion fields are inconsistent"
+  in
   let* request =
-    Order.request ~instrument_id ~side ~quantity ~kind ~origin:Order.Direct
+    Order.request_v8 ~instrument_id ~side ~quantity ~kind ~time_in_force
+      ~origin:Order.Direct
   in
   Ok (Strategy.Submit_order request)
 
@@ -731,7 +783,7 @@ let parse_metric_intent json =
   let* value = string ~name:"metric value" value_json in
   Ok (Strategy.Emit_metric { name; value })
 
-let parse_intent json =
+let parse_intent ~contract_version json =
   match json with
   | `Assoc fields -> (
       match List.assoc_opt "type" fields with
@@ -745,20 +797,21 @@ let parse_intent json =
             ~parse_target:parse_quantity_target
             (fun targets -> Strategy.Target_quantities targets)
             json
-      | Some (`String "submit_order") -> parse_submit_intent json
+      | Some (`String "submit_order") ->
+          parse_submit_intent ~contract_version json
       | Some (`String "cancel_order") -> parse_cancel_intent json
       | Some (`String "emit_metric") -> parse_metric_intent json
       | Some _ -> Error "unsupported intent type"
       | None -> Error "intent is missing type")
   | _ -> Error "intent must be a JSON object"
 
-let intent_of_yojson json =
-  parse_intent json
+let intent_of_yojson ?(contract_version = Contract.previous_version) json =
+  parse_intent ~contract_version json
   |> Result.map_error (fun message ->
       Diagnostic.make ~code:Diagnostic.Scenario_invalid
         ~phase:Diagnostic.Validation ~json_path:"$" message)
 
-let parse_schedule_item json =
+let parse_schedule_item ~contract_version json =
   let* fields =
     object_fields ~name:"schedule item"
       ~expected:[ "after_slice_sequence"; "intents" ]
@@ -773,7 +826,7 @@ let parse_schedule_item json =
       (Printf.sprintf "intent count is %d; limit is %d"
          (List.length intents_json) Resource_limits.intents_per_batch)
   else
-    let* intents = map_list parse_intent intents_json in
+    let* intents = map_list (parse_intent ~contract_version) intents_json in
     Ok (sequence, intents)
 
 let parse_volume = function
@@ -1010,7 +1063,7 @@ let construct_header ~root ~contract_path ~contract_version
       |> at (child root "base_currency")
     in
     let* initial_cash, initial_portfolio =
-      if List.mem contract_version [ "7"; "6" ] then
+      if List.mem contract_version [ "8"; "7"; "6" ] then
         let* portfolio =
           parse_initial_portfolio ~base_currency shape.initial_state
           |> at (child root "initial_portfolio")
@@ -1100,7 +1153,11 @@ let construct_batch (shape : Scenario_shape.batch) =
   let* schedule_json =
     list ~name:"schedule" shape.schedule |> at "$.schedule"
   in
-  let* schedule = map_list_at "$.schedule" parse_schedule_item schedule_json in
+  let* schedule =
+    map_list_at "$.schedule"
+      (parse_schedule_item ~contract_version)
+      schedule_json
+  in
   let* slices_json = list ~name:"slices" shape.slices |> at "$.slices" in
   let* slices = map_list_at "$.slices" parse_slice slices_json in
   let* () =
@@ -1205,7 +1262,9 @@ let stream_item_of_yojson header ~previous json =
     |> Result.map_error (diagnostic code)
   in
   let* intents =
-    map_list_at "$.payload.intents" parse_intent intents_json
+    map_list_at "$.payload.intents"
+      (parse_intent ~contract_version:header.contract_version)
+      intents_json
     |> Result.map_error (diagnostic code)
   in
   let previous_slice, previous_intents, prior_action_ids =

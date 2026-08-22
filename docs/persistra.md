@@ -58,7 +58,7 @@ journal output for v3 inputs. The engine parser is authoritative for ordering, c
 causality, tick, lot, risk, and accounting invariants that JSON Schema cannot express.
 
 External strategies use the separate
-[strategy protocol v5](../contracts/strategy/v5/README.md). Persistra's host turns protocol
+[strategy protocol v6](../contracts/strategy/v6/README.md). Persistra's host turns protocol
 initialization, marked portfolio contexts, market-slice, fill, order, and rejection events into
 typed callbacks. Realized weights are available only for positive equity. The retained run
 manifest binds the strategy identity, executable hash, declared input hashes, transcript hash,

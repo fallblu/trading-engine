@@ -118,14 +118,15 @@ let capabilities_describe_execution_contracts () =
     (strings "configuration_versions");
   Alcotest.(check (list string))
     "scenario contracts"
-    [ "7"; "6"; "5"; "4"; "3" ]
+    [ "8"; "7"; "6"; "5"; "4"; "3" ]
     (strings "scenario_contract_versions");
   Alcotest.(check (list string))
     "required fields"
     [ "version"; "participation_bps"; "fixed_fee"; "fee_bps" ]
     (strings "required_fields");
   Alcotest.(check (list string))
-    "order types" [ "market"; "limit" ]
+    "order types"
+    [ "market"; "limit"; "stop"; "stop_limit" ]
     (strings "supported_order_types");
   Alcotest.(check (list string))
     "market data" [ "completed_ohlcv_bars" ]

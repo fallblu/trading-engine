@@ -326,6 +326,7 @@ let initialization () =
       initial_cash = [ ("USD", money "10000") ];
       initial_portfolio = None;
       instruments = [ instrument ];
+      venue_calendars = [];
       risk = risk ~instruments:[ instrument ] ();
       execution_model = T.Execution_model.find "completed_bar_v1" |> ok;
       execution = execution ();
