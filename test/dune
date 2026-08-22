@@ -132,6 +132,7 @@
   validate_strategy_schema.py
   ../contracts/v3/scenario.schema.json
   ../contracts/v3/journal.schema.json
+  ../contracts/diagnostic/v1/diagnostic.schema.json
   ../contracts/strategy/v3/message.schema.json
   ../contracts/strategy/v3/transcript.schema.json
   ../contracts/strategy/v3/fixtures/external.strategy.jsonl)
@@ -141,9 +142,23 @@
    %{dep:validate_strategy_schema.py}
    %{dep:../contracts/v3/scenario.schema.json}
    %{dep:../contracts/v3/journal.schema.json}
+   %{dep:../contracts/diagnostic/v1/diagnostic.schema.json}
    %{dep:../contracts/strategy/v3/message.schema.json}
    %{dep:../contracts/strategy/v3/transcript.schema.json}
    %{dep:../contracts/strategy/v3/fixtures/external.strategy.jsonl})))
+
+(rule
+ (alias runtest)
+ (deps
+  validate_diagnostic_schema.py
+  ../contracts/diagnostic/v1/diagnostic.schema.json
+  ../contracts/diagnostic/v1/fixtures/strategy-protocol.json)
+ (action
+  (run
+   python3
+   %{dep:validate_diagnostic_schema.py}
+   %{dep:../contracts/diagnostic/v1/diagnostic.schema.json}
+   %{dep:../contracts/diagnostic/v1/fixtures/strategy-protocol.json})))
 
 (rule
  (alias runtest)
