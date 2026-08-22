@@ -4,7 +4,7 @@ type common = {
   metadata : Yojson.Safe.t;
   run_id : Yojson.Safe.t;
   base_currency : Yojson.Safe.t;
-  initial_cash : Yojson.Safe.t;
+  initial_state : Yojson.Safe.t;
   instruments : Yojson.Safe.t;
   venue_calendars : Yojson.Safe.t option;
   risk : Yojson.Safe.t;
@@ -67,10 +67,14 @@ let common ~root ~contract_version fields =
   let* metadata = field ~root fields "metadata" in
   let* run_id = field ~root fields "run_id" in
   let* base_currency = field ~root fields "base_currency" in
-  let* initial_cash = field ~root fields "initial_cash" in
+  let initial_field =
+    if String.equal contract_version "6" then "initial_portfolio"
+    else "initial_cash"
+  in
+  let* initial_state = field ~root fields initial_field in
   let* instruments = field ~root fields "instruments" in
   let venue_calendars =
-    if String.equal contract_version "5" then
+    if List.mem contract_version [ "6"; "5" ] then
       List.assoc_opt "venue_calendars" fields
     else None
   in
@@ -82,7 +86,7 @@ let common ~root ~contract_version fields =
       metadata;
       run_id;
       base_currency;
-      initial_cash;
+      initial_state;
       instruments;
       venue_calendars;
       risk;
@@ -101,7 +105,11 @@ let batch json =
     match preliminary with `String value -> value | _ -> ""
   in
   let calendar_fields =
-    if String.equal contract_version "5" then [ "venue_calendars" ] else []
+    if List.mem contract_version [ "6"; "5" ] then [ "venue_calendars" ] else []
+  in
+  let initial_field =
+    if String.equal contract_version "6" then "initial_portfolio"
+    else "initial_cash"
   in
   let* fields =
     object_fields ~json_path:root ~name:"scenario"
@@ -111,7 +119,7 @@ let batch json =
            "metadata";
            "run_id";
            "base_currency";
-           "initial_cash";
+           initial_field;
            "instruments";
            "risk";
            "execution";
@@ -131,7 +139,11 @@ let batch json =
 let stream_header ~contract_version json =
   let root = "$.payload" in
   let calendar_fields =
-    if String.equal contract_version "5" then [ "venue_calendars" ] else []
+    if List.mem contract_version [ "6"; "5" ] then [ "venue_calendars" ] else []
+  in
+  let initial_field =
+    if String.equal contract_version "6" then "initial_portfolio"
+    else "initial_cash"
   in
   let* fields =
     object_fields ~json_path:root ~name:"scenario stream header payload"
@@ -140,7 +152,7 @@ let stream_header ~contract_version json =
            "metadata";
            "run_id";
            "base_currency";
-           "initial_cash";
+           initial_field;
            "instruments";
            "risk";
            "execution";

@@ -25,6 +25,7 @@ type valuation = { account : Account.valuation; margin : Risk.margin_snapshot }
 
 type event =
   | Run_started of { scenario_sha256 : string; execution_model : string }
+  | Initial_state of { portfolio : Initial_portfolio.t; valuation : valuation }
   | Market_slice_received of Market_slice.t
   | Target_portfolio_requested of {
       basis : target_basis;
@@ -120,6 +121,7 @@ let target_basis_to_string = function
 
 let event_name = function
   | Run_started _ -> "run_started"
+  | Initial_state _ -> "initial_state"
   | Market_slice_received _ -> "market_slice_received"
   | Target_portfolio_requested _ -> "target_portfolio_requested"
   | Order_accepted _ -> "order_accepted"

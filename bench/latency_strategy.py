@@ -36,7 +36,7 @@ for line in sys.stdin:
     print(
         json.dumps(
             {
-                "strategy_protocol_version": "3",
+                "strategy_protocol_version": "4",
                 "strategy_sequence": request["strategy_sequence"],
                 "message_type": response_type,
                 "payload": payload,

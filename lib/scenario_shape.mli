@@ -6,7 +6,7 @@ type common = {
   metadata : Yojson.Safe.t;
   run_id : Yojson.Safe.t;
   base_currency : Yojson.Safe.t;
-  initial_cash : Yojson.Safe.t;
+  initial_state : Yojson.Safe.t;
   instruments : Yojson.Safe.t;
   venue_calendars : Yojson.Safe.t option;
   risk : Yojson.Safe.t;
