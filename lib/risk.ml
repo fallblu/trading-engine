@@ -153,9 +153,7 @@ let create_group_limits ~max_gross_exposure ~max_long_exposure
   then Error "group money limits must be positive"
   else if
     Option.exists
-      (fun value ->
-        Scalar.Ratio.compare value Scalar.Ratio.one > 0
-        || Scalar.Ratio.to_micros value <= 0L)
+      (fun value -> Scalar.Ratio.compare value Scalar.Ratio.one > 0)
       max_concentration
   then Error "group concentration must be greater than zero and at most one"
   else if
@@ -607,9 +605,6 @@ let check_initial state valuation =
         else
           match group.limits.max_concentration with
           | None -> Ok ()
-          | Some _
-            when Scalar.Money.compare valuation.equity Scalar.Money.zero <= 0 ->
-              Error "group concentration requires positive equity"
           | Some limit ->
               let* threshold =
                 Scalar.Money.multiply_ratio valuation.equity limit
@@ -731,8 +726,6 @@ let check_group_fill_limit state ~equity values =
         let* () =
           match group.limits.max_concentration with
           | None -> Ok ()
-          | Some _ when Scalar.Money.compare equity Scalar.Money.zero <= 0 ->
-              Error (Invalid "group concentration requires positive equity")
           | Some limit ->
               let* threshold =
                 Scalar.Money.multiply_ratio equity limit |> invalid
@@ -746,100 +739,10 @@ let check_group_fill_limit state ~equity values =
   in
   check state.groups
 
-let check_post_fill_for state ~instrument_id ~before_position ~after_position
+let check_post_fill_for state ~instrument_id:_ ~before_position ~after_position
     ~before ~after =
-  match instrument_policy state instrument_id with
-  | None -> Error (Invalid "fill has no instrument risk policy")
-  | Some policy ->
-      let* before_absolute =
-        Scalar.Quantity.absolute before_position |> invalid
-      in
-      let* after_absolute =
-        Scalar.Quantity.absolute after_position |> invalid
-      in
-      let increasing =
-        Scalar.Quantity.compare after_absolute before_absolute > 0
-      in
-      let* () =
-        if not increasing then Ok ()
-        else if
-          Scalar.Quantity.compare after_position policy.max_long_position > 0
-        then
-          Error
-            (Limit
-               (Instrument_maximum_long_position
-                  (instrument_id, policy.max_long_position)))
-        else
-          let* minimum_short =
-            Scalar.Quantity.negate policy.max_short_position |> invalid
-          in
-          if Scalar.Quantity.compare after_position minimum_short < 0 then
-            Error
-              (Limit
-                 (Instrument_maximum_short_position
-                    (instrument_id, policy.max_short_position)))
-          else if
-            (not policy.shorting_allowed)
-            && Scalar.Quantity.is_negative after_position
-          then Error (Limit (Instrument_shorting_disabled instrument_id))
-          else Ok ()
-      in
-      let* values =
-        List.map
-          (fun (position : Account.position_attribution) ->
-            let* absolute_value =
-              Scalar.Money.absolute position.base_market_value |> invalid
-            in
-            Ok
-              {
-                instrument_id = position.instrument_id;
-                quantity = position.quantity;
-                signed_value = position.base_market_value;
-                absolute_value;
-              })
-          after.Account.positions
-        |> List.fold_left
-             (fun result item ->
-               let* values = result in
-               let* value = item in
-               Ok (value :: values))
-             (Ok [])
-        |> Result.map List.rev
-      in
-      let* current =
-        match
-          List.find_opt
-            (fun value -> Id.Instrument.equal value.instrument_id instrument_id)
-            values
-        with
-        | Some value -> Ok value
-        | None ->
-            Ok
-              {
-                instrument_id;
-                quantity = Scalar.Quantity.zero;
-                signed_value = Scalar.Money.zero;
-                absolute_value = Scalar.Money.zero;
-              }
-      in
-      let* () =
-        match policy.max_notional_exposure with
-        | Some limit
-          when increasing
-               && Scalar.Money.compare current.absolute_value limit > 0 ->
-            Error (Limit (Instrument_maximum_notional (instrument_id, limit)))
-        | _ -> Ok ()
-      in
-      let* gross, _, _, _ = sum_values values |> invalid in
-      let* () =
-        if state.versioned then Ok ()
-        else if Scalar.Money.compare gross before.Account.gross_exposure <= 0
-        then Ok ()
-        else
-          check_fill_initial state ~equity:after.Account.equity
-            ~gross_exposure:gross
-      in
-      check_group_fill_limit state ~equity:after.equity values
+  if state.versioned then Ok ()
+  else check_post_fill state ~before_position ~after_position ~before ~after
 
 let check_position state quantity =
   if Scalar.Quantity.compare quantity state.max_long_position > 0 then
@@ -1009,49 +912,6 @@ let fill_projected_quantities state ~account ~oms ~(order : Order.t)
        (Ok [])
   |> Result.map List.rev
 
-let projected_gross_exposure state ~account ~oms ~marks ~fx_rates request =
-  let* quantities =
-    projected_valuation_quantities state ~account ~oms request
-  in
-  let mark_map =
-    List.fold_left
-      (fun map (instrument_id, mark) ->
-        Id.Instrument.Map.add instrument_id mark map)
-      Id.Instrument.Map.empty marks
-  in
-  let module Currency_map = Map.Make (String) in
-  let fx_map =
-    List.fold_left
-      (fun map (currency, rate) -> Currency_map.add currency rate map)
-      Currency_map.empty fx_rates
-  in
-  let* gross_exposure =
-    List.fold_left
-      (fun result (instrument_id, quantity) ->
-        let* gross = result in
-        let* instrument =
-          match instrument state instrument_id with
-          | Some value -> Ok value
-          | None -> Error "projected position has no configured instrument"
-        in
-        let* mark =
-          match Id.Instrument.Map.find_opt instrument_id mark_map with
-          | Some value -> Ok value
-          | None -> Error "projected position has no current market price"
-        in
-        let* rate =
-          match Currency_map.find_opt instrument.quote_currency fx_map with
-          | Some value -> Ok value
-          | None -> Error "projected position has no current FX rate"
-        in
-        let* value = Scalar.Money.notional mark quantity in
-        let* value = Scalar.Money.absolute value in
-        let* value = Scalar.Money.convert value ~rate in
-        Scalar.Money.add gross value)
-      (Ok Scalar.Money.zero) quantities
-  in
-  Ok gross_exposure
-
 let projected_values state ~marks ~fx_rates quantities =
   let mark_map =
     List.fold_left
@@ -1198,8 +1058,6 @@ let check_projected_values state ~equity values =
           (fun () ->
             match group.limits.max_concentration with
             | None -> Ok ()
-            | Some _ when Scalar.Money.compare equity Scalar.Money.zero <= 0 ->
-                Error "group concentration requires positive equity"
             | Some limit ->
                 let* exceeded = concentration_exceeded limit in
                 if exceeded then
@@ -1227,15 +1085,6 @@ let check_reserved_fill state ~account ~oms ~marks ~fx_rates ~(order : Order.t)
       match instrument_policy state instrument_id with
       | Some policy -> Ok policy
       | None -> Error (Invalid "fill has no instrument risk policy")
-    in
-    let* current =
-      match
-        List.find_opt
-          (fun value -> Id.Instrument.equal value.instrument_id instrument_id)
-          values
-      with
-      | Some value -> Ok value
-      | None -> Error (Invalid "fill projection omitted its instrument")
     in
     let* () =
       List.fold_left
@@ -1278,73 +1127,44 @@ let check_reserved_fill state ~account ~oms ~marks ~fx_rates ~(order : Order.t)
               | _ -> Ok ())
         (Ok ()) values
     in
-    if Scalar.Quantity.compare current.quantity policy.max_long_position > 0
-    then
+    let* gross, _, _, _ = sum_values values |> invalid in
+    let* () =
+      if Scalar.Money.compare gross state.max_gross_exposure > 0 then
+        Error (Limit (Maximum_gross_exposure state.max_gross_exposure))
+      else
+        let* leveraged_equity =
+          Scalar.Money.multiply_ratio after.Account.equity state.max_leverage
+          |> invalid
+        in
+        if Scalar.Money.compare gross leveraged_equity > 0 then
+          Error (Limit (Maximum_leverage state.max_leverage))
+        else Ok ()
+    in
+    let* initial_requirement =
+      List.fold_left
+        (fun result value ->
+          let* total = result in
+          let* item_policy =
+            match instrument_policy state value.instrument_id with
+            | Some policy -> Ok policy
+            | None -> Error (Invalid "fill projection has no risk policy")
+          in
+          let* requirement =
+            Scalar.Money.bps_ceil value.absolute_value
+              ~bps:item_policy.initial_margin_bps
+            |> invalid
+          in
+          Scalar.Money.add total requirement |> invalid)
+        (Ok Scalar.Money.zero) values
+    in
+    let* excess =
+      Scalar.Money.subtract after.equity initial_requirement |> invalid
+    in
+    if Scalar.Money.compare excess Scalar.Money.zero < 0 then
       Error
         (Limit
-           (Instrument_maximum_long_position
-              (instrument_id, policy.max_long_position)))
-    else
-      let* minimum_short =
-        Scalar.Quantity.negate policy.max_short_position |> invalid
-      in
-      if Scalar.Quantity.compare current.quantity minimum_short < 0 then
-        Error
-          (Limit
-             (Instrument_maximum_short_position
-                (instrument_id, policy.max_short_position)))
-      else if
-        (not policy.shorting_allowed)
-        && Scalar.Quantity.is_negative current.quantity
-      then Error (Limit (Instrument_shorting_disabled instrument_id))
-      else
-        let* () =
-          match policy.max_notional_exposure with
-          | Some limit
-            when Scalar.Money.compare current.absolute_value limit > 0 ->
-              Error (Limit (Instrument_maximum_notional (instrument_id, limit)))
-          | _ -> Ok ()
-        in
-        let* gross, _, _, _ = sum_values values |> invalid in
-        let* () =
-          if Scalar.Money.compare gross state.max_gross_exposure > 0 then
-            Error (Limit (Maximum_gross_exposure state.max_gross_exposure))
-          else
-            let* leveraged_equity =
-              Scalar.Money.multiply_ratio after.Account.equity
-                state.max_leverage
-              |> invalid
-            in
-            if Scalar.Money.compare gross leveraged_equity > 0 then
-              Error (Limit (Maximum_leverage state.max_leverage))
-            else Ok ()
-        in
-        let* initial_requirement =
-          List.fold_left
-            (fun result value ->
-              let* total = result in
-              let* item_policy =
-                match instrument_policy state value.instrument_id with
-                | Some policy -> Ok policy
-                | None -> Error (Invalid "fill projection has no risk policy")
-              in
-              let* requirement =
-                Scalar.Money.bps_ceil value.absolute_value
-                  ~bps:item_policy.initial_margin_bps
-                |> invalid
-              in
-              Scalar.Money.add total requirement |> invalid)
-            (Ok Scalar.Money.zero) values
-        in
-        let* excess =
-          Scalar.Money.subtract after.equity initial_requirement |> invalid
-        in
-        if Scalar.Money.compare excess Scalar.Money.zero < 0 then
-          Error
-            (Limit
-               (Instrument_initial_margin
-                  (instrument_id, policy.initial_margin_bps)))
-        else check_group_fill_limit state ~equity:after.equity values
+           (Instrument_initial_margin (instrument_id, policy.initial_margin_bps)))
+    else check_group_fill_limit state ~equity:after.equity values
 
 let check state ~account ~oms ~marks ~fx_rates (request : Order.request) =
   match instrument state request.instrument_id with
