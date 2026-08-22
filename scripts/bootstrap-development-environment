@@ -26,7 +26,6 @@ printf '%s\n' "Installing locked OCaml development dependencies..."
 opam install "$repository_root" \
   --deps-only \
   --with-test \
-  --with-doc \
   --locked \
   --require-checksums \
   --switch "$repository_root" \
