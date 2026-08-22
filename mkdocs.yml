@@ -45,6 +45,7 @@ nav:
       - Documentation platform: docs/documentation-platform.md
       - Release artifacts: docs/release-artifacts.md
       - Security maintenance: docs/security-maintenance.md
+      - Repository governance: docs/repository-governance.md
   - Contributing: CONTRIBUTING.md
   - Support: SUPPORT.md
   - Changelog: CHANGELOG.md
