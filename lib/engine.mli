@@ -10,6 +10,15 @@ val config :
   max_internal_events:int ->
   (config, string) result
 
+val config_v8 :
+  contract_version:string ->
+  risk:Risk.t ->
+  venue_calendars:Venue_calendar.t list ->
+  execution_model:Execution_model.t ->
+  execution:Execution.t ->
+  max_internal_events:int ->
+  (config, string) result
+
 module Interactive : sig
   type t
   type progress

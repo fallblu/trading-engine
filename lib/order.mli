@@ -1,7 +1,23 @@
 (** Immutable orders and their legal state transitions. *)
 
 type side = Buy | Sell
-type kind = Market | Limit of Scalar.Price.t
+
+type kind =
+  | Market
+  | Limit of Scalar.Price.t
+  | Stop of Scalar.Price.t
+  | Stop_limit of {
+      trigger_price : Scalar.Price.t;
+      limit_price : Scalar.Price.t;
+    }
+
+type time_in_force =
+  | Gtc
+  | Ioc
+  | Fok
+  | Day of { venue_id : Id.Venue.t; calendar_id : Id.Venue_calendar.t }
+  | Gtd of Ptime.t
+
 type origin = Direct | Target_rebalance | Margin_liquidation
 
 type request = private {
@@ -9,8 +25,13 @@ type request = private {
   side : side;
   quantity : Scalar.Quantity.t;
   kind : kind;
+  time_in_force : time_in_force;
   origin : origin;
 }
+
+type trigger_state =
+  | Dormant
+  | Triggered of { triggered_at : Ptime.t; triggered_slice_sequence : int64 }
 
 type status =
   | Working
@@ -29,14 +50,28 @@ type t = private {
   eligible_after_slice_sequence : int64;
   filled_quantity : Scalar.Quantity.t;
   filled_notional : Scalar.Money.t;
+  trigger_state : trigger_state option;
   status : status;
 }
+
+val compatibility_time_in_force : kind -> time_in_force
+(** Preserve the pre-v8 mapping: market orders are IOC and all other kinds are
+    GTC. *)
 
 val request :
   instrument_id:Id.Instrument.t ->
   side:side ->
   quantity:Scalar.Quantity.t ->
   kind:kind ->
+  origin:origin ->
+  (request, string) result
+
+val request_v8 :
+  instrument_id:Id.Instrument.t ->
+  side:side ->
+  quantity:Scalar.Quantity.t ->
+  kind:kind ->
+  time_in_force:time_in_force ->
   origin:origin ->
   (request, string) result
 
@@ -63,6 +98,17 @@ val remaining_quantity : t -> Scalar.Quantity.t
 val is_active : t -> bool
 val is_terminal : t -> bool
 val is_market : t -> bool
+val is_ioc : t -> bool
+val is_fok : t -> bool
+val is_dormant_stop : t -> bool
+val effective_kind : t -> kind option
+
+val trigger :
+  t ->
+  updated_event_id:Id.Event.t ->
+  triggered_at:Ptime.t ->
+  triggered_slice_sequence:int64 ->
+  (t, string) result
 
 val apply_fill :
   t ->
@@ -81,6 +127,7 @@ val adjust_for_split :
 
 val side_to_string : side -> string
 val kind_to_string : kind -> string
+val time_in_force_to_string : time_in_force -> string
 val origin_to_string : origin -> string
 val status_to_string : status -> string
 val pp : Format.formatter -> t -> unit

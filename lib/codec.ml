@@ -239,6 +239,8 @@ let request_fields request =
     match request.Order.kind with
     | Order.Market -> ("market", `Null)
     | Order.Limit value -> ("limit", price value)
+    | Order.Stop value -> ("stop", price value)
+    | Order.Stop_limit { limit_price; _ } -> ("stop_limit", price limit_price)
   in
   [
     ("instrument_id", instrument_id request.instrument_id);
@@ -246,6 +248,41 @@ let request_fields request =
     ("quantity", quantity request.quantity);
     ("order_kind", string kind);
     ("limit_price", limit_price);
+    ("origin", string (Order.origin_to_string request.origin));
+  ]
+
+let request_fields_v8 request =
+  let kind, trigger_price, limit_price =
+    match request.Order.kind with
+    | Order.Market -> ("market", `Null, `Null)
+    | Order.Limit value -> ("limit", `Null, price value)
+    | Order.Stop value -> ("stop", price value, `Null)
+    | Order.Stop_limit { trigger_price; limit_price } ->
+        ("stop_limit", price trigger_price, price limit_price)
+  in
+  let tif, venue_id, calendar_id, expires_at =
+    match request.time_in_force with
+    | Order.Gtc -> ("gtc", `Null, `Null, `Null)
+    | Order.Ioc -> ("ioc", `Null, `Null, `Null)
+    | Order.Fok -> ("fok", `Null, `Null, `Null)
+    | Order.Day { venue_id; calendar_id } ->
+        ( "day",
+          string (Id.Venue.to_string venue_id),
+          string (Id.Venue_calendar.to_string calendar_id),
+          `Null )
+    | Order.Gtd value -> ("gtd", `Null, `Null, timestamp value)
+  in
+  [
+    ("instrument_id", instrument_id request.instrument_id);
+    ("side", string (Order.side_to_string request.side));
+    ("quantity", quantity request.quantity);
+    ("order_kind", string kind);
+    ("trigger_price", trigger_price);
+    ("limit_price", limit_price);
+    ("time_in_force", string tif);
+    ("venue_id", venue_id);
+    ("calendar_id", calendar_id);
+    ("expires_at", expires_at);
     ("origin", string (Order.origin_to_string request.origin));
   ]
 
@@ -269,6 +306,39 @@ let order_to_yojson order =
         ("status", string (Order.status_to_string order.status));
         ("rejection_reason", rejection_reason);
       ])
+
+let order_to_yojson_v8 order =
+  let rejection_reason =
+    match order.Order.status with
+    | Order.Rejected reason -> string reason
+    | _ -> `Null
+  in
+  let triggered_at, triggered_slice_sequence =
+    match order.trigger_state with
+    | Some (Order.Triggered { triggered_at; triggered_slice_sequence }) ->
+        (timestamp triggered_at, int64 triggered_slice_sequence)
+    | Some Order.Dormant | None -> (`Null, `Null)
+  in
+  `Assoc
+    ((("order_id", order_id order.id) :: request_fields_v8 order.request)
+    @ [
+        ("created_event_id", string (Id.Event.to_string order.created_event_id));
+        ("updated_event_id", string (Id.Event.to_string order.updated_event_id));
+        ("created_sequence", int64 order.created_sequence);
+        ("created_at", timestamp order.created_at);
+        ( "eligible_after_slice_sequence",
+          int64 order.eligible_after_slice_sequence );
+        ("triggered_at", triggered_at);
+        ("triggered_slice_sequence", triggered_slice_sequence);
+        ("filled_quantity", quantity order.filled_quantity);
+        ("filled_notional", money order.filled_notional);
+        ("status", string (Order.status_to_string order.status));
+        ("rejection_reason", rejection_reason);
+      ])
+
+let versioned_order_to_yojson ~contract_version order =
+  if String.equal contract_version "8" then order_to_yojson_v8 order
+  else order_to_yojson order
 
 let fill_to_yojson fill =
   `Assoc
@@ -466,11 +536,13 @@ let payload_to_yojson ~contract_version = function
           ("targets", `List (List.map requested_target_to_yojson targets));
         ]
   | Audit.Order_accepted order | Audit.Order_rejected order ->
-      order_to_yojson order
+      versioned_order_to_yojson ~contract_version order
+  | Audit.Order_triggered order ->
+      versioned_order_to_yojson ~contract_version order
   | Audit.Order_cancelled { order; reason } ->
       `Assoc
         [
-          ("order", order_to_yojson order);
+          ("order", versioned_order_to_yojson ~contract_version order);
           ("reason", string (Audit.cancellation_reason_to_string reason));
         ]
   | Audit.Split_applied { action; previous_quantity; adjusted_quantity } ->
@@ -490,7 +562,7 @@ let payload_to_yojson ~contract_version = function
   | Audit.Order_adjusted { order; action_id } ->
       `Assoc
         [
-          ("order", order_to_yojson order);
+          ("order", versioned_order_to_yojson ~contract_version order);
           ("action_id", string (Id.Corporate_action.to_string action_id));
         ]
   | Audit.Fill_applied fill -> fill_to_yojson fill

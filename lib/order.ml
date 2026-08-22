@@ -1,5 +1,21 @@
 type side = Buy | Sell
-type kind = Market | Limit of Scalar.Price.t
+
+type kind =
+  | Market
+  | Limit of Scalar.Price.t
+  | Stop of Scalar.Price.t
+  | Stop_limit of {
+      trigger_price : Scalar.Price.t;
+      limit_price : Scalar.Price.t;
+    }
+
+type time_in_force =
+  | Gtc
+  | Ioc
+  | Fok
+  | Day of { venue_id : Id.Venue.t; calendar_id : Id.Venue_calendar.t }
+  | Gtd of Ptime.t
+
 type origin = Direct | Target_rebalance | Margin_liquidation
 
 type request = {
@@ -7,8 +23,13 @@ type request = {
   side : side;
   quantity : Scalar.Quantity.t;
   kind : kind;
+  time_in_force : time_in_force;
   origin : origin;
 }
+
+type trigger_state =
+  | Dormant
+  | Triggered of { triggered_at : Ptime.t; triggered_slice_sequence : int64 }
 
 type status =
   | Working
@@ -30,13 +51,33 @@ type t = {
   eligible_after_slice_sequence : int64;
   filled_quantity : Scalar.Quantity.t;
   filled_notional : Scalar.Money.t;
+  trigger_state : trigger_state option;
   status : status;
 }
 
-let request ~instrument_id ~side ~quantity ~kind ~origin =
+let compatibility_time_in_force = function Market -> Ioc | _ -> Gtc
+
+let valid_stop_limit side trigger_price limit_price =
+  match side with
+  | Buy -> Scalar.Price.compare limit_price trigger_price >= 0
+  | Sell -> Scalar.Price.compare limit_price trigger_price <= 0
+
+let request_v8 ~instrument_id ~side ~quantity ~kind ~time_in_force ~origin =
   if not (Scalar.Quantity.is_positive quantity) then
     Error "order quantity must be positive"
-  else Ok { instrument_id; side; quantity; kind; origin }
+  else
+    match kind with
+    | Stop_limit { trigger_price; limit_price }
+      when not (valid_stop_limit side trigger_price limit_price) ->
+        Error
+          "buy stop-limit prices require limit >= trigger and sell stop-limit \
+           prices require limit <= trigger"
+    | _ -> Ok { instrument_id; side; quantity; kind; time_in_force; origin }
+
+let request ~instrument_id ~side ~quantity ~kind ~origin =
+  request_v8 ~instrument_id ~side ~quantity ~kind
+    ~time_in_force:(compatibility_time_in_force kind)
+    ~origin
 
 let make ~id ~created_event_id ~sequence ~created_at
     ~eligible_after_slice_sequence ~request ~status =
@@ -44,6 +85,11 @@ let make ~id ~created_event_id ~sequence ~created_at
     Error "order sequence must be nonnegative"
   else if Int64.compare eligible_after_slice_sequence 0L < 0 then
     Error "order eligibility sequence must be nonnegative"
+  else if
+    match request.time_in_force with
+    | Gtd expires_at -> Ptime.compare expires_at created_at <= 0
+    | Gtc | Ioc | Fok | Day _ -> false
+  then Error "GTD expiry must follow order creation"
   else
     Ok
       {
@@ -56,6 +102,10 @@ let make ~id ~created_event_id ~sequence ~created_at
         eligible_after_slice_sequence;
         filled_quantity = Scalar.Quantity.zero;
         filled_notional = Scalar.Money.zero;
+        trigger_state =
+          (match request.kind with
+          | Stop _ | Stop_limit _ -> Some Dormant
+          | Market | Limit _ -> None);
         status;
       }
 
@@ -88,7 +138,47 @@ let is_active order =
 let is_terminal order = not (is_active order)
 
 let is_market order =
-  match order.request.kind with Market -> true | Limit _ -> false
+  match order.request.kind with
+  | Market -> true
+  | Limit _ | Stop _ | Stop_limit _ -> false
+
+let is_ioc order =
+  match order.request.time_in_force with Ioc | Fok -> true | _ -> false
+
+let is_fok order =
+  match order.request.time_in_force with Fok -> true | _ -> false
+
+let is_dormant_stop order =
+  match order.trigger_state with
+  | Some Dormant -> true
+  | Some (Triggered _) | None -> false
+
+let trigger order ~updated_event_id ~triggered_at ~triggered_slice_sequence =
+  if not (is_active order) then Error "cannot trigger a terminal order"
+  else
+    match order.trigger_state with
+    | None -> Error "cannot trigger an unconditional order"
+    | Some (Triggered _) -> Error "cannot trigger an already-triggered order"
+    | Some Dormant ->
+        if Int64.compare triggered_slice_sequence 0L < 0 then
+          Error "trigger slice sequence must be nonnegative"
+        else
+          Ok
+            {
+              order with
+              updated_event_id;
+              trigger_state =
+                Some (Triggered { triggered_at; triggered_slice_sequence });
+            }
+
+let effective_kind order =
+  match (order.request.kind, order.trigger_state) with
+  | ((Market | Limit _) as kind), _ -> Some kind
+  | Stop _, Some Dormant | Stop_limit _, Some Dormant -> None
+  | Stop _, Some (Triggered _) -> Some Market
+  | Stop_limit { limit_price; _ }, Some (Triggered _) ->
+      Some (Limit limit_price)
+  | (Stop _ | Stop_limit _), None -> None
 
 let apply_fill order ~quantity ~notional =
   if not (is_active order) then Error "cannot fill a terminal order"
@@ -131,6 +221,20 @@ let adjust_for_split order ~updated_event_id ~numerator ~denominator =
           Scalar.Price.scale_ratio_exact price ~numerator:denominator
             ~denominator:numerator
           |> Result.map (fun price -> Limit price)
+      | Stop trigger_price ->
+          Scalar.Price.scale_ratio_exact trigger_price ~numerator:denominator
+            ~denominator:numerator
+          |> Result.map (fun price -> Stop price)
+      | Stop_limit { trigger_price; limit_price } ->
+          let* trigger_price =
+            Scalar.Price.scale_ratio_exact trigger_price ~numerator:denominator
+              ~denominator:numerator
+          in
+          let* limit_price =
+            Scalar.Price.scale_ratio_exact limit_price ~numerator:denominator
+              ~denominator:numerator
+          in
+          Ok (Stop_limit { trigger_price; limit_price })
     in
     if not (Scalar.Quantity.is_positive quantity) then
       Error "split-adjusted order quantity must be positive"
@@ -148,6 +252,22 @@ let side_to_string = function Buy -> "buy" | Sell -> "sell"
 let kind_to_string = function
   | Market -> "market"
   | Limit price -> "limit@" ^ Scalar.Price.to_decimal_string price
+  | Stop price -> "stop@" ^ Scalar.Price.to_decimal_string price
+  | Stop_limit { trigger_price; limit_price } ->
+      "stop_limit@"
+      ^ Scalar.Price.to_decimal_string trigger_price
+      ^ "/"
+      ^ Scalar.Price.to_decimal_string limit_price
+
+let time_in_force_to_string = function
+  | Gtc -> "gtc"
+  | Ioc -> "ioc"
+  | Fok -> "fok"
+  | Day { venue_id; calendar_id } ->
+      Printf.sprintf "day@%s/%s"
+        (Id.Venue.to_string venue_id)
+        (Id.Venue_calendar.to_string calendar_id)
+  | Gtd expires_at -> "gtd@" ^ Ptime.to_rfc3339 expires_at
 
 let origin_to_string = function
   | Direct -> "direct"
