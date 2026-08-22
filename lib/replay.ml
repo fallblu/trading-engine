@@ -69,14 +69,18 @@ let add_audit_count count events =
   else Ok (Int64.add count added)
 
 let engine_config ~contract_version ~risk ~venue_calendars ~execution_model
-    ~execution ~financing ~max_internal_events =
-  match financing with
-  | None ->
+    ~execution ~financing ~settlement ~max_internal_events =
+  match (financing, settlement) with
+  | None, None ->
       Engine.config_v8 ~contract_version ~risk ~venue_calendars ~execution_model
         ~execution ~max_internal_events
-  | Some financing ->
+  | Some financing, None ->
       Engine.config_v10 ~contract_version ~risk ~venue_calendars
         ~execution_model ~execution ~financing ~max_internal_events
+  | Some financing, Some settlement ->
+      Engine.config_v11 ~contract_version ~risk ~venue_calendars
+        ~execution_model ~execution ~financing ~settlement ~max_internal_events
+  | None, Some _ -> Error "settlement requires financing configuration"
 
 let run ~scenario_sha256 ?journal_path ?(durability = Artifact_writer.Buffered)
     scenario =
@@ -87,7 +91,7 @@ let run ~scenario_sha256 ?journal_path ?(durability = Artifact_writer.Buffered)
     engine_config ~contract_version:scenario.contract_version
       ~risk:scenario.risk ~venue_calendars:scenario.venue_calendars
       ~execution_model:scenario.execution_model ~execution:scenario.execution
-      ~financing:scenario.financing
+      ~financing:scenario.financing ~settlement:scenario.settlement
       ~max_internal_events:scenario.max_internal_events
     |> reducer_result
   in
@@ -168,6 +172,7 @@ let run_stream_pass ~scenario_sha256 ~journal channel =
               ~risk:header.Scenario.risk ~venue_calendars:header.venue_calendars
               ~execution_model:header.execution_model
               ~execution:header.execution ~financing:header.financing
+              ~settlement:header.settlement
               ~max_internal_events:header.max_internal_events
             |> reducer_result
           with

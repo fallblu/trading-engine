@@ -12,6 +12,7 @@ type common = {
   risk : Yojson.Safe.t;
   execution : Yojson.Safe.t;
   financing : Yojson.Safe.t option;
+  settlement : Yojson.Safe.t option;
   max_internal_events : Yojson.Safe.t;
 }
 

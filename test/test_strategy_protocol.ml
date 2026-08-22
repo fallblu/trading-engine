@@ -33,6 +33,7 @@ let initialization () =
           ~fee_schedules:[ fee_schedule ]
         |> ok;
       financing = Some T.Financing.legacy_policy;
+      settlement = None;
     }
 
 let field name = function
@@ -44,7 +45,7 @@ let initialize_message_is_complete () =
     T.Strategy_protocol.initialize_message ~sequence:1L (initialization ())
   in
   Alcotest.(check string)
-    "protocol version" "8"
+    "protocol version" "9"
     (match field "strategy_protocol_version" message with
     | `String value -> value
     | _ -> Alcotest.fail "expected version string");
@@ -221,7 +222,7 @@ let nonpositive_equity_omits_weights () =
 let response message_type payload =
   `Assoc
     [
-      ("strategy_protocol_version", `String "8");
+      ("strategy_protocol_version", `String "9");
       ("strategy_sequence", `String "3");
       ("message_type", `String message_type);
       ("payload", payload);

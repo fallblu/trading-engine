@@ -1,11 +1,11 @@
 # Execution model
 
 The engine selects a compiled execution module by the scenario's stable `execution.model` name.
-Contract v10 advertises and accepts `completed_bar_v1`; embedders can inject another module through
+Contract v11 advertises and accepts `completed_bar_v1`; embedders can inject another module through
 the typed engine configuration without introducing runtime shared-library loading. The selected
 name is repeated in both terminal audit records.
 
-Each compiled model owns a strict configuration contract. The v10 envelope separates selection from
+Each compiled model owns a strict configuration contract. The v11 envelope separates selection from
 model-specific parameters:
 
 ```json

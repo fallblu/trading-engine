@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add deterministic trade-date and settlement-date accounting, versioned business-date settlement
+  calendars, settled and unsettled cash and position attribution, explicit settlement buying-power
+  policies, and auditable settlement completion and failure events.
+- Publish scenario/journal contract v11 and external strategy protocol v9 while preserving v10 and
+  protocol v8 as frozen compatibility contracts.
 - Add effective-time borrow availability, signed rates, locate clipping or rejection, recalls,
   deterministic close-outs, and explicit missing-data behavior.
 - Add effective-time currency credit/debit rates with Actual/365 or Actual/360 day count, simple or

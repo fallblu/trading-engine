@@ -7,11 +7,12 @@ type config = {
   execution_model : Execution_model.t;
   execution : Execution.t;
   financing : Financing.policy option;
+  settlement : Settlement.policy option;
   max_internal_events : int;
 }
 
 let make_config ~venue_calendars ~contract_version ~risk ~execution_model
-    ~execution ~financing ~max_internal_events =
+    ~execution ~financing ~settlement ~max_internal_events =
   if not (Contract.is_supported contract_version) then
     Error "engine contract version is unsupported"
   else if max_internal_events <= 0 then
@@ -29,23 +30,30 @@ let make_config ~venue_calendars ~contract_version ~risk ~execution_model
         execution_model;
         execution;
         financing;
+        settlement;
         max_internal_events;
       }
 
 let config ~contract_version ~risk ~execution_model ~execution
     ~max_internal_events =
   make_config ~venue_calendars:[] ~contract_version ~risk ~execution_model
-    ~execution ~financing:None ~max_internal_events
+    ~execution ~financing:None ~max_internal_events ~settlement:None
 
 let config_v8 ~contract_version ~risk ~venue_calendars ~execution_model
     ~execution ~max_internal_events =
   make_config ~venue_calendars ~contract_version ~risk ~execution_model
-    ~execution ~financing:None ~max_internal_events
+    ~execution ~financing:None ~max_internal_events ~settlement:None
 
 let config_v10 ~contract_version ~risk ~venue_calendars ~execution_model
     ~execution ~financing ~max_internal_events =
   make_config ~venue_calendars ~contract_version ~risk ~execution_model
-    ~execution ~financing:(Some financing) ~max_internal_events
+    ~execution ~financing:(Some financing) ~max_internal_events ~settlement:None
+
+let config_v11 ~contract_version ~risk ~venue_calendars ~execution_model
+    ~execution ~financing ~settlement ~max_internal_events =
+  make_config ~venue_calendars ~contract_version ~risk ~execution_model
+    ~execution ~financing:(Some financing) ~settlement:(Some settlement)
+    ~max_internal_events
 
 let valid_sha256 value =
   String.length value = 64
@@ -77,6 +85,7 @@ module Interactive = struct
     latest_fx_rates : (string * Scalar.Price.t) list;
     latest_borrow : Financing.borrow_observation Id.Instrument.Map.t;
     latest_cash_rates : Financing.cash_rate_observation Currency_map.t;
+    settlement_instructions : Settlement.instruction list;
     initial_portfolio : Initial_portfolio.t option;
     applied_action_ids : Id.Corporate_action.Set.t;
     desired_targets : desired_targets option;
@@ -140,6 +149,7 @@ module Interactive = struct
         latest_fx_rates;
         latest_borrow = Id.Instrument.Map.empty;
         latest_cash_rates = Currency_map.empty;
+        settlement_instructions = [];
         initial_portfolio;
         applied_action_ids = Id.Corporate_action.Set.empty;
         desired_targets = None;
@@ -1010,6 +1020,77 @@ module Interactive = struct
         in
         apply_cash_interest reduction market_slice policy
 
+  let process_settlements reduction (market_slice : Market_slice.t) =
+    match reduction.state.config.settlement with
+    | None -> Ok reduction
+    | Some _ ->
+        List.fold_left
+          (fun result (instruction : Settlement.instruction) ->
+            let* reduction = result in
+            match instruction.status with
+            | Settlement.Settled _ | Settlement.Failed _ -> Ok reduction
+            | Settlement.Pending ->
+                if not (Settlement.is_due instruction market_slice.start_at)
+                then Ok reduction
+                else
+                  let failure =
+                    List.find_opt
+                      (fun (failure : Settlement.failure) ->
+                        String.equal failure.instruction_id
+                          instruction.instruction_id)
+                      market_slice.Market_slice.settlement_failures
+                  in
+                  let* instruction, account, event =
+                    match failure with
+                    | Some failure ->
+                        let* instruction =
+                          Settlement.fail instruction
+                            ~failed_at:market_slice.start_at
+                            ~reason:failure.reason
+                        in
+                        Ok
+                          ( instruction,
+                            reduction.state.account,
+                            Audit.Settlement_failed instruction )
+                    | None ->
+                        let* account =
+                          Account.apply_settlement reduction.state.account
+                            instruction
+                        in
+                        let* instruction =
+                          Settlement.settle instruction
+                            ~settled_at:market_slice.start_at
+                        in
+                        Ok
+                          ( instruction,
+                            account,
+                            Audit.Settlement_completed instruction )
+                  in
+                  let settlement_instructions =
+                    List.map
+                      (fun (current : Settlement.instruction) ->
+                        if
+                          String.equal current.instruction_id
+                            instruction.instruction_id
+                        then instruction
+                        else current)
+                      reduction.state.settlement_instructions
+                  in
+                  emit
+                    (with_causes
+                       {
+                         reduction with
+                         state =
+                           {
+                             reduction.state with
+                             account;
+                             settlement_instructions;
+                           };
+                       }
+                       (Option.to_list reduction.slice_event_id))
+                    event)
+          (Ok reduction) reduction.state.settlement_instructions
+
   let validate_target_ids state ids =
     let expected =
       configured_instruments state
@@ -1295,6 +1376,20 @@ module Interactive = struct
               Ptime.compare observation.effective_at previous.effective_at > 0)
         market_slice.cash_rate_observations
     in
+    let settlement_failures_valid =
+      match state.config.settlement with
+      | None -> market_slice.settlement_failures = []
+      | Some _ ->
+          List.for_all
+            (fun (failure : Settlement.failure) ->
+              List.exists
+                (fun (instruction : Settlement.instruction) ->
+                  String.equal instruction.instruction_id failure.instruction_id
+                  && instruction.status = Settlement.Pending
+                  && Settlement.is_due instruction market_slice.start_at)
+                state.settlement_instructions)
+            market_slice.settlement_failures
+    in
     if List.length ids <> List.length actual || actual <> expected then
       Error "market slice must contain each configured instrument exactly once"
     else if
@@ -1316,6 +1411,8 @@ module Interactive = struct
       Error "borrow observations must be known and advance effective time"
     else if not cash_observations_valid then
       Error "cash rate observations must be known and advance effective time"
+    else if not settlement_failures_valid then
+      Error "settlement failures must reference due pending instructions"
     else
       match state.last_slice_sequence with
       | Some sequence
@@ -1379,7 +1476,11 @@ module Interactive = struct
             ~executed_at:proposed.executed_at
             ~slice_sequence:market_slice.Market_slice.slice_sequence
         in
-        let* account = Account.apply_fill state.account fill in
+        let* account =
+          match state.config.settlement with
+          | None -> Account.apply_fill state.account fill
+          | Some _ -> Account.apply_unsettled_fill state.account fill
+        in
         let after_position = Account.position_quantity account instrument.id in
         let* after =
           Account.value account ~instruments ~marks
@@ -1391,6 +1492,59 @@ module Interactive = struct
       | Error message -> Error (`Invalid message)
       | Ok (fee_components, fee, account, after_position, after) -> (
           let checked =
+            let* () =
+              match (state.config.settlement, order.Order.request.side) with
+              | Some settlement, Order.Buy -> (
+                  let available =
+                    match settlement.Settlement.cash_buying_power with
+                    | Settlement.Total_cash ->
+                        Account.cash state.account instrument.quote_currency
+                    | Settlement.Settled_cash ->
+                        Account.settled_cash state.account
+                          instrument.quote_currency
+                  in
+                  let available =
+                    Option.value available ~default:Scalar.Money.zero
+                  in
+                  let available =
+                    if Scalar.Money.compare available Scalar.Money.zero > 0 then
+                      available
+                    else Scalar.Money.zero
+                  in
+                  match
+                    let* notional =
+                      Scalar.Money.notional proposed.Execution.price quantity
+                    in
+                    Scalar.Money.add notional fee
+                  with
+                  | Error message -> Error (Risk.Invalid message)
+                  | Ok cost ->
+                      if Scalar.Money.compare cost available > 0 then
+                        Error
+                          (Risk.Limit
+                             (Risk.Settlement_cash_buying_power
+                                (instrument.quote_currency, available)))
+                      else Ok ())
+              | Some settlement, Order.Sell
+                when settlement.position_availability
+                     = Settlement.Settled_positions
+                     && Scalar.Quantity.is_positive before_position ->
+                  let available =
+                    Account.settled_position_quantity state.account
+                      instrument.id
+                  in
+                  let available =
+                    if Scalar.Quantity.is_positive available then available
+                    else Scalar.Quantity.zero
+                  in
+                  if Scalar.Quantity.compare quantity available > 0 then
+                    Error
+                      (Risk.Limit
+                         (Risk.Settlement_position_availability
+                            (instrument.id, available)))
+                  else Ok ()
+              | None, _ | Some _, _ -> Ok ()
+            in
             let* () =
               Risk.check_post_fill_for state.config.risk
                 ~instrument_id:instrument.id ~before_position ~after_position
@@ -1531,7 +1685,12 @@ module Interactive = struct
                         Error "newly allocated fill ID was duplicated"
                     | Ok (oms, Oms.Applied order) -> (
                         match
-                          Account.apply_fill reduction.state.account fill
+                          match reduction.state.config.settlement with
+                          | None ->
+                              Account.apply_fill reduction.state.account fill
+                          | Some _ ->
+                              Account.apply_unsettled_fill
+                                reduction.state.account fill
                         with
                         | Error _ as error -> error
                         | Ok account -> (
@@ -1542,6 +1701,28 @@ module Interactive = struct
                             with
                             | Error _ as error -> error
                             | Ok (reduction, event_id) ->
+                                let* reduction =
+                                  match reduction.state.config.settlement with
+                                  | None -> Ok reduction
+                                  | Some policy ->
+                                      let* instruction =
+                                        Settlement.instruction policy fill
+                                      in
+                                      let state =
+                                        {
+                                          reduction.state with
+                                          settlement_instructions =
+                                            reduction.state
+                                              .settlement_instructions
+                                            @ [ instruction ];
+                                        }
+                                      in
+                                      emit
+                                        (with_causes { reduction with state }
+                                           [ event_id ])
+                                        (Audit.Settlement_instruction_created
+                                           instruction)
+                                in
                                 let* fill_pending =
                                   notification reduction
                                     ~causation_ids:[ event_id ]
@@ -1971,6 +2152,7 @@ module Interactive = struct
   module Actions_phase = struct
     let run market_slice reduction =
       let* reduction = cancel_expired_gtd reduction market_slice in
+      let* reduction = process_settlements reduction market_slice in
       apply_corporate_actions reduction
         market_slice.Market_slice.corporate_actions
   end
