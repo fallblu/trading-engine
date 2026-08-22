@@ -3,6 +3,8 @@
 Version 4 is a synchronous JSON Lines protocol over child-process standard input and output.
 Trading Engine sends `initialize`, ordered `event` requests, and `shutdown`. The strategy answers
 with `ready`, `intents`, and `stopped`. It may answer any request with `error`.
+Protocol v3 remains available for legacy scenario contracts and retains its frozen message and
+transcript shapes.
 
 Every message repeats `strategy_protocol_version: "4"` and a positive canonical
 `strategy_sequence`. A response must repeat the sequence of its request. Only one request is
