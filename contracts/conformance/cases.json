@@ -2,6 +2,16 @@
   "format_version": "1",
   "cases": [
     {
+      "name": "scenario-v6-valid",
+      "artifact": "scenario-v6",
+      "kind": "scenario",
+      "source": "v6/fixtures/demo.scenario.json",
+      "mutations": [],
+      "schema_expectation": "accept",
+      "runtime_expectation": "accept",
+      "rule": "structural"
+    },
+    {
       "name": "scenario-v5-valid",
       "artifact": "scenario-v5",
       "kind": "scenario",
@@ -92,6 +102,16 @@
       "rule": "structural"
     },
     {
+      "name": "scenario-stream-v6-valid",
+      "artifact": "scenario-stream-v6",
+      "kind": "scenario_stream",
+      "source": "v6/fixtures/demo.scenario.jsonl",
+      "mutations": [],
+      "schema_expectation": "accept",
+      "runtime_expectation": "accept",
+      "rule": "structural"
+    },
+    {
       "name": "scenario-stream-v3-valid",
       "artifact": "scenario-stream-v3",
       "kind": "scenario_stream",
@@ -136,9 +156,9 @@
     },
     {
       "name": "strategy-ready-valid",
-      "artifact": "strategy-message-v3",
+      "artifact": "strategy-message-v4",
       "kind": "strategy_response",
-      "source": "strategy/v3/fixtures/external.strategy.jsonl",
+      "source": "strategy/v4/fixtures/external.strategy.jsonl",
       "record": 2,
       "extract": ["message"],
       "expected_sequence": "1",
@@ -149,9 +169,9 @@
     },
     {
       "name": "strategy-intents-valid",
-      "artifact": "strategy-message-v3",
+      "artifact": "strategy-message-v4",
       "kind": "strategy_response",
-      "source": "strategy/v3/fixtures/external.strategy.jsonl",
+      "source": "strategy/v4/fixtures/external.strategy.jsonl",
       "record": 4,
       "extract": ["message"],
       "expected_sequence": "2",
@@ -162,9 +182,9 @@
     },
     {
       "name": "strategy-stopped-valid",
-      "artifact": "strategy-message-v3",
+      "artifact": "strategy-message-v4",
       "kind": "strategy_response",
-      "source": "strategy/v3/fixtures/external.strategy.jsonl",
+      "source": "strategy/v4/fixtures/external.strategy.jsonl",
       "record": 14,
       "extract": ["message"],
       "expected_sequence": "7",
@@ -175,9 +195,9 @@
     },
     {
       "name": "strategy-error-valid",
-      "artifact": "strategy-message-v3",
+      "artifact": "strategy-message-v4",
       "kind": "strategy_response",
-      "source": "strategy/v3/fixtures/external.strategy.jsonl",
+      "source": "strategy/v4/fixtures/external.strategy.jsonl",
       "record": 14,
       "extract": ["message"],
       "expected_sequence": "7",
@@ -191,9 +211,9 @@
     },
     {
       "name": "strategy-missing-version",
-      "artifact": "strategy-message-v3",
+      "artifact": "strategy-message-v4",
       "kind": "strategy_response",
-      "source": "strategy/v3/fixtures/external.strategy.jsonl",
+      "source": "strategy/v4/fixtures/external.strategy.jsonl",
       "record": 2,
       "extract": ["message"],
       "expected_sequence": "1",
@@ -204,9 +224,9 @@
     },
     {
       "name": "strategy-unknown-field",
-      "artifact": "strategy-message-v3",
+      "artifact": "strategy-message-v4",
       "kind": "strategy_response",
-      "source": "strategy/v3/fixtures/external.strategy.jsonl",
+      "source": "strategy/v4/fixtures/external.strategy.jsonl",
       "record": 2,
       "extract": ["message"],
       "expected_sequence": "1",
@@ -217,9 +237,9 @@
     },
     {
       "name": "strategy-wrong-sequence",
-      "artifact": "strategy-message-v3",
+      "artifact": "strategy-message-v4",
       "kind": "strategy_response",
-      "source": "strategy/v3/fixtures/external.strategy.jsonl",
+      "source": "strategy/v4/fixtures/external.strategy.jsonl",
       "record": 2,
       "extract": ["message"],
       "expected_sequence": "2",
@@ -255,8 +275,46 @@
       "schema_expectation": "accept"
     },
     {
+      "name": "strategy-v3-error-branch",
+      "artifact": "strategy-message-v3",
+      "source": "strategy/v3/fixtures/external.strategy.jsonl",
+      "record": 14,
+      "extract": ["message"],
+      "mutations": [
+        {"op": "replace", "path": ["message_type"], "value": "error"},
+        {"op": "replace", "path": ["payload"], "value": {"message": "intentional conformance error"}}
+      ],
+      "schema_expectation": "accept"
+    },
+    {
       "name": "strategy-v3-rejected-response-branch",
       "artifact": "strategy-transcript-v3",
+      "instance": {
+        "strategy_diagnostic_version": "1",
+        "transcript_sequence": "2",
+        "record_type": "rejected_strategy_response",
+        "expected_strategy_sequence": "1",
+        "diagnostic": {
+          "diagnostic_version": "1",
+          "code": "strategy.protocol",
+          "phase": "strategy",
+          "message": "strategy initialization: invalid strategy response JSON",
+          "context": {"json_path": "$", "sequence": "1"},
+          "cause": null
+        },
+        "evidence": {
+          "encoding": "hex",
+          "prefix": "7b",
+          "observed_bytes": 1,
+          "truncated": false
+        }
+      },
+      "mutations": [],
+      "schema_expectation": "accept"
+    },
+    {
+      "name": "strategy-v4-rejected-response-branch",
+      "artifact": "strategy-transcript-v4",
       "instance": {
         "strategy_diagnostic_version": "1",
         "transcript_sequence": "2",

@@ -210,6 +210,46 @@ let fill_to_yojson fill =
       ("slice_sequence", int64 fill.slice_sequence);
     ]
 
+let initial_position_to_yojson (position : Initial_portfolio.position) =
+  `Assoc
+    [
+      ("instrument_id", instrument_id position.instrument_id);
+      ("quantity", quantity position.quantity);
+      ("cost_basis", money position.cost_basis);
+      ("realized_pnl", money position.realized_pnl);
+      ("dividend_pnl", money position.dividend_pnl);
+      ("execution_fees", money position.execution_fees);
+      ("borrow_fees", money position.borrow_fees);
+    ]
+
+let initial_portfolio_to_yojson (portfolio : Initial_portfolio.t) =
+  let cash =
+    List.map
+      (fun (currency, amount) ->
+        `Assoc [ ("currency", string currency); ("amount", money amount) ])
+      portfolio.cash
+  in
+  let marks =
+    List.map
+      (fun (id, value) ->
+        `Assoc [ ("instrument_id", instrument_id id); ("price", price value) ])
+      portfolio.marks
+  in
+  let fx_rates =
+    List.map
+      (fun (currency, rate) ->
+        `Assoc [ ("currency", string currency); ("rate", price rate) ])
+      portfolio.fx_rates
+  in
+  `Assoc
+    [
+      ("cash", `List cash);
+      ( "positions",
+        `List (List.map initial_position_to_yojson portfolio.positions) );
+      ("marks", `List marks);
+      ("fx_rates", `List fx_rates);
+    ]
+
 let position_attribution_to_yojson position =
   `Assoc
     [
@@ -310,6 +350,12 @@ let payload_to_yojson = function
         [
           ("scenario_sha256", string scenario_sha256);
           ("execution_model", string execution_model);
+        ]
+  | Audit.Initial_state { portfolio; valuation } ->
+      `Assoc
+        [
+          ("portfolio", initial_portfolio_to_yojson portfolio);
+          ("valuation", valuation_to_yojson valuation);
         ]
   | Audit.Market_slice_received market_slice ->
       market_slice_to_yojson market_slice

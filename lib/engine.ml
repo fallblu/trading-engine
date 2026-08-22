@@ -52,7 +52,9 @@ module Interactive = struct
     last_slice_end : Ptime.t option;
     last_received_at : Ptime.t option;
     latest_bars : Bar.t Id.Instrument.Map.t;
+    latest_marks : Scalar.Price.t Id.Instrument.Map.t;
     latest_fx_rates : (string * Scalar.Price.t) list;
+    initial_portfolio : Initial_portfolio.t option;
     applied_action_ids : Id.Corporate_action.Set.t;
     desired_targets : desired_targets option;
     liquidation_pending : bool;
@@ -97,17 +99,44 @@ module Interactive = struct
     processed : int;
   }
 
+  let create_state ~run_id ~scenario_sha256 ~config ~account ~latest_marks
+      ~latest_fx_rates ~initial_portfolio =
+    Ok
+      {
+        run_id;
+        scenario_sha256;
+        config;
+        engine_sequence = 0L;
+        next_order_number = 1L;
+        next_fill_number = 1L;
+        last_slice_sequence = None;
+        last_slice_end = None;
+        last_received_at = None;
+        latest_bars = Id.Instrument.Map.empty;
+        latest_marks;
+        latest_fx_rates;
+        initial_portfolio;
+        applied_action_ids = Id.Corporate_action.Set.empty;
+        desired_targets = None;
+        liquidation_pending = false;
+        account;
+        oms = Oms.empty;
+        started = false;
+        completed = false;
+      }
+
+  let expected_currencies config =
+    Risk.base_currency config.risk
+    :: List.map
+         (fun instrument -> instrument.Instrument.quote_currency)
+         (Risk.instruments config.risk)
+    |> List.sort_uniq String.compare
+
   let create ~run_id ~scenario_sha256 ~config ~initial_cash =
     if not (valid_sha256 scenario_sha256) then
       Error "scenario SHA-256 must contain 64 lowercase hexadecimal characters"
     else
-      let expected_currencies =
-        Risk.base_currency config.risk
-        :: List.map
-             (fun instrument -> instrument.Instrument.quote_currency)
-             (Risk.instruments config.risk)
-        |> List.sort_uniq String.compare
-      in
+      let expected_currencies = expected_currencies config in
       let supplied_currencies =
         List.map fst initial_cash |> List.sort_uniq String.compare
       in
@@ -124,28 +153,43 @@ module Interactive = struct
             let base_rate =
               Scalar.Price.of_decimal_string "1" |> Result.get_ok
             in
-            Ok
-              {
-                run_id;
-                scenario_sha256;
-                config;
-                engine_sequence = 0L;
-                next_order_number = 1L;
-                next_fill_number = 1L;
-                last_slice_sequence = None;
-                last_slice_end = None;
-                last_received_at = None;
-                latest_bars = Id.Instrument.Map.empty;
-                latest_fx_rates =
-                  [ (Risk.base_currency config.risk, base_rate) ];
-                applied_action_ids = Id.Corporate_action.Set.empty;
-                desired_targets = None;
-                liquidation_pending = false;
-                account;
-                oms = Oms.empty;
-                started = false;
-                completed = false;
-              }
+            create_state ~run_id ~scenario_sha256 ~config ~account
+              ~latest_marks:Id.Instrument.Map.empty
+              ~latest_fx_rates:[ (Risk.base_currency config.risk, base_rate) ]
+              ~initial_portfolio:None
+
+  let create_with_portfolio ~run_id ~scenario_sha256 ~config ~initial_portfolio
+      =
+    if not (valid_sha256 scenario_sha256) then
+      Error "scenario SHA-256 must contain 64 lowercase hexadecimal characters"
+    else if
+      not
+        (String.equal initial_portfolio.Initial_portfolio.base_currency
+           (Risk.base_currency config.risk))
+    then Error "initial portfolio base currency differs from risk configuration"
+    else
+      let supplied =
+        List.map fst initial_portfolio.cash |> List.sort_uniq String.compare
+      in
+      if supplied <> expected_currencies config then
+        Error "initial cash must contain every configured currency exactly once"
+      else
+        let* account = Account.of_initial_portfolio initial_portfolio in
+        let latest_marks =
+          List.fold_left
+            (fun marks (instrument_id, price) ->
+              Id.Instrument.Map.add instrument_id price marks)
+            Id.Instrument.Map.empty initial_portfolio.marks
+        in
+        let* valuation =
+          Account.value account
+            ~instruments:(Risk.instruments config.risk)
+            ~marks:initial_portfolio.marks ~fx_rates:initial_portfolio.fx_rates
+        in
+        let* () = Risk.check_initial config.risk valuation in
+        create_state ~run_id ~scenario_sha256 ~config ~account ~latest_marks
+          ~latest_fx_rates:initial_portfolio.fx_rates
+          ~initial_portfolio:(Some initial_portfolio)
 
   let account state = state.account
   let oms state = state.oms
@@ -182,36 +226,48 @@ module Interactive = struct
 
   let emit reduction event = emit_with_id reduction event |> Result.map fst
 
+  let value state =
+    Account.value state.account
+      ~instruments:(Risk.instruments state.config.risk)
+      ~marks:(Id.Instrument.Map.bindings state.latest_marks)
+      ~fx_rates:state.latest_fx_rates
+
   let ensure_started reduction =
     if reduction.state.started then Ok reduction
     else
       let state = { reduction.state with started = true } in
-      emit_with_id
-        (with_causes { reduction with state } [])
-        (Audit.Run_started
-           {
-             scenario_sha256 = reduction.state.scenario_sha256;
-             execution_model =
-               Execution_model.name reduction.state.config.execution_model;
-           })
-      |> Result.map (fun (reduction, event_id) ->
-          with_causes reduction [ event_id ])
+      let* reduction, event_id =
+        emit_with_id
+          (with_causes { reduction with state } [])
+          (Audit.Run_started
+             {
+               scenario_sha256 = reduction.state.scenario_sha256;
+               execution_model =
+                 Execution_model.name reduction.state.config.execution_model;
+             })
+      in
+      let reduction = with_causes reduction [ event_id ] in
+      match reduction.state.initial_portfolio with
+      | None -> Ok reduction
+      | Some portfolio ->
+          let* account = value reduction.state in
+          let* margin =
+            Risk.margin_snapshot reduction.state.config.risk account
+          in
+          let valuation = Audit.{ account; margin } in
+          let* reduction, initial_event_id =
+            emit_with_id reduction
+              (Audit.Initial_state { portfolio; valuation })
+          in
+          emit
+            (with_causes reduction [ initial_event_id ])
+            (Audit.Valuation valuation)
 
   let enqueue reduction items =
     { reduction with pending = Pending_queue.enqueue reduction.pending items }
 
   let prepend reduction items =
     { reduction with pending = Pending_queue.prepend reduction.pending items }
-
-  let value state =
-    let marks =
-      Id.Instrument.Map.bindings state.latest_bars
-      |> List.map (fun (instrument_id, bar) ->
-          (instrument_id, bar.Bar.close_price))
-    in
-    Account.value state.account
-      ~instruments:(Risk.instruments state.config.risk)
-      ~marks ~fx_rates:state.latest_fx_rates
 
   let strategy_context state now =
     let latest_bars =
@@ -279,9 +335,7 @@ module Interactive = struct
             in
             match
               let marks =
-                Id.Instrument.Map.bindings reduction.state.latest_bars
-                |> List.map (fun (instrument_id, bar) ->
-                    (instrument_id, bar.Bar.close_price))
+                Id.Instrument.Map.bindings reduction.state.latest_marks
               in
               Risk.check reduction.state.config.risk
                 ~account:reduction.state.account ~oms:reduction.state.oms ~marks
@@ -679,16 +733,7 @@ module Interactive = struct
       > 0
     then Error "target gross weight exceeds maximum leverage"
     else
-      let* valuation =
-        let marks =
-          Id.Instrument.Map.bindings state.latest_bars
-          |> List.map (fun (instrument_id, bar) ->
-              (instrument_id, bar.Bar.close_price))
-        in
-        Account.value state.account
-          ~instruments:(Risk.instruments state.config.risk)
-          ~marks ~fx_rates:state.latest_fx_rates
-      in
+      let* valuation = value state in
       let add result (target : Strategy.weight_target) =
         let* desired, requested = result in
         match
@@ -1333,19 +1378,11 @@ module Interactive = struct
           (fun bars bar -> Id.Instrument.Map.add bar.Bar.instrument_id bar bars)
           state.latest_bars market_slice.bars
       in
-      let state =
-        {
-          state with
-          last_slice_sequence = Some market_slice.slice_sequence;
-          last_slice_end = Some market_slice.end_at;
-          last_received_at = Some market_slice.received_at;
-          latest_fx_rates =
-            List.map
-              (fun mark -> (mark.Market_slice.currency, mark.Market_slice.rate))
-              market_slice.fx_rates;
-          latest_bars;
-          applied_action_ids;
-        }
+      let latest_marks =
+        List.fold_left
+          (fun marks bar ->
+            Id.Instrument.Map.add bar.Bar.instrument_id bar.close_price marks)
+          state.latest_marks market_slice.bars
       in
       let reduction =
         {
@@ -1360,6 +1397,22 @@ module Interactive = struct
         }
       in
       let* reduction = ensure_started reduction in
+      let state =
+        {
+          reduction.state with
+          last_slice_sequence = Some market_slice.slice_sequence;
+          last_slice_end = Some market_slice.end_at;
+          last_received_at = Some market_slice.received_at;
+          latest_fx_rates =
+            List.map
+              (fun mark -> (mark.Market_slice.currency, mark.Market_slice.rate))
+              market_slice.fx_rates;
+          latest_bars;
+          latest_marks;
+          applied_action_ids;
+        }
+      in
+      let reduction = { reduction with state } in
       let* reduction, slice_event_id =
         emit_with_id (with_causes reduction [])
           (Audit.Market_slice_received market_slice)
@@ -1562,6 +1615,12 @@ module Make (Strategy_impl : Strategy.S) = struct
 
   let create ~run_id ~scenario_sha256 ~config ~initial_cash ~strategy_state =
     Interactive.create ~run_id ~scenario_sha256 ~config ~initial_cash
+    |> Result.map (fun engine -> { engine; strategy_state })
+
+  let create_with_portfolio ~run_id ~scenario_sha256 ~config ~initial_portfolio
+      ~strategy_state =
+    Interactive.create_with_portfolio ~run_id ~scenario_sha256 ~config
+      ~initial_portfolio
     |> Result.map (fun engine -> { engine; strategy_state })
 
   let account state = Interactive.account state.engine

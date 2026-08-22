@@ -69,6 +69,7 @@ def main() -> None:
     journal_validator = Draft202012Validator(
         journal_schema,
         format_checker=Draft202012Validator.FORMAT_CHECKER,
+        registry=registry,
     )
     stream_validator = Draft202012Validator(
         stream_schema,
@@ -115,7 +116,7 @@ def main() -> None:
     unsupported_execution_model = copy.deepcopy(scenario)
     unsupported_execution_model["execution"]["model"] = "future_model"
     expect_invalid(scenario_validator, unsupported_execution_model)
-    if contract_version == "5":
+    if contract_version in {"5", "6"}:
         missing_configuration_version = copy.deepcopy(scenario)
         del missing_configuration_version["execution"]["configuration"][
             "version"
@@ -129,7 +130,7 @@ def main() -> None:
         unknown_configuration_field = copy.deepcopy(scenario)
         unknown_configuration_field["execution"]["configuration"]["future"] = True
         expect_invalid(scenario_validator, unknown_configuration_field)
-    if contract_version in {"3", "4", "5"}:
+    if contract_version in {"3", "4", "5", "6"}:
         excessive_feedback_cap = copy.deepcopy(scenario)
         excessive_feedback_cap["max_internal_events"] = 100001
         expect_invalid(scenario_validator, excessive_feedback_cap)
@@ -149,7 +150,7 @@ def main() -> None:
     malformed_stream_slice = copy.deepcopy(stream_records[1])
     malformed_stream_slice["payload"]["market_slice"]["unexpected"] = True
     expect_invalid(stream_validator, malformed_stream_slice)
-    if contract_version in {"3", "4"}:
+    if contract_version in {"3", "4", "5", "6"}:
         excessive_stream_catalog = copy.deepcopy(stream_records[0])
         excessive_stream_catalog["payload"]["instruments"] = (
             [stream_records[0]["payload"]["instruments"][0]] * 4097
@@ -162,6 +163,8 @@ def main() -> None:
     noncanonical = copy.deepcopy(scenario)
     if contract_version in {"3", "4"}:
         noncanonical["initial_cash"][0]["amount"] = "10000.0"
+    elif contract_version == "6":
+        noncanonical["initial_portfolio"]["cash"][0]["amount"] = "10000.0"
     else:
         noncanonical["initial_cash"] = "10000.0"
     expect_invalid(scenario_validator, noncanonical)

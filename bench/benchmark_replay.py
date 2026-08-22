@@ -23,7 +23,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_EXECUTABLE = ROOT / "_build/default/bin/main.exe"
 DEFAULT_BASELINE = ROOT / "bench/baselines/linux-x86_64.json"
-FIXTURE = ROOT / "contracts/v5/fixtures/demo.scenario.json"
+FIXTURE = ROOT / "contracts/v6/fixtures/demo.scenario.json"
 STRATEGY = ROOT / "bench/latency_strategy.py"
 SUMMARY_PATTERN = re.compile(
     r"\baudits=(?P<audits>[0-9]+).*\bactive=(?P<active>[0-9]+)"
@@ -163,6 +163,12 @@ def build_scenario(case: BenchmarkCase) -> dict[str, object]:
                 "benchmark_case": case.name,
             },
             "run_id": f"benchmark-{case.name}",
+            "initial_portfolio": {
+                "cash": [{"currency": "USD", "amount": "10000"}],
+                "positions": [],
+                "marks": [],
+                "fx_rates": [{"currency": "USD", "rate": "1"}],
+            },
             "instruments": instruments,
             "venue_calendars": [
                 {
@@ -224,7 +230,7 @@ def stream_records(document: dict[str, object]) -> list[dict[str, object]]:
         "metadata",
         "run_id",
         "base_currency",
-        "initial_cash",
+        "initial_portfolio",
         "instruments",
         "venue_calendars",
         "risk",

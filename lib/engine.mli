@@ -21,6 +21,13 @@ module Interactive : sig
     initial_cash:(string * Scalar.Money.t) list ->
     (t, string) result
 
+  val create_with_portfolio :
+    run_id:Id.Run.t ->
+    scenario_sha256:string ->
+    config:config ->
+    initial_portfolio:Initial_portfolio.t ->
+    (t, string) result
+
   val account : t -> Account.t
   val oms : t -> Oms.t
   val latest_bar : t -> Id.Instrument.t -> Bar.t option
@@ -39,6 +46,14 @@ module Make (Strategy_impl : Strategy.S) : sig
     scenario_sha256:string ->
     config:config ->
     initial_cash:(string * Scalar.Money.t) list ->
+    strategy_state:Strategy_impl.state ->
+    (t, string) result
+
+  val create_with_portfolio :
+    run_id:Id.Run.t ->
+    scenario_sha256:string ->
+    config:config ->
+    initial_portfolio:Initial_portfolio.t ->
     strategy_state:Strategy_impl.state ->
     (t, string) result
 

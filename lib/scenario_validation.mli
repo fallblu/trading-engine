@@ -10,6 +10,15 @@ val header :
   max_internal_events:int ->
   (string list * Id.Instrument.Set.t, Scenario_shape.error) result
 
+val initial_portfolio :
+  root:string ->
+  currencies:string list ->
+  catalog:Id.Instrument.Set.t ->
+  instruments:Instrument.t list ->
+  risk:Risk.t ->
+  Initial_portfolio.t ->
+  (unit, Scenario_shape.error) result
+
 val batch :
   root:string ->
   base_currency:string ->

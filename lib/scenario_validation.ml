@@ -48,9 +48,11 @@ let validate_venue_calendars ~root catalog venue_calendars =
 let header ~root ~contract_version ~base_currency ~initial_cash ~instruments
     ~venue_calendars ~max_internal_events =
   let* () =
-    Account.create ~base_currency ~initial_cash
-    |> Result.map (fun _ -> ())
-    |> at (child root "initial_cash")
+    if String.equal contract_version "6" then Ok ()
+    else
+      Account.create ~base_currency ~initial_cash
+      |> Result.map (fun _ -> ())
+      |> at (child root "initial_cash")
   in
   if instruments = [] then
     fail ~json_path:(child root "instruments")
@@ -64,7 +66,7 @@ let header ~root ~contract_version ~base_currency ~initial_cash ~instruments
       fail ~json_path:(child root "instruments") "instrument IDs must be unique"
     else
       let* () =
-        if String.equal contract_version "5" then
+        if List.mem contract_version [ "6"; "5" ] then
           validate_venue_calendars ~root catalog venue_calendars
         else Ok ()
       in
@@ -80,8 +82,12 @@ let header ~root ~contract_version ~base_currency ~initial_cash ~instruments
       in
       if cash_currencies <> currencies then
         fail
-          ~json_path:(child root "initial_cash")
-          "initial_cash must contain every scenario currency exactly once"
+          ~json_path:
+            (child root
+               (if String.equal contract_version "6" then
+                  "initial_portfolio.cash"
+                else "initial_cash"))
+          "initial cash must contain every scenario currency exactly once"
       else if max_internal_events <= 0 then
         fail
           ~json_path:(child root "max_internal_events")
@@ -92,6 +98,76 @@ let header ~root ~contract_version ~base_currency ~initial_cash ~instruments
           (Printf.sprintf "internal event count is %d; limit is %d"
              max_internal_events Resource_limits.internal_events)
       else Ok (currencies, catalog)
+
+let initial_portfolio ~root ~currencies ~catalog ~instruments ~risk initial =
+  let path = child root "initial_portfolio" in
+  let cash_currencies = List.map fst initial.Initial_portfolio.cash in
+  let fx_currencies = List.map fst initial.fx_rates in
+  let expected_currencies = List.sort String.compare currencies in
+  if List.sort String.compare cash_currencies <> expected_currencies then
+    fail ~json_path:(child path "cash")
+      "initial cash must contain every scenario currency exactly once"
+  else if List.sort String.compare fx_currencies <> expected_currencies then
+    fail ~json_path:(child path "fx_rates")
+      "initial FX rates must contain every scenario currency exactly once"
+  else
+    let instrument_map =
+      List.fold_left
+        (fun map instrument ->
+          Id.Instrument.Map.add instrument.Instrument.id instrument map)
+        Id.Instrument.Map.empty instruments
+    in
+    let* () =
+      List.fold_left
+        (fun result (position : Initial_portfolio.position) ->
+          let* () = result in
+          if not (Id.Instrument.Set.mem position.instrument_id catalog) then
+            fail ~json_path:(child path "positions")
+              "initial position refers to an unknown instrument"
+          else
+            match
+              Id.Instrument.Map.find_opt position.instrument_id instrument_map
+            with
+            | None -> assert false
+            | Some instrument ->
+                if
+                  not
+                    (Scalar.Quantity.is_multiple position.quantity
+                       ~lot:instrument.Instrument.lot_size)
+                then
+                  fail ~json_path:(child path "positions")
+                    "initial position quantity is not aligned to its \
+                     instrument lot"
+                else
+                  Risk.check_position risk position.quantity
+                  |> at (child path "positions"))
+        (Ok ()) initial.positions
+    in
+    let* () =
+      List.fold_left
+        (fun result (instrument_id, mark) ->
+          let* () = result in
+          if not (Id.Instrument.Set.mem instrument_id catalog) then
+            fail ~json_path:(child path "marks")
+              "initial mark refers to an unknown instrument"
+          else
+            match Id.Instrument.Map.find_opt instrument_id instrument_map with
+            | None -> assert false
+            | Some instrument ->
+                if Scalar.Price.is_multiple mark ~tick:instrument.tick_size then
+                  Ok ()
+                else
+                  fail ~json_path:(child path "marks")
+                    "initial mark is not aligned to its instrument tick size")
+        (Ok ()) initial.marks
+    in
+    let* account = Account.of_initial_portfolio initial |> at path in
+    let* valuation =
+      Account.value account ~instruments ~marks:initial.marks
+        ~fx_rates:initial.fx_rates
+      |> at path
+    in
+    Risk.check_initial risk valuation |> at path
 
 let changes_orders = function
   | Strategy.Target_weights _ | Strategy.Target_quantities _

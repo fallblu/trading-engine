@@ -4,8 +4,8 @@ A replay scenario uses either one strict JSON object or a strict JSON Lines stre
 weights, quantities, money, and sequences are canonical JSON strings. Counts and basis points are
 JSON integers. Unknown, missing, duplicate, noncanonical, and non-finite values fail parsing.
 
-Use [the v5 demo](../contracts/v5/fixtures/demo.scenario.json) as the canonical complete example.
-The [scenario JSON Schema](../contracts/v5/scenario.schema.json) provides structural validation.
+Use [the v6 demo](../contracts/v6/fixtures/demo.scenario.json) as the canonical complete example.
+The [scenario JSON Schema](../contracts/v6/scenario.schema.json) provides structural validation.
 The engine parser also enforces cross-field and cross-record invariants. Diagnostics identify the
 failed field or array item. Stream diagnostics additionally retain the record line and sequence.
 
@@ -32,8 +32,8 @@ The batch object and stream header share one domain-construction path and the sa
 checks. Stream items reuse the batch slice and intent validators directly; no synthetic batch
 scenario is constructed.
 
-The [stream record JSON Schema](../contracts/v5/scenario-stream.schema.json) validates each line,
-and [the v5 stream fixture](../contracts/v5/fixtures/demo.scenario.jsonl) is the canonical example.
+The [stream record JSON Schema](../contracts/v6/scenario-stream.schema.json) validates each line,
+and [the v6 stream fixture](../contracts/v6/fixtures/demo.scenario.jsonl) is the canonical example.
 The engine validates the entire stream before creating a journal. It then replays one record at a
 time without retaining prior slices, scheduled batches, or audit events. Reducer state still
 retains current account, order, target, and latest-bar state required by execution semantics.
@@ -42,11 +42,11 @@ retains current account, order, target, and latest-bar state required by executi
 
 | Field | Meaning |
 |---|---|
-| `contract_version` | Required string identifying this file contract; v5 is `"5"` |
+| `contract_version` | Required string identifying this file contract; v6 is `"6"` |
 | `metadata` | Required arbitrary JSON object preserved for provenance and ignored by execution |
 | `run_id` | Stable identity used in generated IDs |
 | `base_currency` | Reporting currency used for aggregate risk and valuation |
-| `initial_cash` | One explicit nonnegative balance for every scenario currency |
+| `initial_portfolio` | Signed cash and positions with accounting history, marks, and FX state |
 | `instruments` | Approved executable-instrument catalog, at most 4,096 entries |
 | `venue_calendars` | Immutable venue/session policies covering every configured instrument |
 | `risk` | Signed position, exposure, leverage, margin, and borrow policy |
@@ -70,12 +70,26 @@ record without a line feed and drains an oversized record without retaining byte
 Each instrument contains `instrument_id`, `symbol`, `quote_currency`, `tick_size`, and `lot_size`.
 Identifiers and labels are nonempty and contain no whitespace or control characters. Tick and lot
 sizes are positive exact values with at most six decimal places. Quote currencies may differ from
-`base_currency`; `initial_cash` contains every distinct quote currency plus the base currency
-exactly once.
+`base_currency`; `initial_portfolio.cash` contains every distinct quote currency plus the base
+currency exactly once.
+
+## Initial portfolio
+
+The v6 `initial_portfolio` contains `cash`, `positions`, `marks`, and `fx_rates`. Cash is signed and
+has exact scenario-currency coverage. Each nonzero signed position names a catalog instrument and
+records signed `quantity` and `cost_basis`, signed `realized_pnl` and `dividend_pnl`, and
+nonnegative `execution_fees` and `borrow_fees`. Basis has the same sign as quantity. These P&L and
+fee values are point-in-time histories; importing them does not apply them to cash again.
+
+Position quantities align to instrument lots and respect long and short limits. Marks cover the
+position set exactly, are positive, and align to instrument ticks. FX rates cover every scenario
+currency exactly and the base rate is one. Before replay, the engine constructs the account,
+reconciles its valuation, and enforces gross exposure, leverage, and initial margin. It accepts
+negative cash when the complete marked account remains valid under the configured risk policy.
 
 ## Venue calendars
 
-Contract v5 requires every instrument to belong to exactly one explicit venue calendar. A calendar
+Contract v6 requires every instrument to belong to exactly one explicit venue calendar. A calendar
 is identified by `venue_id`, `calendar_id`, and `calendar_version`; version 1 is the only supported
 calendar payload. Its `sessions` are unique and ordered by `session_date`, and each date declares
 one policy: `regular`, `early_close`, or `holiday`. Holidays have no phases. Open sessions must
@@ -94,7 +108,7 @@ annualized `short_borrow_bps`. Initial margin cannot be below maintenance margin
 quantity limit must cover at least one lot for every instrument. Orders that increase gross
 exposure must satisfy every applicable limit; exposure-reducing orders remain admissible.
 
-Contract v5 execution contains a stable `model` and a model-owned `configuration`. For
+Contract v6 execution contains a stable `model` and a model-owned `configuration`. For
 `completed_bar_v1`, configuration version `"1"` contains:
 
 - `version`, the strict model-configuration contract version
@@ -104,7 +118,7 @@ Contract v5 execution contains a stable `model` and a model-owned `configuration
 
 The engine advertises each model's scenario and configuration versions, required fields, supported
 order types, data requirements, and limits through `--capabilities.execution_model_contracts`. The
-v3 and v4 scenario contracts preserve their flat execution object unchanged.
+v3 and v4 scenario contracts preserve their flat execution object unchanged; v5 remains frozen.
 
 ## Schedule and intents
 
@@ -198,14 +212,16 @@ than the next slice `start_at`.
 
 ## Audit journal
 
-The [journal JSON Schema](../contracts/v5/journal.schema.json) validates each JSON Lines record.
+The [journal JSON Schema](../contracts/v6/journal.schema.json) validates each JSON Lines record.
 Every record contains `contract_version`, `engine_sequence`, deterministic `event_id`, ordered
 `causation_ids`, `run_id`, `recorded_at`, `event_type`, and an event-specific `payload`. Causal
 references are unique prior event IDs from the same run. The version is repeated on every record
 so a journal remains self-describing when it is streamed or split.
 
-The first record is `run_started` with `scenario_sha256` and the selected execution model. The CLI
-hashes the exact batch document or stream bytes it parses.
+The first record is `run_started` with `scenario_sha256` and the selected execution model. In v6,
+`initial_state` then records the imported portfolio and reconciled valuation, followed by an
+initial `valuation`; both precede the first market slice. The CLI hashes the exact batch document
+or stream bytes it parses.
 `market_slice_received` contains the complete normalized slice. Portfolio requests record their
 basis, original weight when applicable, computed quantity, and sizing reference price. Orders use
 `eligible_after_slice_sequence`; fills use `slice_sequence`. `fill_clipped` records the proposed

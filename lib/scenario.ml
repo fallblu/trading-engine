@@ -4,6 +4,7 @@ type t = {
   run_id : Id.Run.t;
   base_currency : string;
   initial_cash : (string * Scalar.Money.t) list;
+  initial_portfolio : Initial_portfolio.t option;
   instruments : Instrument.t list;
   venue_calendars : Venue_calendar.t list;
   risk : Risk.t;
@@ -20,6 +21,7 @@ type stream_header = {
   run_id : Id.Run.t;
   base_currency : string;
   initial_cash : (string * Scalar.Money.t) list;
+  initial_portfolio : Initial_portfolio.t option;
   instruments : Instrument.t list;
   venue_calendars : Venue_calendar.t list;
   risk : Risk.t;
@@ -432,7 +434,7 @@ let parse_versioned_execution ~contract_version json =
     Ok (execution_model, execution)
 
 let parse_execution ~contract_version json =
-  if String.equal contract_version "5" then
+  if List.mem contract_version [ "6"; "5" ] then
     parse_versioned_execution ~contract_version json
   else parse_legacy_execution ~contract_version json
 
@@ -622,6 +624,92 @@ let parse_fx_mark json =
   let* rate = parse_price ~name:"FX rate" rate_json in
   Market_slice.fx_mark ~currency ~rate
 
+let parse_initial_position json =
+  let* fields =
+    object_fields ~name:"initial position"
+      ~expected:
+        [
+          "instrument_id";
+          "quantity";
+          "cost_basis";
+          "realized_pnl";
+          "dividend_pnl";
+          "execution_fees";
+          "borrow_fees";
+        ]
+      json
+  in
+  let* instrument_json = field fields "instrument_id" in
+  let* instrument_id =
+    parse_id Id.Instrument.of_string ~name:"instrument_id" instrument_json
+  in
+  let* quantity_json = field fields "quantity" in
+  let* quantity =
+    parse_quantity ~name:"initial position quantity" quantity_json
+  in
+  let* basis_json = field fields "cost_basis" in
+  let* cost_basis =
+    parse_money ~name:"initial position cost_basis" basis_json
+  in
+  let* realized_json = field fields "realized_pnl" in
+  let* realized_pnl =
+    parse_money ~name:"initial position realized_pnl" realized_json
+  in
+  let* dividend_json = field fields "dividend_pnl" in
+  let* dividend_pnl =
+    parse_money ~name:"initial position dividend_pnl" dividend_json
+  in
+  let* execution_json = field fields "execution_fees" in
+  let* execution_fees =
+    parse_money ~name:"initial position execution_fees" execution_json
+  in
+  let* borrow_json = field fields "borrow_fees" in
+  let* borrow_fees =
+    parse_money ~name:"initial position borrow_fees" borrow_json
+  in
+  Initial_portfolio.position ~instrument_id ~quantity ~cost_basis ~realized_pnl
+    ~dividend_pnl ~execution_fees ~borrow_fees
+
+let parse_initial_mark json =
+  let* fields =
+    object_fields ~name:"initial mark"
+      ~expected:[ "instrument_id"; "price" ]
+      json
+  in
+  let* instrument_json = field fields "instrument_id" in
+  let* instrument_id =
+    parse_id Id.Instrument.of_string ~name:"instrument_id" instrument_json
+  in
+  let* price_json = field fields "price" in
+  let* price = parse_price ~name:"initial mark price" price_json in
+  Ok (instrument_id, price)
+
+let parse_initial_fx_rate json =
+  let* mark = parse_fx_mark json in
+  Ok (mark.Market_slice.currency, mark.rate)
+
+let parse_initial_portfolio ~base_currency json =
+  let* fields =
+    object_fields ~name:"initial portfolio"
+      ~expected:[ "cash"; "positions"; "marks"; "fx_rates" ]
+      json
+  in
+  let* cash_json = field fields "cash" in
+  let* cash_json = list ~name:"initial portfolio cash" cash_json in
+  let* cash = map_list parse_cash_balance cash_json in
+  let* positions_json = field fields "positions" in
+  let* positions_json =
+    list ~name:"initial portfolio positions" positions_json
+  in
+  let* positions = map_list parse_initial_position positions_json in
+  let* marks_json = field fields "marks" in
+  let* marks_json = list ~name:"initial portfolio marks" marks_json in
+  let* marks = map_list parse_initial_mark marks_json in
+  let* fx_json = field fields "fx_rates" in
+  let* fx_json = list ~name:"initial portfolio FX rates" fx_json in
+  let* fx_rates = map_list parse_initial_fx_rate fx_json in
+  Initial_portfolio.create ~base_currency ~cash ~positions ~marks ~fx_rates
+
 let parse_corporate_action json =
   let* fields =
     match json with
@@ -732,14 +820,24 @@ let construct_header ~root ~contract_path ~contract_version
       string ~name:"base_currency" shape.base_currency
       |> at (child root "base_currency")
     in
-    let* initial_cash_json =
-      list ~name:"initial_cash" shape.initial_cash
-      |> at (child root "initial_cash")
-    in
-    let* initial_cash =
-      map_list_at
-        (child root "initial_cash")
-        parse_cash_balance initial_cash_json
+    let* initial_cash, initial_portfolio =
+      if String.equal contract_version "6" then
+        let* portfolio =
+          parse_initial_portfolio ~base_currency shape.initial_state
+          |> at (child root "initial_portfolio")
+        in
+        Ok (portfolio.Initial_portfolio.cash, Some portfolio)
+      else
+        let* initial_cash_json =
+          list ~name:"initial_cash" shape.initial_state
+          |> at (child root "initial_cash")
+        in
+        let* initial_cash =
+          map_list_at
+            (child root "initial_cash")
+            parse_cash_balance initial_cash_json
+        in
+        Ok (initial_cash, None)
     in
     let* instruments_json =
       list ~name:"instruments" shape.instruments
@@ -771,6 +869,13 @@ let construct_header ~root ~contract_path ~contract_version
     let* risk =
       parse_risk base_currency instruments shape.risk |> at (child root "risk")
     in
+    let* () =
+      match initial_portfolio with
+      | None -> Ok ()
+      | Some portfolio ->
+          Scenario_validation.initial_portfolio ~root ~currencies ~catalog
+            ~instruments ~risk portfolio
+    in
     let* execution_model, execution =
       parse_execution ~contract_version shape.execution
       |> at (child root "execution")
@@ -782,6 +887,7 @@ let construct_header ~root ~contract_path ~contract_version
         run_id;
         base_currency;
         initial_cash;
+        initial_portfolio;
         instruments;
         venue_calendars;
         risk;
@@ -819,6 +925,7 @@ let construct_batch (shape : Scenario_shape.batch) =
       run_id = header.run_id;
       base_currency = header.base_currency;
       initial_cash = header.initial_cash;
+      initial_portfolio = header.initial_portfolio;
       instruments = header.instruments;
       venue_calendars = header.venue_calendars;
       risk = header.risk;
