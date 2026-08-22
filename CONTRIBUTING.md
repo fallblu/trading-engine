@@ -28,6 +28,8 @@ make check
 
 The gate includes the fixed protocol-fuzzing smoke corpus. For longer deterministic
 campaigns and reproduction controls, see [Protocol fuzzing](docs/fuzzing.md).
+Reducer model properties also print reproducible seeds and shrink failures into scenario-like
+traces; see [Reducer property testing](docs/reducer-property-testing.md).
 
 The gate formats a copy check, builds every target, and runs all tests. Keep commits small,
 coherent, and working. Use subject-only conventional commit messages such as
