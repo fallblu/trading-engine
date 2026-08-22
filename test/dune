@@ -109,6 +109,21 @@
   ../contracts/strategy/v10/fixtures/external.strategy.jsonl
   ../contracts/strategy/v11/fixtures/external.strategy.jsonl
   ../contracts/strategy/v13/fixtures/external.strategy.jsonl
+  ../contracts/strategy/v14/fixtures/external.strategy.jsonl
+  ../contracts/v16/fixtures/demo.journal.jsonl
+  ../contracts/v16/fixtures/demo.scenario.json
+  ../contracts/v16/fixtures/demo.scenario.jsonl
+  ../contracts/v16/fixtures/fill-clipped.journal.jsonl
+  ../contracts/v16/fixtures/fill-clipped.scenario.json
+  ../contracts/v16/fixtures/order-book.journal.jsonl
+  ../contracts/v16/fixtures/order-book.scenario.json
+  ../contracts/v16/fixtures/order-book.scenario.jsonl
+  ../contracts/v16/fixtures/quote-trade.journal.jsonl
+  ../contracts/v16/fixtures/quote-trade.scenario.json
+  ../contracts/v16/fixtures/quote-trade.scenario.jsonl
+  ../contracts/v16/journal.schema.json
+  ../contracts/v16/scenario-stream.schema.json
+  ../contracts/v16/scenario.schema.json
   ../contracts/strategy/v4/fixtures/external.strategy.jsonl
   fake_strategy.py)
  (libraries

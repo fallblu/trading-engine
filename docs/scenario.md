@@ -4,8 +4,8 @@ A replay scenario uses either one strict JSON object or a strict JSON Lines stre
 weights, quantities, money, and sequences are canonical JSON strings. Counts and basis points are
 JSON integers. Unknown, missing, duplicate, noncanonical, and non-finite values fail parsing.
 
-Use [the v15 demo](../contracts/v15/fixtures/demo.scenario.json) as the canonical complete example.
-The [scenario JSON Schema](../contracts/v15/scenario.schema.json) provides structural validation.
+Use [the v16 demo](../contracts/v16/fixtures/demo.scenario.json) as the canonical complete example.
+The [scenario JSON Schema](../contracts/v16/scenario.schema.json) provides structural validation.
 The engine parser also enforces cross-field and cross-record invariants. Diagnostics identify the
 failed field or array item. Stream diagnostics additionally retain the record line and sequence.
 
@@ -32,8 +32,8 @@ The batch object and stream header share one domain-construction path and the sa
 checks. Stream items reuse the batch slice and intent validators directly; no synthetic batch
 scenario is constructed.
 
-The [stream record JSON Schema](../contracts/v15/scenario-stream.schema.json) validates each line,
-and [the v15 stream fixture](../contracts/v15/fixtures/demo.scenario.jsonl) is the canonical example.
+The [stream record JSON Schema](../contracts/v16/scenario-stream.schema.json) validates each line,
+and [the v16 stream fixture](../contracts/v16/fixtures/demo.scenario.jsonl) is the canonical example.
 The engine validates the entire stream before creating a journal. It then replays one record at a
 time without retaining prior slices, scheduled batches, or audit events. Reducer state still
 retains current account, order, target, and latest-bar state required by execution semantics.
@@ -42,7 +42,7 @@ retains current account, order, target, and latest-bar state required by executi
 
 | Field | Meaning |
 |---|---|
-| `contract_version` | Required string identifying this file contract; v15 is `"15"` |
+| `contract_version` | Required string identifying this file contract; v16 is `"16"` |
 | `metadata` | Required arbitrary JSON object preserved for provenance and ignored by execution |
 | `run_id` | Stable identity used in generated IDs |
 | `base_currency` | Reporting currency used for aggregate risk and valuation |
@@ -167,7 +167,11 @@ Supported intents are:
 - `target_quantities` with a `targets` array of `instrument_id` and `quantity`
 - `submit_order` with instrument, side, quantity, kind, and nullable limit price
 - `cancel_order` with a deterministic `order_id`
-- `emit_metric` with string `name` and `value`
+- `emit_metric` with a bounded string `name` and typed `value`. The value object declares
+  `numeric` (a canonical decimal string), `string`, or `boolean`. Optional `unit`, `aggregation`
+  (`last`, `sum`, `minimum`, `maximum`, or `mean`), and up to 16 string dimensions carry
+  reconciliation metadata. Dimension keys are unique and journal encoding sorts them
+  lexicographically. Contracts through v15 retain the legacy string-only shape.
 
 Both target forms contain every configured instrument exactly once. Weights and quantities are
 signed. Gross absolute weight must not exceed `max_leverage`; quantity targets align to their
@@ -268,7 +272,7 @@ records `event_at`, `available_at`, `received_at`, and a positive `ingest_sequen
 strictly ordered by availability, receipt, and ingest sequence; economic time cannot follow
 availability, and no event may escape its containing slice's time or observability boundary.
 Prices and quantities align to the instrument tick and lot. The
-[`quote-trade` fixture](../contracts/v15/fixtures/quote-trade.scenario.json) demonstrates passive
+[`quote-trade` fixture](../contracts/v16/fixtures/quote-trade.scenario.json) demonstrates passive
 fills and has an equivalent bounded JSON Lines replay.
 
 Version 15 slices add `order_book_events`. Every configured instrument supplies a fresh full
@@ -278,7 +282,7 @@ books are accepted. Runtime validation enforces the configured `max_depth_levels
 delete, sequence continuity, slice observability, and tick/lot alignment. Marketable orders walk
 the visible book; passive limits queue behind displayed same-price depth, with reductions moving
 them forward and additions joining behind. The
-[`order-book` fixture](../contracts/v15/fixtures/order-book.scenario.json) demonstrates bounded
+[`order-book` fixture](../contracts/v16/fixtures/order-book.scenario.json) demonstrates bounded
 queue replay and has equivalent JSON Lines and journal artifacts.
 
 For causal next-open execution, an order-changing schedule entry's anchor `received_at` is no later
@@ -286,7 +290,7 @@ than the next slice `start_at`.
 
 ## Audit journal
 
-The [journal JSON Schema](../contracts/v15/journal.schema.json) validates each JSON Lines record.
+The [journal JSON Schema](../contracts/v16/journal.schema.json) validates each JSON Lines record.
 Every record contains `contract_version`, `engine_sequence`, deterministic `event_id`, ordered
 `causation_ids`, `run_id`, `recorded_at`, `event_type`, and an event-specific `payload`. Causal
 references are unique prior event IDs from the same run. The version is repeated on every record

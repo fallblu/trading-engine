@@ -495,6 +495,51 @@ let risk_limits_cover_lots () =
           ~initial_margin_bps:5000 ~maintenance_margin_bps:2500
           ~short_borrow_bps:100))
 
+let typed_metric_validation () =
+  let numeric = T.Metric.numeric_of_string "-12.5" |> ok in
+  Alcotest.(check string)
+    "negative fractional numeric" "-0.5"
+    (T.Metric.numeric_of_string "-0.5" |> ok |> T.Metric.numeric_to_string);
+  let metric =
+    T.Metric.create ~name:"strategy.signal" ~value:(T.Metric.Numeric numeric)
+      ~unit_:"ratio"
+      ~dimensions:[ ("venue", "XNYS"); ("asset", "ACME") ]
+      ~aggregation:T.Metric.Mean ()
+    |> ok
+  in
+  Alcotest.(check string)
+    "numeric round trip" "-12.5"
+    (match metric.value with
+    | T.Metric.Numeric value -> T.Metric.numeric_to_string value
+    | _ -> Alcotest.fail "expected numeric metric");
+  Alcotest.(check (list string))
+    "dimensions sort canonically" [ "asset"; "venue" ]
+    (List.map (fun dimension -> dimension.T.Metric.key) metric.dimensions);
+  List.iter
+    (fun invalid ->
+      Alcotest.(check bool)
+        (invalid ^ " rejected") true
+        (Result.is_error (T.Metric.numeric_of_string invalid)))
+    [ ""; "01"; "1.0"; "-0"; "+1"; "1e3" ];
+  Alcotest.(check bool)
+    "duplicate dimensions rejected" true
+    (Result.is_error
+       (T.Metric.create ~name:"duplicate" ~value:(T.Metric.Boolean true)
+          ~dimensions:[ ("side", "buy"); ("side", "sell") ]
+          ()));
+  Alcotest.(check bool)
+    "nonnumeric aggregation rejected" true
+    (Result.is_error
+       (T.Metric.create ~name:"state" ~value:(T.Metric.String "risk-on")
+          ~aggregation:T.Metric.Mean ()));
+  Alcotest.(check bool)
+    "dimension count bounded" true
+    (Result.is_error
+       (T.Metric.create ~name:"bounded" ~value:(T.Metric.String "ok")
+          ~dimensions:
+            (List.init 17 (fun index -> (Printf.sprintf "key-%02d" index, "x")))
+          ()))
+
 let tests =
   [
     Alcotest.test_case "identifier validation" `Quick identifier_validation;
@@ -523,4 +568,5 @@ let tests =
     Alcotest.test_case "risk accepts multiple currencies" `Quick
       risk_accepts_multiple_currencies;
     Alcotest.test_case "risk limits cover lots" `Quick risk_limits_cover_lots;
+    Alcotest.test_case "typed metric validation" `Quick typed_metric_validation;
   ]

@@ -126,3 +126,23 @@ compare_journal \
   v15-order-book \
   contracts/v15/fixtures/order-book.scenario.json \
   contracts/v15/fixtures/order-book.journal.jsonl
+
+compare_journal \
+  v16-demo \
+  contracts/v16/fixtures/demo.scenario.json \
+  contracts/v16/fixtures/demo.journal.jsonl
+
+compare_journal \
+  v16-fill-clipped \
+  contracts/v16/fixtures/fill-clipped.scenario.json \
+  contracts/v16/fixtures/fill-clipped.journal.jsonl
+
+compare_journal \
+  v16-quote-trade \
+  contracts/v16/fixtures/quote-trade.scenario.json \
+  contracts/v16/fixtures/quote-trade.journal.jsonl
+
+compare_journal \
+  v16-order-book \
+  contracts/v16/fixtures/order-book.scenario.json \
+  contracts/v16/fixtures/order-book.journal.jsonl

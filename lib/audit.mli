@@ -130,7 +130,7 @@ type event =
   | Margin_call_triggered of valuation
   | Margin_restored of valuation
   | Intent_rejected of string
-  | Metric_emitted of { name : string; value : string }
+  | Metric_emitted of Metric.t
   | Valuation of valuation
   | Run_completed of {
       scenario_sha256 : string;

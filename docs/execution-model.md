@@ -1,12 +1,12 @@
 # Execution model
 
 The engine selects a compiled execution module by the scenario's stable `execution.model` name.
-Contract v15 advertises `completed_bar_v1`, `completed_bar_next_open_v1`,
+Contract v16 advertises `completed_bar_v1`, `completed_bar_next_open_v1`,
 `completed_bar_adverse_touch_v1`, `quote_trade_v1`, and `order_book_v1`; embedders can inject another module through
 the typed engine configuration without introducing runtime shared-library loading. The selected
 name is repeated in both terminal audit records.
 
-Each compiled model owns a strict configuration contract. The v15 envelope separates selection from
+Each compiled model owns a strict configuration contract. The v16 envelope separates selection from
 model-specific parameters:
 
 ```json
