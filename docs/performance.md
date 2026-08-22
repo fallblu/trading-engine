@@ -45,3 +45,64 @@ three times per size, and prints medians plus the observed range. These results 
 
 The exact timings are illustrative rather than service-level targets. The growing baseline ratio
 and near-linear indexed results are the relevant regression signal.
+
+## Replay regression suite
+
+The replay suite measures complete public-CLI runs, including scenario parsing, deterministic
+reduction, and artifact publication. It generates every input before the timed interval and covers
+the batch and JSON Lines paths independently.
+
+```sh
+make benchmark
+```
+
+The default run performs one warmup and records the median of three samples in
+`benchmark-results/replay.json`. Generated reports are ignored by Git. The table printed to the
+terminal and the JSON report include:
+
+- Wall-clock seconds measured with the monotonic high-resolution clock.
+- Peak resident memory of the direct engine process. On Linux this is `ru_maxrss`, normalized to
+  KiB; an external strategy's own resident memory is intentionally excluded.
+- Audit-event throughput, using the CLI's audit count checked against journal line count.
+- Artifact-byte throughput, using the published journal size and, for external cases, the strategy
+  transcript size.
+
+The full matrix holds all unlisted dimensions constant while varying the source of likely
+regressions:
+
+| Workload pair | Catalog | Slices | Active orders | Strategy latency |
+|---|---:|---:|---:|---:|
+| Standard history | 1 | 500 | 0 | none |
+| Large catalog | 128 | 100 | 0 | none |
+| Dense OMS | 1 | 100 | 256 | none |
+| External strategy | 1 | 100 | 0 | 0 ms/event |
+| Latent external strategy | 1 | 100 | 0 | 5 ms/event |
+
+Every workload is run in both batch and stream form. Dense-OMS cases submit persistent buy limits
+far below the market after the first slice and verify that exactly 256 orders remain active. The
+latency strategy returns no intents and sleeps only before each event response, keeping protocol
+initialization and shutdown outside the modeled per-event delay.
+
+### Baseline and tolerance policy
+
+`bench/baselines/linux-x86_64.json` stores the initial Linux/WSL2 development-build baseline from
+the reference machine described in that file. Wall time allows a 35% increase; peak RSS allows a
+25% increase; event and artifact throughput allow a 30% decrease. These deliberately broad
+tolerances account for scheduler, filesystem-cache, and allocator noise while the project gathers
+measurements across more runners.
+
+Baseline comparison is advisory by default and therefore cannot make `make benchmark` fail. A
+reported regression is a prompt to repeat the run on comparable hardware and profile the affected
+dimension. On a controlled, baseline-compatible runner, opt into a failing gate with:
+
+```sh
+python3 bench/benchmark_replay.py --enforce
+```
+
+Refresh a baseline only after explaining an intentional workload or performance change and
+recording the engine version, build profile, machine, warmup count, and repetition count. Do not
+replace a baseline solely to clear an advisory regression.
+
+`make check` runs a one-sample smoke matrix with tiny versions of all four replay routes. It checks
+input generation, external-strategy protocol behavior, active-order retention, audit counts, and
+artifact publication without comparing timing values.

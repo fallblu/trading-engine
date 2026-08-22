@@ -1,6 +1,8 @@
 /_build/
 /_build-coverage/
 /_coverage/
+/benchmark-results/
+__pycache__/
 /_opam/
 /.venv-schema/
 /.direnv/

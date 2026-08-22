@@ -160,3 +160,12 @@
   (source_tree ../contracts))
  (action
   (run python3 %{dep:validate_contract_conformance.py})))
+
+(rule
+ (alias runtest)
+ (deps
+  test_benchmark_replay.py
+  ../bench/benchmark_replay.py
+  ../contracts/v4/fixtures/demo.scenario.json)
+ (action
+  (run python3 %{dep:test_benchmark_replay.py})))
