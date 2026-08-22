@@ -23,3 +23,4 @@ module Event : S
 module Corporate_action : S
 module Venue : S
 module Venue_calendar : S
+module Risk_group : S

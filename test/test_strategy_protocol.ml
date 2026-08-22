@@ -27,7 +27,7 @@ let initialize_message_is_complete () =
     T.Strategy_protocol.initialize_message ~sequence:1L (initialization ())
   in
   Alcotest.(check string)
-    "protocol version" "4"
+    "protocol version" "5"
     (match field "strategy_protocol_version" message with
     | `String value -> value
     | _ -> Alcotest.fail "expected version string");
@@ -85,8 +85,8 @@ let event_message_contains_complete_context () =
     account_value account ~marks:[ (instrument_id "test-equity", price "105") ]
   in
   let context =
-    T.Strategy.context ~now:slice.received_at ~valuation ~working_orders:[]
-      ~latest_bars:slice.bars
+    T.Strategy.context ~now:slice.received_at ~valuation ~group_exposures:[]
+      ~working_orders:[] ~latest_bars:slice.bars
     |> ok
   in
   let message =
@@ -137,8 +137,8 @@ let nonpositive_equity_omits_weights () =
     account_value account ~marks:[ (instrument_id "test-equity", price "105") ]
   in
   let context =
-    T.Strategy.context ~now:slice.received_at ~valuation ~working_orders:[]
-      ~latest_bars:slice.bars
+    T.Strategy.context ~now:slice.received_at ~valuation ~group_exposures:[]
+      ~working_orders:[] ~latest_bars:slice.bars
     |> ok
   in
   let message =
@@ -165,7 +165,7 @@ let nonpositive_equity_omits_weights () =
 let response message_type payload =
   `Assoc
     [
-      ("strategy_protocol_version", `String "4");
+      ("strategy_protocol_version", `String "5");
       ("strategy_sequence", `String "3");
       ("message_type", `String message_type);
       ("payload", payload);
@@ -223,8 +223,8 @@ let responses_are_strict_and_typed () =
   let duplicate =
     `Assoc
       [
-        ("strategy_protocol_version", `String "4");
-        ("strategy_protocol_version", `String "4");
+        ("strategy_protocol_version", `String "5");
+        ("strategy_protocol_version", `String "5");
         ("strategy_sequence", `String "3");
         ("message_type", `String "stopped");
         ("payload", `Assoc []);
@@ -251,7 +251,7 @@ let responses_are_strict_and_typed () =
   let unknown_field =
     `Assoc
       [
-        ("strategy_protocol_version", `String "4");
+        ("strategy_protocol_version", `String "5");
         ("strategy_sequence", `String "3");
         ("message_type", `String "stopped");
         ("payload", `Assoc []);

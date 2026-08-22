@@ -24,6 +24,7 @@ and portfolio = {
   cash_weight : Scalar.Weight.t option;
   cash_balances : Account.cash_attribution list;
   positions : marked_position list;
+  group_exposures : Risk.group_exposure list;
 }
 
 type event =
@@ -56,7 +57,8 @@ let weight ~equity value =
   if Scalar.Money.compare equity Scalar.Money.zero <= 0 then Ok None
   else Scalar.Money.weight_toward_zero value ~equity |> Result.map Option.some
 
-let context ~now ~(valuation : Account.valuation) ~working_orders ~latest_bars =
+let context ~now ~(valuation : Account.valuation) ~group_exposures
+    ~working_orders ~latest_bars =
   let* cash_weight = weight ~equity:valuation.equity valuation.cash in
   let* positions =
     List.fold_left
@@ -94,6 +96,7 @@ let context ~now ~(valuation : Account.valuation) ~working_orders ~latest_bars =
       cash_weight;
       cash_balances = valuation.cash_balances;
       positions;
+      group_exposures;
     }
   in
   Ok { now; portfolio; working_orders; latest_bars }
@@ -120,6 +123,8 @@ let working_orders context = context.working_orders
 
 let latest_bar context instrument_id =
   Id.Instrument.Map.find_opt instrument_id context.latest_bars
+
+let group_exposures context = context.portfolio.group_exposures
 
 module type S = sig
   type state
