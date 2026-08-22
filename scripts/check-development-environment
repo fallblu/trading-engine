@@ -29,7 +29,6 @@ if ! missing_dependencies=$(
   opam install "$repository_root" \
     --deps-only \
     --with-test \
-    --with-doc \
     --locked \
     --check \
     --switch "$repository_root" 2>&1
