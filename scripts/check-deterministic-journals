@@ -1,0 +1,52 @@
+#!/bin/sh
+
+set -eu
+
+repository_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+engine="$repository_root/_build/default/bin/main.exe"
+temporary_root=$(mktemp -d "${TMPDIR:-/tmp}/trading-engine-determinism.XXXXXX")
+
+cleanup() {
+  rm -rf -- "$temporary_root"
+}
+trap cleanup EXIT HUP INT TERM
+
+export LC_ALL=C
+export TZ=UTC
+
+compare_journal() {
+  name=$1
+  scenario=$2
+  expected=$3
+  actual="$temporary_root/$name.journal.jsonl"
+  standard_output="$temporary_root/$name.stdout"
+  standard_error="$temporary_root/$name.stderr"
+
+  "$engine" \
+    --input "$repository_root/$scenario" \
+    --journal "$actual" \
+    >"$standard_output" \
+    2>"$standard_error"
+
+  if ! cmp -s "$repository_root/$expected" "$actual"; then
+    printf '%s\n' "error: $name journal differs from its canonical bytes" >&2
+    diff -u "$repository_root/$expected" "$actual" >&2 || true
+    exit 1
+  fi
+
+  byte_count=$(wc -c <"$actual" | tr -d ' ')
+  printf '%s\n' "$name: exact journal match ($byte_count bytes)"
+}
+
+compare_journal \
+  v3-demo \
+  contracts/v3/fixtures/demo.scenario.json \
+  contracts/v3/fixtures/demo.journal.jsonl
+compare_journal \
+  v4-demo \
+  contracts/v4/fixtures/demo.scenario.json \
+  contracts/v4/fixtures/demo.journal.jsonl
+compare_journal \
+  v4-fill-clipped \
+  contracts/v4/fixtures/fill-clipped.scenario.json \
+  contracts/v4/fixtures/fill-clipped.journal.jsonl
