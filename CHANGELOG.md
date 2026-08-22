@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add contract v7 exact per-instrument risk policies, versioned overlapping exposure groups,
+  reservation-aware admission and fill clipping, group diagnostics, and strategy protocol v5.
+
 - Add contract v6 explicit initial portfolio snapshots with signed cash and positions, accounting
   history, initial marks and FX, strict risk validation, initial-state auditing, and strategy
   protocol v4 initialization.

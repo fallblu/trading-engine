@@ -12,5 +12,6 @@ let () =
       ("contract-conformance", Test_contract_conformance.tests);
       ("boundary-failures", Test_boundary_failures.tests);
       ("venue-calendar", Test_venue_calendar.tests);
+      ("risk-groups", Test_risk_groups.tests);
       ("scenario", Test_scenario.tests);
     ]

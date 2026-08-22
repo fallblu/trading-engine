@@ -21,6 +21,7 @@ type portfolio = private {
   cash_weight : Scalar.Weight.t option;
   cash_balances : Account.cash_attribution list;
   positions : marked_position list;
+  group_exposures : Risk.group_exposure list;
 }
 
 type event =
@@ -49,6 +50,7 @@ type intent =
 val context :
   now:Ptime.t ->
   valuation:Account.valuation ->
+  group_exposures:Risk.group_exposure list ->
   working_orders:Order.t list ->
   latest_bars:Bar.t list ->
   (context, string) result
@@ -60,6 +62,7 @@ val cash_balances : context -> (string * Scalar.Money.t) list
 val position : context -> Id.Instrument.t -> Scalar.Quantity.t
 val working_orders : context -> Order.t list
 val latest_bar : context -> Id.Instrument.t -> Bar.t option
+val group_exposures : context -> Risk.group_exposure list
 
 module type S = sig
   type state

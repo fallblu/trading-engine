@@ -274,7 +274,8 @@ module Interactive = struct
       Id.Instrument.Map.bindings state.latest_bars |> List.map snd
     in
     let* valuation = value state in
-    Strategy.context ~now ~valuation
+    let* group_exposures = Risk.group_exposures state.config.risk valuation in
+    Strategy.context ~now ~valuation ~group_exposures
       ~working_orders:(Oms.active_orders state.oms)
       ~latest_bars
 
@@ -688,7 +689,10 @@ module Interactive = struct
                  ~lot:instrument.Instrument.lot_size)
           then Error "target quantity is not aligned to its instrument lot"
           else
-            let* () = Risk.check_position state.config.risk target.quantity in
+            let* () =
+              Risk.check_position_for state.config.risk target.instrument_id
+                target.quantity
+            in
             Ok
               ( Id.Instrument.Map.add target.instrument_id target.quantity
                   desired,
@@ -748,7 +752,10 @@ module Interactive = struct
                 ~weight:target.weight ~price:bar.close_price
                 ~lot_size:instrument.lot_size
             in
-            let* () = Risk.check_position state.config.risk quantity in
+            let* () =
+              Risk.check_position_for state.config.risk target.instrument_id
+                quantity
+            in
             Ok
               ( Id.Instrument.Map.add target.instrument_id quantity desired,
                 Audit.
@@ -972,23 +979,34 @@ module Interactive = struct
           Account.value account ~instruments ~marks
             ~fx_rates:state.latest_fx_rates
         in
-        Ok (fee, after_position, after)
+        Ok (fee, account, after_position, after)
       in
       match prepared with
       | Error message -> Error (`Invalid message)
-      | Ok (fee, after_position, after) -> (
-          match
-            Risk.check_post_fill state.config.risk ~before_position
-              ~after_position ~before ~after
-          with
+      | Ok (fee, account, after_position, after) -> (
+          let checked =
+            let* () =
+              Risk.check_post_fill_for state.config.risk
+                ~instrument_id:instrument.id ~before_position ~after_position
+                ~before ~after
+            in
+            Risk.check_reserved_fill state.config.risk ~account ~oms:state.oms
+              ~marks ~fx_rates:state.latest_fx_rates ~order
+              ~filled_quantity:quantity ~after
+          in
+          match checked with
           | Ok () -> Ok fee
           | Error (Risk.Limit limit) -> Error (`Limit limit)
           | Error (Risk.Invalid message) -> Error (`Invalid message))
     in
     let lot_value = Scalar.Quantity.to_micros instrument.lot_size in
+    let* policy_order_limit =
+      match Risk.max_order_quantity_for state.config.risk instrument.id with
+      | Some value -> Ok value
+      | None -> Error "fill instrument has no risk policy"
+    in
     let quantity_limit =
-      Scalar.Quantity.minimum proposed.quantity
-        (Risk.max_order_quantity state.config.risk)
+      Scalar.Quantity.minimum proposed.quantity policy_order_limit
     in
     let requested_lots =
       Int64.div (Scalar.Quantity.to_micros quantity_limit) lot_value
@@ -1013,10 +1031,7 @@ module Interactive = struct
     let* limit =
       if not clipped then Ok None
       else if Int64.equal lots requested_lots then
-        Ok
-          (Some
-             (Risk.Maximum_order_quantity
-                (Risk.max_order_quantity state.config.risk)))
+        Ok (Some (Risk.Maximum_order_quantity policy_order_limit))
       else
         let next_lots = Int64.succ lots in
         let next_quantity =
@@ -1225,10 +1240,12 @@ module Interactive = struct
             match Risk.instrument state.config.risk instrument_id with
             | None -> Error "target refers to an unknown instrument"
             | Some instrument -> (
-                let bounded =
-                  Scalar.Quantity.minimum delta
-                    (Risk.max_order_quantity state.config.risk)
+                let order_limit =
+                  Risk.max_order_quantity_for state.config.risk instrument_id
+                  |> Option.value
+                       ~default:(Risk.max_order_quantity state.config.risk)
                 in
+                let bounded = Scalar.Quantity.minimum delta order_limit in
                 match
                   Scalar.Quantity.round_toward_zero_to_multiple bounded
                     ~multiple:instrument.lot_size
@@ -1288,10 +1305,13 @@ module Interactive = struct
         if Scalar.Quantity.is_zero quantity || already_working then Ok reduction
         else
           let* absolute = Scalar.Quantity.absolute quantity in
-          let bounded =
-            Scalar.Quantity.minimum absolute
-              (Risk.max_order_quantity reduction.state.config.risk)
+          let order_limit =
+            Risk.max_order_quantity_for reduction.state.config.risk
+              instrument.Instrument.id
+            |> Option.value
+                 ~default:(Risk.max_order_quantity reduction.state.config.risk)
           in
+          let bounded = Scalar.Quantity.minimum absolute order_limit in
           let* quantity =
             Scalar.Quantity.round_toward_zero_to_multiple bounded
               ~multiple:instrument.lot_size
