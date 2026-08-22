@@ -2,12 +2,12 @@ open Test_support
 module T = Trading_engine
 
 let demo_document () =
-  In_channel.with_open_bin "../contracts/v9/fixtures/demo.scenario.json"
+  In_channel.with_open_bin "../contracts/v10/fixtures/demo.scenario.json"
     In_channel.input_all
 
 let demo () = T.Scenario.of_string (demo_document ()) |> ok
 let demo_hash () = T.Sha256.digest_string (demo_document ())
-let stream_path = "../contracts/v9/fixtures/demo.scenario.jsonl"
+let stream_path = "../contracts/v10/fixtures/demo.scenario.jsonl"
 
 let stream_document () =
   In_channel.with_open_bin stream_path In_channel.input_all
@@ -62,8 +62,21 @@ let write_large_stream path slice_count =
       for index = 1 to slice_count do
         let offset = (index - 1) * 4 in
         let market_slice =
-          T.Market_slice.create ~slice_sequence:(Int64.of_int index)
-            ~start_at:(add_seconds base offset)
+          let start_at = add_seconds base offset in
+          let borrow_observation =
+            T.Financing.borrow_observation
+              ~instrument_id:(instrument_id "demo-equity-acme")
+              ~effective_at:start_at ~available_quantity:(quantity "1000")
+              ~annual_rate_bps:100 ~recalled:false
+            |> ok
+          in
+          let cash_rate =
+            T.Financing.cash_rate_observation ~currency:"USD"
+              ~effective_at:start_at ~credit_rate_bps:0 ~debit_rate_bps:0
+            |> ok
+          in
+          T.Market_slice.create_v10 ~slice_sequence:(Int64.of_int index)
+            ~start_at
             ~end_at:(add_seconds base (offset + 1))
             ~available_at:(add_seconds base (offset + 2))
             ~received_at:(add_seconds base (offset + 3))
@@ -74,13 +87,14 @@ let write_large_stream path slice_count =
                   (Int64.of_int index);
               ]
             ~fx_rates:[ fx_mark () ]
-            ~corporate_actions:[]
+            ~corporate_actions:[] ~borrow_observations:[ borrow_observation ]
+            ~cash_rate_observations:[ cash_rate ]
           |> ok
         in
         let payload =
           `Assoc
             [
-              ("market_slice", T.Codec.market_slice_to_yojson market_slice);
+              ("market_slice", T.Codec.market_slice_to_yojson_v10 market_slice);
               ("intents", `List []);
             ]
         in
@@ -125,9 +139,9 @@ let schema_artifacts_parse () =
           (List.mem_assoc "$defs" fields)
     | _ -> Alcotest.fail (path ^ " must contain a JSON object")
   in
-  check_schema "../contracts/v9/scenario.schema.json";
-  check_schema "../contracts/v9/scenario-stream.schema.json";
-  check_schema "../contracts/v9/journal.schema.json"
+  check_schema "../contracts/v10/scenario.schema.json";
+  check_schema "../contracts/v10/scenario-stream.schema.json";
+  check_schema "../contracts/v10/journal.schema.json"
 
 let timestamp_precision_is_bounded () =
   List.iter
@@ -189,8 +203,8 @@ let contract_version_is_required_and_supported () =
   let unsupported_diagnostic = T.Scenario.of_yojson unsupported |> error in
   Alcotest.(check string)
     "unsupported version diagnosed"
-    "unsupported scenario contract_version \"2\" (expected one of 9, 8, 7, 6, \
-     5, 4, 3)"
+    "unsupported scenario contract_version \"2\" (expected one of 10, 9, 8, 7, \
+     6, 5, 4, 3)"
     (T.Diagnostic.to_human unsupported_diagnostic);
   Alcotest.(check string)
     "unsupported version code" "scenario.unsupported_contract"
@@ -327,8 +341,20 @@ let dense_schedule_document slice_count =
     List.init slice_count (fun offset ->
         let index = offset + 1 in
         let time_offset = offset * 4 in
-        T.Market_slice.create ~slice_sequence:(Int64.of_int index)
-          ~start_at:(add_seconds base time_offset)
+        let start_at = add_seconds base time_offset in
+        let borrow_observation =
+          T.Financing.borrow_observation
+            ~instrument_id:(instrument_id "demo-equity-acme")
+            ~effective_at:start_at ~available_quantity:(quantity "1000")
+            ~annual_rate_bps:100 ~recalled:false
+          |> ok
+        in
+        let cash_rate_observation =
+          T.Financing.cash_rate_observation ~currency:"USD"
+            ~effective_at:start_at ~credit_rate_bps:100 ~debit_rate_bps:200
+          |> ok
+        in
+        T.Market_slice.create_v10 ~slice_sequence:(Int64.of_int index) ~start_at
           ~end_at:(add_seconds base (time_offset + 1))
           ~available_at:(add_seconds base (time_offset + 2))
           ~received_at:(add_seconds base (time_offset + 3))
@@ -339,8 +365,9 @@ let dense_schedule_document slice_count =
                 (Int64.of_int index);
             ]
           ~fx_rates:[ fx_mark () ]
-          ~corporate_actions:[]
-        |> ok |> T.Codec.market_slice_to_yojson)
+          ~corporate_actions:[] ~borrow_observations:[ borrow_observation ]
+          ~cash_rate_observations:[ cash_rate_observation ]
+        |> ok |> T.Codec.market_slice_to_yojson_v10)
   in
   let schedule =
     List.init slice_count (fun offset ->
@@ -822,24 +849,24 @@ let audit_ids_are_deterministic_and_causal () =
   in
   Alcotest.(check (list string))
     "external slice has no engine cause" []
-    (cause_strings (event 9L));
-  Alcotest.(check (list string))
-    "target order cites slice and target request"
-    [ "demo-event-000000000004"; "demo-event-000000000005" ]
-    (cause_strings (event 7L));
-  Alcotest.(check (list string))
-    "fill cites order creation and executable slice"
-    [ "demo-event-000000000007"; "demo-event-000000000009" ]
     (cause_strings (event 10L));
   Alcotest.(check (list string))
+    "target order cites slice and target request"
+    [ "demo-event-000000000004"; "demo-event-000000000006" ]
+    (cause_strings (event 8L));
+  Alcotest.(check (list string))
+    "fill cites order creation and executable slice"
+    [ "demo-event-000000000008"; "demo-event-000000000010" ]
+    (cause_strings (event 12L));
+  Alcotest.(check (list string))
     "completion cites terminal valuation"
-    [ "demo-event-000000000021" ]
-    (cause_strings (event 22L));
-  match (event 7L).event with
+    [ "demo-event-000000000025" ]
+    (cause_strings (event 26L));
+  match (event 8L).event with
   | T.Audit.Order_accepted order ->
       Alcotest.(check string)
         "order snapshot retains creation event"
-        (T.Id.Event.to_string (event 7L).event_id)
+        (T.Id.Event.to_string (event 8L).event_id)
         (T.Id.Event.to_string order.created_event_id)
   | _ -> Alcotest.fail "expected accepted order"
 
@@ -872,7 +899,7 @@ let replay_matches_golden_file () =
     |> fun value -> value ^ "\n"
   in
   let expected =
-    In_channel.with_open_bin "../contracts/v9/fixtures/demo.journal.jsonl"
+    In_channel.with_open_bin "../contracts/v10/fixtures/demo.journal.jsonl"
       In_channel.input_all
   in
   Alcotest.(check string) "stable audit contract" expected actual
@@ -900,7 +927,8 @@ let v3_replay_matches_frozen_golden_file () =
 let fill_clipping_fixture_reconciles () =
   let document =
     In_channel.with_open_bin
-      "../contracts/v9/fixtures/fill-clipped.scenario.json" In_channel.input_all
+      "../contracts/v10/fixtures/fill-clipped.scenario.json"
+      In_channel.input_all
   in
   let scenario = T.Scenario.of_string document |> ok in
   let result =
@@ -913,7 +941,8 @@ let fill_clipping_fixture_reconciles () =
   in
   let expected =
     In_channel.with_open_bin
-      "../contracts/v9/fixtures/fill-clipped.journal.jsonl" In_channel.input_all
+      "../contracts/v10/fixtures/fill-clipped.journal.jsonl"
+      In_channel.input_all
   in
   Alcotest.(check string) "fill clipping audit reconciliation" expected actual
 
@@ -1012,8 +1041,8 @@ let streamed_replay_matches_batch_semantics () =
       Alcotest.(check int64) "four streamed slices" 4L result.slice_count;
       Alcotest.(check int64) "two schedule batches" 2L result.schedule_count;
       Alcotest.(check int) "one instrument" 1 result.instrument_count;
-      Alcotest.(check int64) "twenty-two audits" 22L result.audit_count;
-      Alcotest.check money_testable "same equity" (money "10111.661495")
+      Alcotest.(check int64) "twenty-six audits" 26L result.audit_count;
+      Alcotest.check money_testable "same equity" (money "10111.946958")
         result.valuation.equity;
       Alcotest.(check string)
         "stream and batch journals agree" expected
@@ -1079,8 +1108,25 @@ let stream_with_second_slice_start start_at =
           map_field "payload" (change_field "intents" (`List [])) record
         else if index = 2 then
           map_field "payload"
-            (map_field "market_slice"
-               (change_field "start_at" (`String start_at)))
+            (map_field "market_slice" (fun market_slice ->
+                 market_slice
+                 |> change_field "start_at" (`String start_at)
+                 |> map_field "borrow_observations" (function
+                   | `List [ observation ] ->
+                       `List
+                         [
+                           change_field "effective_at" (`String start_at)
+                             observation;
+                         ]
+                   | value -> value)
+                 |> map_field "cash_rate_observations" (function
+                   | `List [ observation ] ->
+                       `List
+                         [
+                           change_field "effective_at" (`String start_at)
+                             observation;
+                         ]
+                   | value -> value)))
             record
         else record
       in

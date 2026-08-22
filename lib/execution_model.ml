@@ -36,7 +36,7 @@ let completed_bar_v1_contract =
   {
     version = "2";
     previous_versions = [ "1" ];
-    scenario_contract_versions = [ "9"; "8"; "7"; "6"; "5"; "4"; "3" ];
+    scenario_contract_versions = [ "10"; "9"; "8"; "7"; "6"; "5"; "4"; "3" ];
     required_fields = [ "version"; "participation_bps"; "fee_schedules" ];
     legacy_required_fields =
       [ "version"; "participation_bps"; "fixed_fee"; "fee_bps" ];

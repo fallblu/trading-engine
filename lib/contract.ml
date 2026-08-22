@@ -1,13 +1,13 @@
-let version = "9"
-let previous_version = "8"
+let version = "10"
+let previous_version = "9"
 let legacy_journal_version = "3"
 
 let supported_versions =
-  [ version; previous_version; "7"; "6"; "5"; "4"; legacy_journal_version ]
+  [ version; previous_version; "8"; "7"; "6"; "5"; "4"; legacy_journal_version ]
 
 let is_supported version = List.mem version supported_versions
-let strategy_protocol_version = "7"
-let previous_strategy_protocol_version = "6"
+let strategy_protocol_version = "8"
+let previous_strategy_protocol_version = "7"
 let engine_version = "1.0.0"
 let strings values = `List (List.map (fun value -> `String value) values)
 
@@ -26,6 +26,7 @@ let capabilities_to_yojson () =
           [
             strategy_protocol_version;
             previous_strategy_protocol_version;
+            "6";
             "5";
             "4";
             "3";

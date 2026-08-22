@@ -7,6 +7,7 @@ type cancellation_reason =
   | Day_expired
   | Gtd_expired
   | Margin_call
+  | Borrow_recall
 
 type target_basis = Weights | Quantities
 
@@ -76,6 +77,33 @@ type event =
       period_end : Ptime.t;
       fee : Scalar.Money.t;
     }
+  | Borrow_charge_applied of {
+      observation : Financing.borrow_observation;
+      quote_currency : string;
+      short_quantity : Scalar.Quantity.t;
+      reference_price : Scalar.Price.t;
+      day_count : Financing.day_count;
+      compounding : Financing.compounding;
+      period_start : Ptime.t;
+      period_end : Ptime.t;
+      amount : Scalar.Money.t;
+    }
+  | Borrow_recall_received of {
+      observation : Financing.borrow_observation;
+      short_quantity : Scalar.Quantity.t;
+      close_out_quantity : Scalar.Quantity.t;
+    }
+  | Cash_interest_applied of {
+      observation : Financing.cash_rate_observation;
+      opening_balance : Scalar.Money.t;
+      applied_rate_bps : int;
+      day_count : Financing.day_count;
+      compounding : Financing.compounding;
+      period_start : Ptime.t;
+      period_end : Ptime.t;
+      amount : Scalar.Money.t;
+      closing_balance : Scalar.Money.t;
+    }
   | Margin_call_triggered of valuation
   | Margin_restored of valuation
   | Intent_rejected of string
@@ -123,6 +151,7 @@ let cancellation_reason_to_string = function
   | Day_expired -> "day_expired"
   | Gtd_expired -> "gtd_expired"
   | Margin_call -> "margin_call"
+  | Borrow_recall -> "borrow_recall"
 
 let target_basis_to_string = function
   | Weights -> "weights"
@@ -144,6 +173,9 @@ let event_name = function
   | Margin_limited _ -> "margin_limited"
   | Fill_clipped _ -> "fill_clipped"
   | Borrow_fee_applied _ -> "borrow_fee_applied"
+  | Borrow_charge_applied _ -> "borrow_charge_applied"
+  | Borrow_recall_received _ -> "borrow_recall_received"
+  | Cash_interest_applied _ -> "cash_interest_applied"
   | Margin_call_triggered _ -> "margin_call"
   | Margin_restored _ -> "margin_restored"
   | Intent_rejected _ -> "intent_rejected"
