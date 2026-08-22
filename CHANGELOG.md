@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Protect `main` with required integration checks and a no-bypass review policy, and make rebase
+  merging the only supported repository merge mode.
 - Establish a security baseline with private reporting guidance, grouped dependency proposals,
   dependency review, and CodeQL analysis for workflows and Python tooling.
 - Add structured issue and pull-request intake, reviewed planning-label and repository metadata,
