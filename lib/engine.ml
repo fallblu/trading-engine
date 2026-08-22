@@ -55,6 +55,8 @@ let config_v11 ~contract_version ~risk ~venue_calendars ~execution_model
     ~execution ~financing:(Some financing) ~settlement:(Some settlement)
     ~max_internal_events
 
+let config_v12 = config_v11
+
 let valid_sha256 value =
   String.length value = 64
   && String.for_all
@@ -88,6 +90,7 @@ module Interactive = struct
     settlement_instructions : Settlement.instruction list;
     initial_portfolio : Initial_portfolio.t option;
     applied_action_ids : Id.Corporate_action.Set.t;
+    lifecycle : Instrument_lifecycle.t;
     desired_targets : desired_targets option;
     liquidation_pending : bool;
     account : Account.t;
@@ -133,6 +136,9 @@ module Interactive = struct
 
   let create_state ~run_id ~scenario_sha256 ~config ~account ~latest_marks
       ~latest_fx_rates ~initial_portfolio =
+    let* lifecycle =
+      Instrument_lifecycle.create (Risk.instruments config.risk)
+    in
     Ok
       {
         run_id;
@@ -152,6 +158,7 @@ module Interactive = struct
         settlement_instructions = [];
         initial_portfolio;
         applied_action_ids = Id.Corporate_action.Set.empty;
+        lifecycle;
         desired_targets = None;
         liquidation_pending = false;
         account;
@@ -370,6 +377,13 @@ module Interactive = struct
                 ~engine_sequence:order_sequence
             in
             match
+              let* () =
+                if
+                  Instrument_lifecycle.is_tradable reduction.state.lifecycle
+                    request.Order.instrument_id
+                then Ok ()
+                else Error "instrument is not tradable"
+              in
               let* () =
                 match request.Order.time_in_force with
                 | Order.Day { venue_id; calendar_id } -> (
@@ -612,7 +626,8 @@ module Interactive = struct
     | None -> Error "split target refers to an unknown instrument"
     | Some quantity -> (
         match action.kind with
-        | Corporate_action.Cash_dividend _ -> Ok desired
+        | Corporate_action.Cash_dividend _ | Corporate_action.Distribution _ ->
+            Ok desired
         | Corporate_action.Split { numerator; denominator } ->
             let* quantity =
               Scalar.Quantity.scale_ratio_exact quantity ~numerator ~denominator
@@ -731,6 +746,95 @@ module Interactive = struct
     emit reduction
       (Audit.Cash_dividend_applied { action; quantity; cash_amount })
 
+  let apply_distribution_action reduction action distribution_type
+      destination_instrument_id numerator denominator basis_allocation_bps
+      fractional_policy =
+    let* destination =
+      match
+        Risk.instrument reduction.state.config.risk destination_instrument_id
+      with
+      | Some value -> Ok value
+      | None -> Error "distribution refers to an unknown destination instrument"
+    in
+    let* () =
+      match fractional_policy with
+      | Corporate_action.Reject_fractional -> Ok ()
+      | Cash_in_lieu { currency; _ } ->
+          if String.equal currency destination.quote_currency then Ok ()
+          else
+            Error "cash-in-lieu currency must equal destination quote currency"
+    in
+    let* account, result =
+      Account.apply_distribution reduction.state.account
+        ~source_instrument_id:action.Corporate_action.instrument_id
+        ~destination_instrument_id ~destination_lot_size:destination.lot_size
+        ~numerator ~denominator ~basis_allocation_bps ~fractional_policy
+    in
+    let reduction =
+      { reduction with state = { reduction.state with account } }
+    in
+    let* reduction, distribution_event_id =
+      emit_with_id reduction (Audit.Distribution_applied { action; result })
+    in
+    match distribution_type with
+    | Corporate_action.Stock_dividend ->
+        let total_numerator = Int64.add numerator denominator in
+        let* desired_targets =
+          match reduction.state.desired_targets with
+          | None -> Ok None
+          | Some desired -> (
+              match
+                Id.Instrument.Map.find_opt action.instrument_id
+                  desired.quantities
+              with
+              | None ->
+                  Error "stock-dividend target refers to an unknown instrument"
+              | Some quantity ->
+                  let* entitlement =
+                    Scalar.Quantity.scale_ratio_exact quantity ~numerator
+                      ~denominator
+                  in
+                  let* delivered =
+                    Scalar.Quantity.round_toward_zero_to_multiple entitlement
+                      ~multiple:destination.lot_size
+                  in
+                  let* quantity = Scalar.Quantity.add quantity delivered in
+                  Ok
+                    (Some
+                       {
+                         quantities =
+                           Id.Instrument.Map.add action.instrument_id quantity
+                             desired.quantities;
+                         cause_ids = distribution_event_id :: desired.cause_ids;
+                       }))
+        in
+        let active =
+          Oms.active_for_instrument reduction.state.oms action.instrument_id
+        in
+        let* updated_event_ids =
+          event_ids_after reduction.state (List.length active)
+        in
+        let* oms, adjusted =
+          Oms.adjust_for_split reduction.state.oms
+            ~instrument_id:action.instrument_id ~updated_event_ids
+            ~numerator:total_numerator ~denominator
+        in
+        let reduction =
+          {
+            reduction with
+            state = { reduction.state with oms; desired_targets };
+          }
+        in
+        List.fold_left
+          (fun result order ->
+            let* reduction = result in
+            emit
+              (with_causes reduction
+                 [ order.Order.created_event_id; distribution_event_id ])
+              (Audit.Order_adjusted { order; action_id = action.id }))
+          (Ok reduction) adjusted
+    | Rights | Spin_off -> Ok reduction
+
   let apply_corporate_actions reduction actions =
     List.fold_left
       (fun result action ->
@@ -741,8 +845,115 @@ module Interactive = struct
         | Split { numerator; denominator } ->
             apply_split_action reduction action numerator denominator
         | Cash_dividend { amount_per_unit } ->
-            apply_dividend_action reduction action amount_per_unit)
+            apply_dividend_action reduction action amount_per_unit
+        | Distribution
+            {
+              distribution_type;
+              destination_instrument_id;
+              numerator;
+              denominator;
+              basis_allocation_bps;
+              fractional_policy;
+            } ->
+            apply_distribution_action reduction action distribution_type
+              destination_instrument_id numerator denominator
+              basis_allocation_bps fractional_policy)
       (Ok reduction) actions
+
+  let replace_desired_quantity state instrument_id quantity cause_id =
+    match state.desired_targets with
+    | None -> state
+    | Some desired ->
+        {
+          state with
+          desired_targets =
+            Some
+              {
+                quantities =
+                  Id.Instrument.Map.add instrument_id quantity
+                    desired.quantities;
+                cause_ids = cause_id :: desired.cause_ids;
+              };
+        }
+
+  let apply_lifecycle_event reduction
+      (lifecycle_event : Instrument_lifecycle.event) =
+    let instrument_id = lifecycle_event.Instrument_lifecycle.instrument_id in
+    let* lifecycle =
+      Instrument_lifecycle.apply reduction.state.lifecycle lifecycle_event
+    in
+    let* instrument =
+      match Risk.instrument reduction.state.config.risk instrument_id with
+      | Some instrument -> Ok instrument
+      | None -> Error "lifecycle event refers to an unknown instrument"
+    in
+    let* account, liquidated_quantity, cash_amount =
+      match lifecycle_event.kind with
+      | Instrument_lifecycle.Expiration { terminal_policy }
+      | Delisting { terminal_policy; _ } -> (
+          match terminal_policy with
+          | Instrument_lifecycle.Hold ->
+              Ok
+                ( reduction.state.account,
+                  Scalar.Quantity.zero,
+                  Scalar.Money.zero )
+          | Cash_out { price; currency } ->
+              if not (String.equal currency instrument.quote_currency) then
+                Error
+                  "terminal cash-out currency must equal instrument quote \
+                   currency"
+              else
+                Account.cash_out_position reduction.state.account ~instrument_id
+                  ~currency ~price)
+      | Halt _ | Resume | Identifier_change _ ->
+          Ok (reduction.state.account, Scalar.Quantity.zero, Scalar.Money.zero)
+    in
+    let listing =
+      Instrument_lifecycle.listing lifecycle instrument_id |> Option.get
+    in
+    let reduction =
+      { reduction with state = { reduction.state with lifecycle; account } }
+    in
+    let* reduction, lifecycle_event_id =
+      emit_with_id reduction
+        (Audit.Lifecycle_applied
+           { lifecycle_event; listing; liquidated_quantity; cash_amount })
+    in
+    let cancellation_reason, target_quantity =
+      match lifecycle_event.kind with
+      | Instrument_lifecycle.Halt _ ->
+          ( Some Audit.Instrument_halt,
+            Account.position_quantity account instrument_id )
+      | Expiration _ | Delisting _ ->
+          ( Some Audit.Instrument_terminal,
+            Account.position_quantity account instrument_id )
+      | Resume | Identifier_change _ -> (None, Scalar.Quantity.zero)
+    in
+    let state =
+      match cancellation_reason with
+      | None -> reduction.state
+      | Some _ ->
+          replace_desired_quantity reduction.state instrument_id target_quantity
+            lifecycle_event_id
+    in
+    let reduction = { reduction with state } in
+    match cancellation_reason with
+    | None -> Ok reduction
+    | Some reason ->
+        let ids =
+          Oms.active_for_instrument reduction.state.oms instrument_id
+          |> List.map (fun order -> order.Order.id)
+        in
+        cancel_orders (with_causes reduction [ lifecycle_event_id ]) ~reason ids
+
+  let apply_lifecycle_events reduction events =
+    List.fold_left
+      (fun result lifecycle_event ->
+        let* reduction = result in
+        apply_lifecycle_event
+          (with_causes reduction (Option.to_list reduction.slice_event_id))
+          lifecycle_event)
+      (Ok reduction) events
 
   let borrow_fee ~notional ~bps span =
     if bps = 0 || Scalar.Money.equal notional Scalar.Money.zero then
@@ -1125,6 +1336,12 @@ module Interactive = struct
               (Scalar.Quantity.is_multiple target.quantity
                  ~lot:instrument.Instrument.lot_size)
           then Error "target quantity is not aligned to its instrument lot"
+          else if
+            (not
+               (Instrument_lifecycle.is_tradable state.lifecycle
+                  target.instrument_id))
+            && not (Scalar.Quantity.is_zero target.quantity)
+          then Error "non-tradable instrument target must be zero"
           else
             let* () =
               Risk.check_position_for state.config.risk target.instrument_id
@@ -1188,6 +1405,14 @@ module Interactive = struct
               Planner.quantity_from_weight ~equity:valuation.equity
                 ~weight:target.weight ~price:bar.close_price
                 ~lot_size:instrument.lot_size
+            in
+            let* () =
+              if
+                Instrument_lifecycle.is_tradable state.lifecycle
+                  target.instrument_id
+                || Scalar.Quantity.is_zero quantity
+              then Ok ()
+              else Error "non-tradable instrument target must be zero"
             in
             let* () =
               Risk.check_position_for state.config.risk target.instrument_id
@@ -1346,6 +1571,23 @@ module Interactive = struct
                (Id.Corporate_action.Set.mem action.id state.applied_action_ids))
         market_slice.corporate_actions
     in
+    let lifecycle_valid =
+      List.for_all
+        (fun (lifecycle_event : Instrument_lifecycle.event) ->
+          Option.is_some
+            (Risk.instrument state.config.risk
+               lifecycle_event.Instrument_lifecycle.instrument_id)
+          && (not
+                (Id.Corporate_action.Set.mem lifecycle_event.id
+                   state.applied_action_ids))
+          && not
+               (List.exists
+                  (fun action ->
+                    Id.Corporate_action.equal action.Corporate_action.id
+                      lifecycle_event.id)
+                  market_slice.corporate_actions))
+        market_slice.lifecycle_events
+    in
     let borrow_observations_valid =
       List.for_all
         (fun (observation : Financing.borrow_observation) ->
@@ -1407,6 +1649,8 @@ module Interactive = struct
     then Error "market slice base-currency FX rate must equal one"
     else if not actions_valid then
       Error "corporate action is unknown or was already applied"
+    else if not lifecycle_valid then
+      Error "lifecycle event is unknown, duplicated, or was already applied"
     else if not borrow_observations_valid then
       Error "borrow observations must be known and advance effective time"
     else if not cash_observations_valid then
@@ -2081,6 +2325,12 @@ module Interactive = struct
           (fun ids action ->
             Id.Corporate_action.Set.add action.Corporate_action.id ids)
           state.applied_action_ids market_slice.Market_slice.corporate_actions
+        |> fun ids ->
+        List.fold_left
+          (fun ids (lifecycle_event : Instrument_lifecycle.event) ->
+            Id.Corporate_action.Set.add lifecycle_event.Instrument_lifecycle.id
+              ids)
+          ids market_slice.lifecycle_events
       in
       let latest_bars =
         List.fold_left
@@ -2153,8 +2403,11 @@ module Interactive = struct
     let run market_slice reduction =
       let* reduction = cancel_expired_gtd reduction market_slice in
       let* reduction = process_settlements reduction market_slice in
-      apply_corporate_actions reduction
-        market_slice.Market_slice.corporate_actions
+      let* reduction =
+        apply_corporate_actions reduction
+          market_slice.Market_slice.corporate_actions
+      in
+      apply_lifecycle_events reduction market_slice.lifecycle_events
   end
 
   module Borrow_phase = struct

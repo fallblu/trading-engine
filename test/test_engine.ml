@@ -9,6 +9,7 @@ let () =
       ("fee-schedules", Test_fee_schedules.tests);
       ("financing", Test_financing.tests);
       ("settlement", Test_settlement.tests);
+      ("corporate-lifecycle", Test_corporate_lifecycle.tests);
       ("reducer", Test_reducer.tests);
       ("reducer-properties", Test_reducer_properties.tests);
       ("checkpoint4", Test_checkpoint4.tests);

@@ -2,12 +2,12 @@ open Test_support
 module T = Trading_engine
 
 let demo_document () =
-  In_channel.with_open_bin "../contracts/v11/fixtures/demo.scenario.json"
+  In_channel.with_open_bin "../contracts/v12/fixtures/demo.scenario.json"
     In_channel.input_all
 
 let demo () = T.Scenario.of_string (demo_document ()) |> ok
 let demo_hash () = T.Sha256.digest_string (demo_document ())
-let stream_path = "../contracts/v11/fixtures/demo.scenario.jsonl"
+let stream_path = "../contracts/v12/fixtures/demo.scenario.jsonl"
 
 let stream_document () =
   In_channel.with_open_bin stream_path In_channel.input_all
@@ -75,7 +75,7 @@ let write_large_stream path slice_count =
               ~effective_at:start_at ~credit_rate_bps:0 ~debit_rate_bps:0
             |> ok
           in
-          T.Market_slice.create_v11 ~slice_sequence:(Int64.of_int index)
+          T.Market_slice.create_v12 ~slice_sequence:(Int64.of_int index)
             ~start_at
             ~end_at:(add_seconds base (offset + 1))
             ~available_at:(add_seconds base (offset + 2))
@@ -89,12 +89,13 @@ let write_large_stream path slice_count =
             ~fx_rates:[ fx_mark () ]
             ~corporate_actions:[] ~borrow_observations:[ borrow_observation ]
             ~cash_rate_observations:[ cash_rate ] ~settlement_failures:[]
+            ~lifecycle_events:[]
           |> ok
         in
         let payload =
           `Assoc
             [
-              ("market_slice", T.Codec.market_slice_to_yojson_v11 market_slice);
+              ("market_slice", T.Codec.market_slice_to_yojson_v12 market_slice);
               ("intents", `List []);
             ]
         in
@@ -139,9 +140,9 @@ let schema_artifacts_parse () =
           (List.mem_assoc "$defs" fields)
     | _ -> Alcotest.fail (path ^ " must contain a JSON object")
   in
-  check_schema "../contracts/v11/scenario.schema.json";
-  check_schema "../contracts/v11/scenario-stream.schema.json";
-  check_schema "../contracts/v11/journal.schema.json"
+  check_schema "../contracts/v12/scenario.schema.json";
+  check_schema "../contracts/v12/scenario-stream.schema.json";
+  check_schema "../contracts/v12/journal.schema.json"
 
 let timestamp_precision_is_bounded () =
   List.iter
@@ -178,6 +179,233 @@ let map_root change =
   | `Assoc fields -> `Assoc (change fields)
   | _ -> Alcotest.fail "demo must be an object"
 
+let replace_assoc name value fields =
+  (name, value) :: List.remove_assoc name fields
+
+let v12_distributions_and_lifecycle_parse () =
+  let source = instrument_id "demo-equity-acme" in
+  let child = instrument_id "demo-equity-child" in
+  let action name distribution_type destination fractional_policy =
+    T.Corporate_action.distribution
+      ~id:(T.Id.Corporate_action.of_string_exn name)
+      ~instrument_id:source ~distribution_type
+      ~destination_instrument_id:destination ~numerator:1L ~denominator:2L
+      ~basis_allocation_bps:
+        (if distribution_type = T.Corporate_action.Stock_dividend then 0
+         else 2500)
+      ~fractional_policy
+    |> ok
+  in
+  let event name kind =
+    T.Instrument_lifecycle.create_event
+      ~id:(T.Id.Corporate_action.of_string_exn name)
+      ~instrument_id:source ~kind
+    |> ok
+  in
+  let market_slice =
+    T.Market_slice.create_v12 ~slice_sequence:1L
+      ~start_at:(timestamp "2026-01-02T14:30:00Z")
+      ~end_at:(timestamp "2026-01-02T20:55:00Z")
+      ~available_at:(timestamp "2026-01-02T21:00:00Z")
+      ~received_at:(timestamp "2026-01-02T21:00:01Z")
+      ~bars:[ bar ~instrument:source 1L; bar ~instrument:child 1L ]
+      ~fx_rates:[ fx_mark () ]
+      ~corporate_actions:
+        [
+          action "stock-action" T.Corporate_action.Stock_dividend source
+            T.Corporate_action.Reject_fractional;
+          action "rights-action" T.Corporate_action.Rights child
+            (T.Corporate_action.Cash_in_lieu
+               { price = price "12.5"; currency = "USD" });
+          action "spinoff-action" T.Corporate_action.Spin_off child
+            T.Corporate_action.Reject_fractional;
+        ]
+      ~borrow_observations:[] ~cash_rate_observations:[] ~settlement_failures:[]
+      ~lifecycle_events:
+        [
+          event "rename-event"
+            (T.Instrument_lifecycle.Identifier_change
+               {
+                 symbol = "ACME2";
+                 provider = "sip";
+                 provider_instrument_id = "ACME.X";
+               });
+          event "halt-event"
+            (T.Instrument_lifecycle.Halt { reason = "regulatory" });
+          event "resume-event" T.Instrument_lifecycle.Resume;
+          event "expiration-event"
+            (T.Instrument_lifecycle.Expiration
+               { terminal_policy = T.Instrument_lifecycle.Hold });
+          event "delisting-event"
+            (T.Instrument_lifecycle.Delisting
+               {
+                 terminal_policy =
+                   T.Instrument_lifecycle.Cash_out
+                     { price = price "9"; currency = "USD" };
+                 reason = "acquisition";
+               });
+        ]
+    |> ok
+  in
+  let document =
+    map_root (fun fields ->
+        let instruments =
+          match List.assoc "instruments" fields with
+          | `List (`Assoc configured :: rest) ->
+              let child_instrument =
+                configured
+                |> replace_assoc "instrument_id" (`String "demo-equity-child")
+                |> replace_assoc "symbol" (`String "CHILD")
+              in
+              `List (`Assoc configured :: `Assoc child_instrument :: rest)
+          | _ -> Alcotest.fail "demo instruments must be a list"
+        in
+        let risk =
+          match List.assoc "risk" fields with
+          | `Assoc risk_fields ->
+              let policies =
+                match List.assoc "instrument_policies" risk_fields with
+                | `List (`Assoc configured :: rest) ->
+                    let child_policy =
+                      replace_assoc "instrument_id"
+                        (`String "demo-equity-child") configured
+                    in
+                    `List (`Assoc configured :: `Assoc child_policy :: rest)
+                | _ -> Alcotest.fail "demo risk policies must be a list"
+              in
+              `Assoc (replace_assoc "instrument_policies" policies risk_fields)
+          | _ -> Alcotest.fail "demo risk must be an object"
+        in
+        let venue_calendars =
+          match List.assoc "venue_calendars" fields with
+          | `List [ `Assoc calendar ] ->
+              `List
+                [
+                  `Assoc
+                    (replace_assoc "instrument_ids"
+                       (`List
+                          [
+                            `String "demo-equity-acme";
+                            `String "demo-equity-child";
+                          ])
+                       calendar);
+                ]
+          | _ -> Alcotest.fail "demo venue calendars must be a singleton"
+        in
+        let execution =
+          match List.assoc "execution" fields with
+          | `Assoc execution_fields -> (
+              match List.assoc "configuration" execution_fields with
+              | `Assoc configuration ->
+                  let schedules =
+                    match List.assoc "fee_schedules" configuration with
+                    | `List (`Assoc configured :: rest) ->
+                        let child_schedule =
+                          configured
+                          |> replace_assoc "schedule_id"
+                               (`String "demo-child-fees-v1")
+                          |> replace_assoc "instrument_id"
+                               (`String "demo-equity-child")
+                        in
+                        `List
+                          (`Assoc configured :: `Assoc child_schedule :: rest)
+                    | _ -> Alcotest.fail "demo fee schedules must be a list"
+                  in
+                  `Assoc
+                    (replace_assoc "configuration"
+                       (`Assoc
+                          (replace_assoc "fee_schedules" schedules configuration))
+                       execution_fields)
+              | _ ->
+                  Alcotest.fail "demo execution configuration must be an object"
+              )
+          | _ -> Alcotest.fail "demo execution must be an object"
+        in
+        let slices =
+          match List.assoc "slices" fields with
+          | `List (_ :: rest) ->
+              let add_child_bar = function
+                | `Assoc slice_fields -> (
+                    match List.assoc "bars" slice_fields with
+                    | `List (`Assoc configured :: bars) ->
+                        let child_bar =
+                          replace_assoc "instrument_id"
+                            (`String "demo-equity-child") configured
+                        in
+                        `Assoc
+                          (replace_assoc "bars"
+                             (`List
+                                (`Assoc configured :: `Assoc child_bar :: bars))
+                             slice_fields)
+                    | _ -> Alcotest.fail "demo slice bars must be nonempty")
+                | _ -> Alcotest.fail "demo slice must be an object"
+              in
+              `List
+                (T.Codec.market_slice_to_yojson_v12 market_slice
+                :: List.map add_child_bar rest)
+          | _ -> Alcotest.fail "demo slices must be nonempty"
+        in
+        let schedule =
+          let add_child_target = function
+            | `Assoc intent_fields as intent -> (
+                match List.assoc_opt "targets" intent_fields with
+                | Some (`List (`Assoc configured :: targets)) ->
+                    let child_target =
+                      configured
+                      |> replace_assoc "instrument_id"
+                           (`String "demo-equity-child")
+                      |> fun fields ->
+                      if List.mem_assoc "weight" fields then
+                        replace_assoc "weight" (`String "0") fields
+                      else replace_assoc "quantity" (`String "0") fields
+                    in
+                    `Assoc
+                      (replace_assoc "targets"
+                         (`List
+                            (`Assoc configured :: `Assoc child_target :: targets))
+                         intent_fields)
+                | _ -> intent)
+            | json -> json
+          in
+          match List.assoc "schedule" fields with
+          | `List entries ->
+              `List
+                (List.map
+                   (function
+                     | `Assoc entry_fields -> (
+                         match List.assoc "intents" entry_fields with
+                         | `List intents ->
+                             `Assoc
+                               (replace_assoc "intents"
+                                  (`List (List.map add_child_target intents))
+                                  entry_fields)
+                         | _ -> Alcotest.fail "schedule intents must be a list")
+                     | _ -> Alcotest.fail "schedule entry must be an object")
+                   entries)
+          | _ -> Alcotest.fail "demo schedule must be a list"
+        in
+        fields
+        |> replace_assoc "instruments" instruments
+        |> replace_assoc "risk" risk
+        |> replace_assoc "venue_calendars" venue_calendars
+        |> replace_assoc "execution" execution
+        |> replace_assoc "slices" slices
+        |> replace_assoc "schedule" schedule)
+    |> Yojson.Safe.to_string
+  in
+  let parsed =
+    match T.Scenario.of_string document with
+    | Ok value -> value
+    | Error diagnostic -> Alcotest.fail (T.Diagnostic.to_human diagnostic)
+  in
+  let first = List.hd parsed.slices in
+  Alcotest.(check int)
+    "all distribution variants" 3
+    (List.length first.corporate_actions);
+  Alcotest.(check int)
+    "all lifecycle variants" 5
+    (List.length first.lifecycle_events)
+
 let unknown_fields_are_rejected () =
   let changed = map_root (fun fields -> ("unexpected", `Bool true) :: fields) in
   Alcotest.(check bool)
@@ -203,8 +431,8 @@ let contract_version_is_required_and_supported () =
   let unsupported_diagnostic = T.Scenario.of_yojson unsupported |> error in
   Alcotest.(check string)
     "unsupported version diagnosed"
-    "unsupported scenario contract_version \"2\" (expected one of 11, 10, 9, \
-     8, 7, 6, 5, 4, 3)"
+    "unsupported scenario contract_version \"2\" (expected one of 12, 11, 10, \
+     9, 8, 7, 6, 5, 4, 3)"
     (T.Diagnostic.to_human unsupported_diagnostic);
   Alcotest.(check string)
     "unsupported version code" "scenario.unsupported_contract"
@@ -354,7 +582,7 @@ let dense_schedule_document slice_count =
             ~effective_at:start_at ~credit_rate_bps:100 ~debit_rate_bps:200
           |> ok
         in
-        T.Market_slice.create_v11 ~slice_sequence:(Int64.of_int index) ~start_at
+        T.Market_slice.create_v12 ~slice_sequence:(Int64.of_int index) ~start_at
           ~end_at:(add_seconds base (time_offset + 1))
           ~available_at:(add_seconds base (time_offset + 2))
           ~received_at:(add_seconds base (time_offset + 3))
@@ -367,8 +595,8 @@ let dense_schedule_document slice_count =
           ~fx_rates:[ fx_mark () ]
           ~corporate_actions:[] ~borrow_observations:[ borrow_observation ]
           ~cash_rate_observations:[ cash_rate_observation ]
-          ~settlement_failures:[]
-        |> ok |> T.Codec.market_slice_to_yojson_v11)
+          ~settlement_failures:[] ~lifecycle_events:[]
+        |> ok |> T.Codec.market_slice_to_yojson_v12)
   in
   let schedule =
     List.init slice_count (fun offset ->
@@ -900,7 +1128,7 @@ let replay_matches_golden_file () =
     |> fun value -> value ^ "\n"
   in
   let expected =
-    In_channel.with_open_bin "../contracts/v11/fixtures/demo.journal.jsonl"
+    In_channel.with_open_bin "../contracts/v12/fixtures/demo.journal.jsonl"
       In_channel.input_all
   in
   Alcotest.(check string) "stable audit contract" expected actual
@@ -928,7 +1156,7 @@ let v3_replay_matches_frozen_golden_file () =
 let fill_clipping_fixture_reconciles () =
   let document =
     In_channel.with_open_bin
-      "../contracts/v11/fixtures/fill-clipped.scenario.json"
+      "../contracts/v12/fixtures/fill-clipped.scenario.json"
       In_channel.input_all
   in
   let scenario = T.Scenario.of_string document |> ok in
@@ -942,7 +1170,7 @@ let fill_clipping_fixture_reconciles () =
   in
   let expected =
     In_channel.with_open_bin
-      "../contracts/v11/fixtures/fill-clipped.journal.jsonl"
+      "../contracts/v12/fixtures/fill-clipped.journal.jsonl"
       In_channel.input_all
   in
   Alcotest.(check string) "fill clipping audit reconciliation" expected actual
@@ -1245,6 +1473,8 @@ let large_stream_replay_does_not_retain_audit_history () =
 let tests =
   [
     Alcotest.test_case "demo contract parses" `Quick demo_contract_parses;
+    Alcotest.test_case "v12 distributions and lifecycle parse" `Quick
+      v12_distributions_and_lifecycle_parse;
     Alcotest.test_case "schema artifacts parse" `Quick schema_artifacts_parse;
     Alcotest.test_case "timestamp precision is bounded" `Quick
       timestamp_precision_is_bounded;

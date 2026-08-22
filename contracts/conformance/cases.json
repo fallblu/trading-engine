@@ -1190,6 +1190,90 @@
       "mutations": [],
       "schema_expectation": "accept",
       "source": "strategy/v9/fixtures/external.strategy.jsonl"
+    },
+    {
+      "name": "scenario-v12-valid",
+      "artifact": "scenario-v12",
+      "kind": "scenario",
+      "source": "v12/fixtures/demo.scenario.json",
+      "mutations": [],
+      "schema_expectation": "accept",
+      "parser_expectation": "accept"
+    },
+    {
+      "name": "scenario-stream-v12-valid",
+      "artifact": "scenario-stream-v12",
+      "kind": "scenario_stream",
+      "source": "v12/fixtures/demo.scenario.jsonl",
+      "mutations": [],
+      "schema_expectation": "accept",
+      "parser_expectation": "accept"
+    },
+    {
+      "name": "strategy-ready-valid-v10",
+      "artifact": "strategy-message-v10",
+      "instance": {
+        "strategy_protocol_version": "10",
+        "strategy_sequence": "1",
+        "message_type": "ready",
+        "payload": { "strategy_name": "conformance", "strategy_version": null }
+      },
+      "mutations": [],
+      "schema_expectation": "accept",
+      "parser_expectation": "accept",
+      "parser_expected": "ready"
+    },
+    {
+      "name": "strategy-intents-valid-v10",
+      "artifact": "strategy-message-v10",
+      "instance": {
+        "strategy_protocol_version": "10",
+        "strategy_sequence": "2",
+        "message_type": "intents",
+        "payload": { "intents": [] }
+      },
+      "mutations": [],
+      "schema_expectation": "accept",
+      "parser_expectation": "accept",
+      "parser_expected": "intents"
+    },
+    {
+      "name": "strategy-error-valid-v10",
+      "artifact": "strategy-message-v10",
+      "instance": {
+        "strategy_protocol_version": "10",
+        "strategy_sequence": "7",
+        "message_type": "error",
+        "payload": { "message": "fixture failure" }
+      },
+      "mutations": [],
+      "schema_expectation": "accept"
+    },
+    {
+      "name": "strategy-v10-rejected-response-branch",
+      "artifact": "strategy-transcript-v10",
+      "instance": {
+        "strategy_diagnostic_version": "1",
+        "transcript_sequence": "2",
+        "record_type": "rejected_strategy_response",
+        "expected_strategy_sequence": "1",
+        "diagnostic": {
+          "diagnostic_version": "1",
+          "code": "strategy.protocol",
+          "phase": "strategy",
+          "message": "strategy initialization: invalid strategy response JSON",
+          "context": { "json_path": "$", "sequence": "1" },
+          "cause": null
+        },
+        "evidence": {
+          "encoding": "hex",
+          "prefix": "7b",
+          "observed_bytes": 1,
+          "truncated": false
+        }
+      },
+      "mutations": [],
+      "schema_expectation": "accept"
     }
   ]
 }

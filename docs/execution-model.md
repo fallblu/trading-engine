@@ -1,11 +1,11 @@
 # Execution model
 
 The engine selects a compiled execution module by the scenario's stable `execution.model` name.
-Contract v11 advertises and accepts `completed_bar_v1`; embedders can inject another module through
+Contract v12 advertises and accepts `completed_bar_v1`; embedders can inject another module through
 the typed engine configuration without introducing runtime shared-library loading. The selected
 name is repeated in both terminal audit records.
 
-Each compiled model owns a strict configuration contract. The v11 envelope separates selection from
+Each compiled model owns a strict configuration contract. The v12 envelope separates selection from
 model-specific parameters:
 
 ```json
@@ -143,6 +143,14 @@ order may exceed that maximum, but no individual fill may do so.
 
 A cash dividend multiplies the pre-match signed position by its per-unit amount. It credits a long
 or debits a short in the instrument's quote-currency ledger and records realized dividend P&L.
+Stock dividends, rights, and spin-offs deliver a lot-aligned exact-ratio entitlement. Their payload
+allocates basis explicitly and either rejects fractions or converts them at a declared
+quote-currency price. Stock dividends also scale persistent targets and eligible working orders.
+
+Lifecycle events follow corporate actions and precede matching. Identifier changes preserve the
+stable instrument ID while updating the symbol and named provider mapping. Halts and terminal
+events cancel active orders. Expiration and delisting use an explicit hold or cash-out policy and
+cannot be resumed.
 Contract v10 replaces the fixed legacy rate with effective-time borrow observations. Each
 observation names an instrument, available quantity, annual rate in basis points, and recall state.
 Observations become active no later than the slice start and remain active until superseded. A new
