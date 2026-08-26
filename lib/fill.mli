@@ -24,19 +24,6 @@ val create :
   quantity:Scalar.Quantity.t ->
   price:Scalar.Price.t ->
   fee:Scalar.Money.t ->
-  executed_at:Ptime.t ->
-  slice_sequence:int64 ->
-  (t, string) result
-
-val create_v9 :
-  id:Id.Fill.t ->
-  order_id:Id.Order.t ->
-  instrument_id:Id.Instrument.t ->
-  quote_currency:string ->
-  side:Order.side ->
-  quantity:Scalar.Quantity.t ->
-  price:Scalar.Price.t ->
-  fee:Scalar.Money.t ->
   fee_components:Fee_schedule.calculated_component list ->
   executed_at:Ptime.t ->
   slice_sequence:int64 ->

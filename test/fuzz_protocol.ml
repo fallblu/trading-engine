@@ -324,7 +324,7 @@ let hostile_seeds () =
       ("deep-nesting", deep_json 512);
       ("huge-token", huge_json_string);
       ( "duplicate-key",
-        "{\"contract_version\":\"4\",\"contract_version\":\"4\"}" );
+        "{\"contract_version\":\"1\",\"contract_version\":\"1\"}" );
       ("truncation", "{\"contract_version\":");
     ]
   in

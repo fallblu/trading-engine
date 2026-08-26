@@ -9,8 +9,9 @@ let runner ?(initial_cash = "10000") ?(risk = risk ()) ?(venue_calendars = [])
     schedule =
   let strategy_state = T.Scripted_strategy.create schedule |> ok in
   Runner.create ~run_id:(run_id "lifetime-run") ~scenario_sha256
-    ~config:(engine_config_v8 ~risk ~venue_calendars ())
-    ~initial_cash:[ ("USD", money initial_cash) ]
+    ~config:(engine_config ~risk ~venue_calendars ())
+    ~initial_portfolio:
+      (initial_portfolio ~cash:[ ("USD", money initial_cash) ] ())
     ~strategy_state
   |> ok
 
@@ -34,21 +35,11 @@ let calendar ?(venue = "XNAS") ?(covered_instrument = "test-equity") () =
     ~sessions:[ session ]
   |> ok
 
-let compatibility_mapping () =
-  let market = request () in
-  let limit = request ~kind:(T.Order.Limit (price "100")) () in
-  Alcotest.(check string)
-    "legacy market is IOC" "ioc"
-    (T.Order.time_in_force_to_string market.time_in_force);
-  Alcotest.(check string)
-    "legacy limit is GTC" "gtc"
-    (T.Order.time_in_force_to_string limit.time_in_force)
-
 let validates_stop_limit_and_gtd () =
   Alcotest.(check bool)
     "invalid buy stop-limit" true
     (Result.is_error
-       (T.Order.request_v8
+       (T.Order.request
           ~instrument_id:(instrument_id "test-equity")
           ~side:T.Order.Buy ~quantity:(quantity "1")
           ~kind:
@@ -56,9 +47,7 @@ let validates_stop_limit_and_gtd () =
                { trigger_price = price "100"; limit_price = price "99" })
           ~time_in_force:T.Order.Gtc ~origin:T.Order.Direct));
   let request =
-    request_v8
-      ~time_in_force:(T.Order.Gtd (timestamp "2026-01-02T20:00:00Z"))
-      ()
+    request ~time_in_force:(T.Order.Gtd (timestamp "2026-01-02T20:00:00Z")) ()
   in
   Alcotest.(check bool)
     "expiry follows creation" true
@@ -68,7 +57,7 @@ let validates_stop_limit_and_gtd () =
           ~created_at:(timestamp "2026-01-02T21:00:00Z")
           ~eligible_after_slice_sequence:1L request))
 
-let v8_intent_requires_explicit_companions () =
+let intent_requires_explicit_companions () =
   let intent =
     `Assoc
       [
@@ -87,7 +76,7 @@ let v8_intent_requires_explicit_companions () =
   in
   Alcotest.(check bool)
     "explicit stop/GTD parses" true
-    (Result.is_ok (T.Scenario.intent_of_yojson ~contract_version:"8" intent));
+    (Result.is_ok (T.Scenario.intent_of_yojson intent));
   let missing_trigger =
     match intent with
     | `Assoc fields -> `Assoc (List.remove_assoc "trigger_price" fields)
@@ -95,8 +84,7 @@ let v8_intent_requires_explicit_companions () =
   in
   Alcotest.(check bool)
     "missing companion is rejected" true
-    (Result.is_error
-       (T.Scenario.intent_of_yojson ~contract_version:"8" missing_trigger));
+    (Result.is_error (T.Scenario.intent_of_yojson missing_trigger));
   let submit kind trigger limit tif venue calendar expires =
     `Assoc
       [
@@ -125,34 +113,34 @@ let v8_intent_requires_explicit_companions () =
   List.iter
     (fun json ->
       Alcotest.(check bool)
-        "v8 order variant parses" true
-        (Result.is_ok (T.Scenario.intent_of_yojson ~contract_version:"8" json)))
+        "order variant parses" true
+        (Result.is_ok (T.Scenario.intent_of_yojson json)))
     valid;
   Alcotest.(check bool)
     "inconsistent TIF companions rejected" true
     (Result.is_error
-       (T.Scenario.intent_of_yojson ~contract_version:"8"
+       (T.Scenario.intent_of_yojson
           (submit "market" `Null `Null "gtc" (`String "XNAS") `Null `Null)))
 
 let order_validation_and_serialization_branches () =
   Alcotest.(check bool)
     "nonpositive quantity rejected" true
     (Result.is_error
-       (T.Order.request_v8
+       (T.Order.request
           ~instrument_id:(instrument_id "test-equity")
           ~side:T.Order.Buy ~quantity:T.Scalar.Quantity.zero
           ~kind:T.Order.Market ~time_in_force:T.Order.Gtc ~origin:T.Order.Direct));
   Alcotest.(check bool)
     "invalid sell stop-limit rejected" true
     (Result.is_error
-       (T.Order.request_v8
+       (T.Order.request
           ~instrument_id:(instrument_id "test-equity")
           ~side:T.Order.Sell ~quantity:(quantity "1")
           ~kind:
             (T.Order.Stop_limit
                { trigger_price = price "100"; limit_price = price "101" })
           ~time_in_force:T.Order.Gtc ~origin:T.Order.Direct));
-  let ordinary = request_v8 () in
+  let ordinary = current_request () in
   Alcotest.(check bool)
     "negative accepted sequence rejected" true
     (Result.is_error
@@ -198,7 +186,7 @@ let order_validation_and_serialization_branches () =
   in
   List.iteri
     (fun index (kind, time_in_force) ->
-      let request = request_v8 ~kind ~time_in_force () in
+      let request = current_request ~kind ~time_in_force () in
       ignore (T.Order.kind_to_string kind);
       ignore (T.Order.time_in_force_to_string time_in_force);
       let order =
@@ -206,14 +194,14 @@ let order_validation_and_serialization_branches () =
       in
       ignore (T.Order.is_market order);
       ignore (T.Order.effective_kind order);
-      match T.Codec.order_to_yojson_v8 order with
+      match T.Codec.order_to_yojson order with
       | `Assoc fields ->
           Alcotest.(check bool)
             "TIF serialized" true
             (List.mem_assoc "time_in_force" fields)
       | _ -> Alcotest.fail "serialized order must be an object")
     cases;
-  let unconditional = accepted_order (request_v8 ()) in
+  let unconditional = accepted_order (current_request ()) in
   Alcotest.(check bool)
     "unconditional order cannot trigger" true
     (Result.is_error
@@ -222,7 +210,7 @@ let order_validation_and_serialization_branches () =
           ~triggered_at:(timestamp "2026-01-03T20:00:00Z")
           ~triggered_slice_sequence:2L));
   let conditional =
-    accepted_order (request_v8 ~kind:(T.Order.Stop (price "110")) ())
+    accepted_order (current_request ~kind:(T.Order.Stop (price "110")) ())
   in
   Alcotest.(check bool)
     "negative trigger sequence rejected" true
@@ -237,7 +225,7 @@ let order_validation_and_serialization_branches () =
       ~triggered_slice_sequence:2L
     |> ok
   in
-  ignore (T.Codec.order_to_yojson_v8 triggered);
+  ignore (T.Codec.order_to_yojson triggered);
   Alcotest.(check bool)
     "duplicate trigger rejected" true
     (Result.is_error
@@ -259,7 +247,9 @@ let order_validation_and_serialization_branches () =
 
 let trigger_then_execute_on_following_slice () =
   let request =
-    request_v8 ~kind:(T.Order.Stop (price "110")) ~time_in_force:T.Order.Gtc ()
+    current_request
+      ~kind:(T.Order.Stop (price "110"))
+      ~time_in_force:T.Order.Gtc ()
   in
   let oms, order = oms_with_order request in
   let trigger_slice =
@@ -317,7 +307,7 @@ let trigger_then_execute_on_following_slice () =
 
 let stop_limit_uses_limit_after_trigger () =
   let request =
-    request_v8
+    request
       ~kind:
         (T.Order.Stop_limit
            { trigger_price = price "110"; limit_price = price "111" })
@@ -363,7 +353,7 @@ let stop_limit_uses_limit_after_trigger () =
 
 let sell_stop_gap_and_partial_fill () =
   let request =
-    request_v8 ~side:T.Order.Sell ~quantity_value:"10"
+    current_request ~side:T.Order.Sell ~quantity_value:"10"
       ~kind:(T.Order.Stop (price "90"))
       ()
   in
@@ -412,7 +402,9 @@ let sell_stop_gap_and_partial_fill () =
   | _ -> Alcotest.fail "expected one partial sell-stop fill"
 
 let fok_is_all_or_cancel () =
-  let request = request_v8 ~quantity_value:"10" ~time_in_force:T.Order.Fok () in
+  let request =
+    current_request ~quantity_value:"10" ~time_in_force:T.Order.Fok ()
+  in
   let oms, order = oms_with_order request in
   let matched =
     T.Execution.match_slice (execution ())
@@ -427,7 +419,7 @@ let fok_is_all_or_cancel () =
 
 let split_adjusts_stop_prices () =
   let request =
-    request_v8 ~quantity_value:"10"
+    current_request ~quantity_value:"10"
       ~kind:
         (T.Order.Stop_limit
            { trigger_price = price "110"; limit_price = price "112" })
@@ -450,7 +442,9 @@ let split_adjusts_stop_prices () =
 
 let engine_audits_trigger_and_defers_fill () =
   let request =
-    request_v8 ~kind:(T.Order.Stop (price "110")) ~time_in_force:T.Order.Gtc ()
+    current_request
+      ~kind:(T.Order.Stop (price "110"))
+      ~time_in_force:T.Order.Gtc ()
   in
   let state = runner [ (1L, [ T.Strategy.Submit_order request ]) ] in
   let state, _ = Runner.process_slice state (market_slice 1L) |> ok in
@@ -482,7 +476,7 @@ let engine_audits_trigger_and_defers_fill () =
 
 let gtd_and_day_expire_deterministically () =
   let gtd =
-    request_v8
+    request
       ~kind:(T.Order.Limit (price "90"))
       ~time_in_force:(T.Order.Gtd (timestamp "2026-01-03T20:00:00Z"))
       ()
@@ -509,7 +503,7 @@ let gtd_and_day_expire_deterministically () =
     (T.Audit.cancellation_reason_to_string reason);
   let calendar = calendar () in
   let day =
-    request_v8
+    request
       ~kind:(T.Order.Stop (price "101"))
       ~time_in_force:
         (T.Order.Day
@@ -555,7 +549,7 @@ let gtd_and_day_expire_deterministically () =
     (List.mem "fill_applied" (event_names expired))
 
 let fok_rejects_risk_clipped_fill () =
-  let order = request_v8 ~time_in_force:T.Order.Fok () in
+  let order = current_request ~time_in_force:T.Order.Fok () in
   let state =
     runner ~initial_cash:"550"
       ~risk:(risk ~max_leverage:"1" ())
@@ -593,7 +587,7 @@ let fok_rejects_risk_clipped_fill () =
 
 let day_identity_is_validated () =
   let day venue =
-    request_v8
+    request
       ~kind:(T.Order.Limit (price "90"))
       ~time_in_force:
         (T.Order.Day
@@ -637,12 +631,10 @@ let day_identity_is_validated () =
 
 let tests =
   [
-    Alcotest.test_case "legacy compatibility mapping" `Quick
-      compatibility_mapping;
     Alcotest.test_case "stop-limit and GTD validation" `Quick
       validates_stop_limit_and_gtd;
-    Alcotest.test_case "v8 intent companions" `Quick
-      v8_intent_requires_explicit_companions;
+    Alcotest.test_case "intent companions" `Quick
+      intent_requires_explicit_companions;
     Alcotest.test_case "order validation and serialization" `Quick
       order_validation_and_serialization_branches;
     Alcotest.test_case "stop triggers before later execution" `Quick

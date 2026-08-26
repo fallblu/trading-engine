@@ -65,38 +65,17 @@ let field ~root fields name =
       Error
         (error ~json_path:(root ^ "." ^ name) ("missing JSON field: " ^ name))
 
-let common ~root ~contract_version fields =
+let common ~root fields =
   let* metadata = field ~root fields "metadata" in
   let* run_id = field ~root fields "run_id" in
   let* base_currency = field ~root fields "base_currency" in
-  let initial_field =
-    if
-      List.mem contract_version
-        [ "16"; "15"; "14"; "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6" ]
-    then "initial_portfolio"
-    else "initial_cash"
-  in
-  let* initial_state = field ~root fields initial_field in
+  let* initial_state = field ~root fields "initial_portfolio" in
   let* instruments = field ~root fields "instruments" in
-  let venue_calendars =
-    if
-      List.mem contract_version
-        [ "16"; "15"; "14"; "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6"; "5" ]
-    then List.assoc_opt "venue_calendars" fields
-    else None
-  in
+  let venue_calendars = List.assoc_opt "venue_calendars" fields in
   let* risk = field ~root fields "risk" in
   let* execution = field ~root fields "execution" in
-  let financing =
-    if List.mem contract_version [ "16"; "15"; "14"; "13"; "12"; "11"; "10" ]
-    then List.assoc_opt "financing" fields
-    else None
-  in
-  let settlement =
-    if List.mem contract_version [ "16"; "15"; "14"; "13"; "12"; "11" ] then
-      List.assoc_opt "settlement" fields
-    else None
-  in
+  let financing = List.assoc_opt "financing" fields in
+  let settlement = List.assoc_opt "settlement" fields in
   let* max_internal_events = field ~root fields "max_internal_events" in
   Ok
     {
@@ -120,99 +99,55 @@ let batch json =
     | `Assoc fields -> field ~root fields "contract_version"
     | _ -> Error (error ~json_path:root "scenario must be a JSON object")
   in
-  let contract_version =
-    match preliminary with `String value -> value | _ -> ""
-  in
-  let calendar_fields =
-    if
-      List.mem contract_version
-        [ "16"; "15"; "14"; "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6"; "5" ]
-    then [ "venue_calendars" ]
-    else []
-  in
-  let initial_field =
-    if
-      List.mem contract_version
-        [ "16"; "15"; "14"; "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6" ]
-    then "initial_portfolio"
-    else "initial_cash"
-  in
+  let _ = preliminary in
   let* fields =
     object_fields ~json_path:root ~name:"scenario"
       ~expected:
-        ([
-           "contract_version";
-           "metadata";
-           "run_id";
-           "base_currency";
-           initial_field;
-           "instruments";
-           "risk";
-           "execution";
-           "max_internal_events";
-           "schedule";
-           "slices";
-         ]
-        @ calendar_fields
-        @ (if
-             List.mem contract_version
-               [ "16"; "15"; "14"; "13"; "12"; "11"; "10" ]
-           then [ "financing" ]
-           else [])
-        @
-        if List.mem contract_version [ "16"; "15"; "14"; "13"; "12"; "11" ] then
-          [ "settlement" ]
-        else [])
+        [
+          "contract_version";
+          "metadata";
+          "run_id";
+          "base_currency";
+          "initial_portfolio";
+          "instruments";
+          "venue_calendars";
+          "risk";
+          "execution";
+          "financing";
+          "settlement";
+          "max_internal_events";
+          "schedule";
+          "slices";
+        ]
       json
   in
   let* contract_version_json = field ~root fields "contract_version" in
-  let* common = common ~root ~contract_version fields in
+  let* common = common ~root fields in
   let* schedule = field ~root fields "schedule" in
   let* slices = field ~root fields "slices" in
   Ok { contract_version = contract_version_json; common; schedule; slices }
 
-let stream_header ~contract_version json =
+let stream_header json =
   let root = "$.payload" in
-  let calendar_fields =
-    if
-      List.mem contract_version
-        [ "16"; "15"; "14"; "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6"; "5" ]
-    then [ "venue_calendars" ]
-    else []
-  in
-  let initial_field =
-    if
-      List.mem contract_version
-        [ "16"; "15"; "14"; "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6" ]
-    then "initial_portfolio"
-    else "initial_cash"
-  in
   let* fields =
     object_fields ~json_path:root ~name:"scenario stream header payload"
       ~expected:
-        ([
-           "metadata";
-           "run_id";
-           "base_currency";
-           initial_field;
-           "instruments";
-           "risk";
-           "execution";
-           "max_internal_events";
-         ]
-        @ calendar_fields
-        @ (if
-             List.mem contract_version
-               [ "16"; "15"; "14"; "13"; "12"; "11"; "10" ]
-           then [ "financing" ]
-           else [])
-        @
-        if List.mem contract_version [ "16"; "15"; "14"; "13"; "12"; "11" ] then
-          [ "settlement" ]
-        else [])
+        [
+          "metadata";
+          "run_id";
+          "base_currency";
+          "initial_portfolio";
+          "instruments";
+          "venue_calendars";
+          "risk";
+          "execution";
+          "financing";
+          "settlement";
+          "max_internal_events";
+        ]
       json
   in
-  common ~root ~contract_version fields
+  common ~root fields
 
 let stream_item json =
   let root = "$.payload" in

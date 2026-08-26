@@ -22,18 +22,17 @@ let initialization () =
       metadata = `Assoc [ ("experiment", `String "demo") ];
       run_id = run_id "test-run";
       base_currency = "USD";
-      initial_cash = [ ("USD", money "10000") ];
-      initial_portfolio = None;
+      initial_portfolio = initial_portfolio ();
       instruments = [ instrument ];
       venue_calendars = [];
       risk = risk ~instruments:[ instrument ] ();
       execution_model = T.Execution_model.find "completed_bar_v1" |> ok;
       execution =
-        T.Execution.create_v2 ~participation_bps:10_000
+        T.Execution.create ~participation_bps:10_000
           ~fee_schedules:[ fee_schedule ]
         |> ok;
-      financing = Some T.Financing.legacy_policy;
-      settlement = None;
+      financing = financing_policy ();
+      settlement = settlement_policy ();
     }
 
 let field name = function
@@ -45,7 +44,7 @@ let initialize_message_is_complete () =
     T.Strategy_protocol.initialize_message ~sequence:1L (initialization ())
   in
   Alcotest.(check string)
-    "protocol version" "14"
+    "protocol version" "1"
     (match field "strategy_protocol_version" message with
     | `String value -> value
     | _ -> Alcotest.fail "expected version string");
@@ -148,36 +147,6 @@ let conservative_initialize_message_encodes_cost_models () =
   check "completed_bar_next_open_v1" T.Execution.Reject_missing_volume "reject";
   check "completed_bar_adverse_touch_v1" T.Execution.Zero_impact "zero_impact"
 
-let legacy_initialize_message_remains_frozen () =
-  let initialization =
-    {
-      (initialization ()) with
-      scenario_contract_version = T.Contract.legacy_journal_version;
-    }
-  in
-  let message =
-    T.Strategy_protocol.initialize_message ~sequence:1L initialization
-  in
-  Alcotest.(check string)
-    "legacy protocol version" "3"
-    (match field "strategy_protocol_version" message with
-    | `String value -> value
-    | _ -> Alcotest.fail "expected version string");
-  let payload = field "payload" message in
-  Alcotest.(check bool)
-    "no v4 initial portfolio" false
-    (match payload with
-    | `Assoc fields -> List.mem_assoc "initial_portfolio" fields
-    | _ -> Alcotest.fail "expected payload object");
-  let execution = field "execution" payload in
-  Alcotest.(check bool)
-    "flat v3 execution" true
-    (match execution with
-    | `Assoc fields ->
-        List.mem_assoc "participation_bps" fields
-        && not (List.mem_assoc "configuration" fields)
-    | _ -> Alcotest.fail "expected execution object")
-
 let event_message_contains_complete_context () =
   let account = test_account () in
   let slice = market_slice 1L in
@@ -265,7 +234,7 @@ let nonpositive_equity_omits_weights () =
 let response message_type payload =
   `Assoc
     [
-      ("strategy_protocol_version", `String "14");
+      ("strategy_protocol_version", `String "1");
       ("strategy_sequence", `String "3");
       ("message_type", `String message_type);
       ("payload", payload);
@@ -365,8 +334,8 @@ let responses_are_strict_and_typed () =
   let duplicate =
     `Assoc
       [
-        ("strategy_protocol_version", `String "7");
-        ("strategy_protocol_version", `String "7");
+        ("strategy_protocol_version", `String "1");
+        ("strategy_protocol_version", `String "1");
         ("strategy_sequence", `String "3");
         ("message_type", `String "stopped");
         ("payload", `Assoc []);
@@ -380,20 +349,21 @@ let responses_are_strict_and_typed () =
   let wrong_version =
     `Assoc
       [
-        ("strategy_protocol_version", `String "1");
+        ("strategy_protocol_version", `String "unsupported");
         ("strategy_sequence", `String "3");
         ("message_type", `String "stopped");
         ("payload", `Assoc []);
       ]
   in
   Alcotest.(check string)
-    "wrong version rejected" "unsupported strategy protocol version: 1"
+    "wrong version rejected"
+    "unsupported strategy protocol version: unsupported"
     (T.Strategy_protocol.response_of_yojson ~expected_sequence:3L wrong_version
     |> diagnostic_message);
   let unknown_field =
     `Assoc
       [
-        ("strategy_protocol_version", `String "7");
+        ("strategy_protocol_version", `String "unsupported");
         ("strategy_sequence", `String "3");
         ("message_type", `String "stopped");
         ("payload", `Assoc []);
@@ -581,8 +551,6 @@ let tests =
       initialize_message_includes_calendars;
     Alcotest.test_case "conservative initialization encodes costs" `Quick
       conservative_initialize_message_encodes_cost_models;
-    Alcotest.test_case "legacy initialize message remains frozen" `Quick
-      legacy_initialize_message_remains_frozen;
     Alcotest.test_case "event context is complete" `Quick
       event_message_contains_complete_context;
     Alcotest.test_case "nonpositive equity omits weights" `Quick

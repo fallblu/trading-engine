@@ -152,11 +152,13 @@ let financing_slice ?(borrow_observations = []) ?(cash_rate_observations = [])
   let end_at = timestamp (Printf.sprintf "2026-01-%02dT21:00:00Z" day) in
   let available_at = timestamp (Printf.sprintf "2026-01-%02dT21:00:01Z" day) in
   let received_at = timestamp (Printf.sprintf "2026-01-%02dT21:00:02Z" day) in
-  T.Market_slice.create_v10 ~slice_sequence:sequence ~start_at ~end_at
-    ~available_at ~received_at
+  T.Market_slice.create ~slice_sequence:sequence ~start_at ~end_at ~available_at
+    ~received_at
     ~bars:[ bar sequence ]
     ~fx_rates:[ fx_mark () ]
     ~corporate_actions:[] ~borrow_observations ~cash_rate_observations
+    ~settlement_failures:[] ~lifecycle_events:[] ~market_events:[]
+    ~order_book_events:[]
   |> ok
 
 let borrow_observation ?(available = "5") ?(rate = 3600) ?(recalled = false)
@@ -173,11 +175,11 @@ let cash_rate effective_at =
   |> ok
 
 let financing_config financing =
-  T.Engine.config_v10 ~contract_version:T.Contract.version
-    ~risk:(risk ~short_borrow_bps:0 ())
+  T.Engine.config ~contract_version:T.Contract.version ~risk:(risk ())
     ~venue_calendars:[]
     ~execution_model:(T.Execution_model.find "completed_bar_v1" |> ok)
-    ~execution:(execution ()) ~financing ~max_internal_events:1000
+    ~execution:(execution ()) ~financing ~settlement:(settlement_policy ())
+    ~max_internal_events:1000
   |> ok
 
 let empty_strategy () = T.Scripted_strategy.create [] |> ok
@@ -186,7 +188,7 @@ let missing_data_policies_are_explicit () =
   let cash_state =
     Runner.create ~run_id:(run_id "missing-cash") ~scenario_sha256
       ~config:(financing_config (policy ()))
-      ~initial_cash:[ ("USD", money "1000") ]
+      ~initial_portfolio:(initial_portfolio ~cash:[ ("USD", money "1000") ] ())
       ~strategy_state:(empty_strategy ())
     |> ok
   in
@@ -213,8 +215,7 @@ let missing_data_policies_are_explicit () =
     |> ok
   in
   let borrow_state =
-    Runner.create_with_portfolio ~run_id:(run_id "missing-borrow")
-      ~scenario_sha256
+    Runner.create ~run_id:(run_id "missing-borrow") ~scenario_sha256
       ~config:(financing_config (policy ~cash_missing_data:T.Financing.Zero ()))
       ~initial_portfolio ~strategy_state:(empty_strategy ())
     |> ok
@@ -247,7 +248,7 @@ let reject_order_policy_uses_current_locate () =
   let state =
     Runner.create ~run_id:(run_id "reject-locate") ~scenario_sha256
       ~config:(financing_config financing)
-      ~initial_cash:[ ("USD", money "1000") ]
+      ~initial_portfolio:(initial_portfolio ~cash:[ ("USD", money "1000") ] ())
       ~strategy_state
     |> ok
   in
@@ -294,8 +295,7 @@ let zero_missing_data_and_recall_retention () =
       ~recall_policy:T.Financing.Reject_new_shorts ()
   in
   let state =
-    Runner.create_with_portfolio ~run_id:(run_id "retain-recall")
-      ~scenario_sha256
+    Runner.create ~run_id:(run_id "retain-recall") ~scenario_sha256
       ~config:(financing_config financing)
       ~initial_portfolio ~strategy_state:(empty_strategy ())
     |> ok
@@ -344,18 +344,19 @@ let availability_clips_and_recall_closes () =
       ]
   in
   let strategy_state = T.Scripted_strategy.create [ (1L, [ target ]) ] |> ok in
-  let configured_risk = risk ~short_borrow_bps:0 () in
+  let configured_risk = risk () in
   let financing = policy () in
   let config =
-    T.Engine.config_v10 ~contract_version:T.Contract.version
-      ~risk:configured_risk ~venue_calendars:[]
+    T.Engine.config ~contract_version:T.Contract.version ~risk:configured_risk
+      ~venue_calendars:[]
       ~execution_model:(T.Execution_model.find "completed_bar_v1" |> ok)
-      ~execution:(execution ()) ~financing ~max_internal_events:1000
+      ~execution:(execution ()) ~financing ~settlement:(settlement_policy ())
+      ~max_internal_events:1000
     |> ok
   in
   let state =
     Runner.create ~run_id:(run_id "financing") ~scenario_sha256 ~config
-      ~initial_cash:[ ("USD", money "1000") ]
+      ~initial_portfolio:(initial_portfolio ~cash:[ ("USD", money "1000") ] ())
       ~strategy_state
     |> ok
   in

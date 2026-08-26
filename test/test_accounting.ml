@@ -249,7 +249,7 @@ let risk_reserves_partial_order_remainders () =
        (request ~side:T.Order.Buy ~quantity_value:"1" ()));
   Alcotest.(check string)
     "two units exceed the reserved long limit"
-    "position would exceed the maximum long position"
+    "position would exceed the instrument maximum long position"
     (risk_check configured ~account ~oms
        (request ~side:T.Order.Buy ~quantity_value:"2" ())
     |> error)

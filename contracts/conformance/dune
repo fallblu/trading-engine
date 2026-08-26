@@ -4,5 +4,4 @@
  (files
   (README.md as contracts/conformance/README.md)
   (cases.json as contracts/conformance/cases.json)
-  (frozen.sha256 as contracts/conformance/frozen.sha256)
   (manifest.json as contracts/conformance/manifest.json)))

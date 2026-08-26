@@ -81,4 +81,4 @@ position. Do not encode delivery commitments in labels. The reviewed label defin
 repository metadata live under `.github/` and must agree with the GitHub settings.
 
 For reciprocal Persistra compatibility guarantees and the pin-advancement procedure, read
-[Persistra integration](docs/persistra.md#compatibility-guarantees).
+[Persistra integration](docs/persistra.md#compatibility-gate).

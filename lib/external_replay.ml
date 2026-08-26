@@ -62,7 +62,6 @@ let initialization_of_scenario ~scenario_sha256 (scenario : Scenario.t) =
       metadata = scenario.metadata;
       run_id = scenario.run_id;
       base_currency = scenario.base_currency;
-      initial_cash = scenario.initial_cash;
       initial_portfolio = scenario.initial_portfolio;
       instruments = scenario.instruments;
       venue_calendars = scenario.venue_calendars;
@@ -82,7 +81,6 @@ let initialization_of_header ~scenario_sha256 (header : Scenario.stream_header)
       metadata = header.metadata;
       run_id = header.run_id;
       base_currency = header.base_currency;
-      initial_cash = header.initial_cash;
       initial_portfolio = header.initial_portfolio;
       instruments = header.instruments;
       venue_calendars = header.venue_calendars;
@@ -95,47 +93,14 @@ let initialization_of_header ~scenario_sha256 (header : Scenario.stream_header)
 
 let create_runner ~contract_version ~run_id ~scenario_sha256 ~risk
     ~venue_calendars ~execution_model ~execution ~financing ~settlement
-    ~max_internal_events ~initial_cash ~initial_portfolio =
+    ~max_internal_events ~initial_portfolio =
   let* config =
-    (match (financing, settlement) with
-      | None, None ->
-          Engine.config_v8 ~contract_version ~risk ~venue_calendars
-            ~execution_model ~execution ~max_internal_events
-      | Some financing, None ->
-          Engine.config_v10 ~contract_version ~risk ~venue_calendars
-            ~execution_model ~execution ~financing ~max_internal_events
-      | Some financing, Some settlement ->
-          if List.mem contract_version [ "16"; "15" ] then
-            Engine.config_v16 ~contract_version ~risk ~venue_calendars
-              ~execution_model ~execution ~financing ~settlement
-              ~max_internal_events
-          else if String.equal contract_version "14" then
-            Engine.config_v14 ~contract_version ~risk ~venue_calendars
-              ~execution_model ~execution ~financing ~settlement
-              ~max_internal_events
-          else if String.equal contract_version "13" then
-            Engine.config_v13 ~contract_version ~risk ~venue_calendars
-              ~execution_model ~execution ~financing ~settlement
-              ~max_internal_events
-          else if String.equal contract_version "12" then
-            Engine.config_v12 ~contract_version ~risk ~venue_calendars
-              ~execution_model ~execution ~financing ~settlement
-              ~max_internal_events
-          else
-            Engine.config_v11 ~contract_version ~risk ~venue_calendars
-              ~execution_model ~execution ~financing ~settlement
-              ~max_internal_events
-      | None, Some _ -> Error "settlement requires financing configuration")
+    Engine.config ~contract_version ~risk ~venue_calendars ~execution_model
+      ~execution ~financing ~settlement ~max_internal_events
     |> reducer_result
   in
-  match initial_portfolio with
-  | None ->
-      Runner.create ~run_id ~scenario_sha256 ~config ~initial_cash
-      |> reducer_result
-  | Some initial_portfolio ->
-      Runner.create_with_portfolio ~run_id ~scenario_sha256 ~config
-        ~initial_portfolio
-      |> reducer_result
+  Runner.create ~run_id ~scenario_sha256 ~config ~initial_portfolio
+  |> reducer_result
 
 let append_events journal events =
   match journal with
@@ -214,7 +179,6 @@ let run ?(durability = Artifact_writer.Buffered) ~env ~scenario_sha256
         ~execution_model:scenario.execution_model ~execution:scenario.execution
         ~financing:scenario.financing ~settlement:scenario.settlement
         ~max_internal_events:scenario.max_internal_events
-        ~initial_cash:scenario.initial_cash
         ~initial_portfolio:scenario.initial_portfolio
     in
     let* journal, transcript =
@@ -271,7 +235,6 @@ let validate_stream_pass ~scenario_sha256 channel =
           ~execution_model:header.execution_model ~execution:header.execution
           ~financing:header.financing ~settlement:header.settlement
           ~max_internal_events:header.max_internal_events
-          ~initial_cash:header.initial_cash
           ~initial_portfolio:header.initial_portfolio
       in
       Ok (runner, initialization_of_header ~scenario_sha256 header, 0L))
@@ -302,7 +265,6 @@ let replay_stream_pass ~scenario_sha256 ~journal ~session channel =
           ~execution_model:header.execution_model ~execution:header.execution
           ~financing:header.financing ~settlement:header.settlement
           ~max_internal_events:header.max_internal_events
-          ~initial_cash:header.initial_cash
           ~initial_portfolio:header.initial_portfolio
       in
       Ok { runner; journal = Some journal; audit_count = 0L })

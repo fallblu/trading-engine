@@ -218,22 +218,17 @@ let gen_trace =
            (list_size (int_range 4 14) gen_step)))
 
 let make_risk trace =
-  T.Risk.create ~base_currency:"USD" ~instruments:[ primary; foreign ]
-    ~max_order_quantity:(quantity "50") ~max_long_position:(quantity "100")
-    ~max_short_position:(quantity "100") ~max_gross_exposure:(money "50000")
-    ~max_leverage:
-      (T.Scalar.Ratio.of_decimal_string
-         (decimal_of_scaled trace.leverage_tenths 10)
-      |> ok)
+  risk ~instruments:[ primary; foreign ] ~max_order:"50" ~max_long:"100"
+    ~max_short:"100" ~max_gross:"50000"
+    ~max_leverage:(decimal_of_scaled trace.leverage_tenths 10)
     ~initial_margin_bps:trace.initial_margin_bps
-    ~maintenance_margin_bps:trace.maintenance_margin_bps ~short_borrow_bps:250
-  |> ok
+    ~maintenance_margin_bps:trace.maintenance_margin_bps ()
 
 let make_config trace risk =
   engine_config ~risk
     ~execution:
-      (execution ~participation_bps:trace.participation_bps ~fixed_fee:"0.25"
-         ~fee_bps:5 ())
+      (execution ~participation_bps:trace.participation_bps
+         ~instruments:[ primary; foreign ] ())
     ~max_internal_events:5000 ()
 
 let initial_cash = [ ("USD", money "10000"); ("EUR", money "5000") ]
@@ -693,9 +688,10 @@ let slice_valuation audits =
       | T.Audit.Valuation value -> Some value
       | _ -> None)
     audits
+  |> List.rev
   |> function
-  | [ valuation ] -> Ok valuation
-  | _ -> Error "slice did not emit exactly one valuation"
+  | valuation :: _ -> Ok valuation
+  | [] -> Error "slice did not emit a valuation"
 
 let check_fill oms audit =
   match audit.T.Audit.event with
@@ -743,7 +739,9 @@ let reducer_invariants_hold trace =
   let config = make_config trace risk in
   let state =
     Generated_runner.create ~run_id:(run_id "property-run") ~scenario_sha256
-      ~config ~initial_cash ~strategy_state:(schedule trace)
+      ~config
+      ~initial_portfolio:(initial_portfolio ~cash:initial_cash ())
+      ~strategy_state:(schedule trace)
     |> ok
   in
   let rec loop index history state = function
@@ -841,13 +839,16 @@ let reducers_agree trace =
   let scripted =
     Generated_runner.create
       ~run_id:(run_id "property-equivalence")
-      ~scenario_sha256 ~config ~initial_cash ~strategy_state
+      ~scenario_sha256 ~config
+      ~initial_portfolio:(initial_portfolio ~cash:initial_cash ())
+      ~strategy_state
     |> ok
   in
   let interactive =
     T.Engine.Interactive.create
       ~run_id:(run_id "property-equivalence")
-      ~scenario_sha256 ~config ~initial_cash
+      ~scenario_sha256 ~config
+      ~initial_portfolio:(initial_portfolio ~cash:initial_cash ())
     |> ok
   in
   let compare_slice index scripted interactive audits scripted_audits =

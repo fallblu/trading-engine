@@ -6,13 +6,13 @@ type config = {
   venue_calendars : Venue_calendar.t list;
   execution_model : Execution_model.t;
   execution : Execution.t;
-  financing : Financing.policy option;
-  settlement : Settlement.policy option;
+  financing : Financing.policy;
+  settlement : Settlement.policy;
   max_internal_events : int;
 }
 
-let make_config ~venue_calendars ~contract_version ~risk ~execution_model
-    ~execution ~financing ~settlement ~max_internal_events =
+let config ~contract_version ~risk ~venue_calendars ~execution_model ~execution
+    ~financing ~settlement ~max_internal_events =
   if not (Contract.is_supported contract_version) then
     Error "engine contract version is unsupported"
   else if
@@ -50,33 +50,6 @@ let make_config ~venue_calendars ~contract_version ~risk ~execution_model
         max_internal_events;
       }
 
-let config ~contract_version ~risk ~execution_model ~execution
-    ~max_internal_events =
-  make_config ~venue_calendars:[] ~contract_version ~risk ~execution_model
-    ~execution ~financing:None ~max_internal_events ~settlement:None
-
-let config_v8 ~contract_version ~risk ~venue_calendars ~execution_model
-    ~execution ~max_internal_events =
-  make_config ~venue_calendars ~contract_version ~risk ~execution_model
-    ~execution ~financing:None ~max_internal_events ~settlement:None
-
-let config_v10 ~contract_version ~risk ~venue_calendars ~execution_model
-    ~execution ~financing ~max_internal_events =
-  make_config ~venue_calendars ~contract_version ~risk ~execution_model
-    ~execution ~financing:(Some financing) ~max_internal_events ~settlement:None
-
-let config_v11 ~contract_version ~risk ~venue_calendars ~execution_model
-    ~execution ~financing ~settlement ~max_internal_events =
-  make_config ~venue_calendars ~contract_version ~risk ~execution_model
-    ~execution ~financing:(Some financing) ~settlement:(Some settlement)
-    ~max_internal_events
-
-let config_v12 = config_v11
-let config_v13 = config_v12
-let config_v14 = config_v13
-let config_v15 = config_v14
-let config_v16 = config_v15
-
 let valid_sha256 value =
   String.length value = 64
   && String.for_all
@@ -108,7 +81,7 @@ module Interactive = struct
     latest_borrow : Financing.borrow_observation Id.Instrument.Map.t;
     latest_cash_rates : Financing.cash_rate_observation Currency_map.t;
     settlement_instructions : Settlement.instruction list;
-    initial_portfolio : Initial_portfolio.t option;
+    initial_portfolio : Initial_portfolio.t;
     applied_action_ids : Id.Corporate_action.Set.t;
     lifecycle : Instrument_lifecycle.t;
     desired_targets : desired_targets option;
@@ -194,34 +167,7 @@ module Interactive = struct
          (Risk.instruments config.risk)
     |> List.sort_uniq String.compare
 
-  let create ~run_id ~scenario_sha256 ~config ~initial_cash =
-    if not (valid_sha256 scenario_sha256) then
-      Error "scenario SHA-256 must contain 64 lowercase hexadecimal characters"
-    else
-      let expected_currencies = expected_currencies config in
-      let supplied_currencies =
-        List.map fst initial_cash |> List.sort_uniq String.compare
-      in
-      if supplied_currencies <> expected_currencies then
-        Error "initial cash must contain every configured currency exactly once"
-      else
-        match
-          Account.create
-            ~base_currency:(Risk.base_currency config.risk)
-            ~initial_cash
-        with
-        | Error _ as error -> error
-        | Ok account ->
-            let base_rate =
-              Scalar.Price.of_decimal_string "1" |> Result.get_ok
-            in
-            create_state ~run_id ~scenario_sha256 ~config ~account
-              ~latest_marks:Id.Instrument.Map.empty
-              ~latest_fx_rates:[ (Risk.base_currency config.risk, base_rate) ]
-              ~initial_portfolio:None
-
-  let create_with_portfolio ~run_id ~scenario_sha256 ~config ~initial_portfolio
-      =
+  let create ~run_id ~scenario_sha256 ~config ~initial_portfolio =
     if not (valid_sha256 scenario_sha256) then
       Error "scenario SHA-256 must contain 64 lowercase hexadecimal characters"
     else if
@@ -250,8 +196,7 @@ module Interactive = struct
         in
         let* () = Risk.check_initial config.risk valuation in
         create_state ~run_id ~scenario_sha256 ~config ~account ~latest_marks
-          ~latest_fx_rates:initial_portfolio.fx_rates
-          ~initial_portfolio:(Some initial_portfolio)
+          ~latest_fx_rates:initial_portfolio.fx_rates ~initial_portfolio
 
   let account state = state.account
   let oms state = state.oms
@@ -309,21 +254,16 @@ module Interactive = struct
              })
       in
       let reduction = with_causes reduction [ event_id ] in
-      match reduction.state.initial_portfolio with
-      | None -> Ok reduction
-      | Some portfolio ->
-          let* account = value reduction.state in
-          let* margin =
-            Risk.margin_snapshot reduction.state.config.risk account
-          in
-          let valuation = Audit.{ account; margin } in
-          let* reduction, initial_event_id =
-            emit_with_id reduction
-              (Audit.Initial_state { portfolio; valuation })
-          in
-          emit
-            (with_causes reduction [ initial_event_id ])
-            (Audit.Valuation valuation)
+      let portfolio = reduction.state.initial_portfolio in
+      let* account = value reduction.state in
+      let* margin = Risk.margin_snapshot reduction.state.config.risk account in
+      let valuation = Audit.{ account; margin } in
+      let* reduction, initial_event_id =
+        emit_with_id reduction (Audit.Initial_state { portfolio; valuation })
+      in
+      emit
+        (with_causes reduction [ initial_event_id ])
+        (Audit.Valuation valuation)
 
   let enqueue reduction items =
     { reduction with pending = Pending_queue.enqueue reduction.pending items }
@@ -432,13 +372,13 @@ module Interactive = struct
                 Id.Instrument.Map.bindings reduction.state.latest_marks
               in
               let* () =
+                let policy = reduction.state.config.financing in
                 match
-                  ( reduction.state.config.financing,
-                    request.Order.side,
+                  ( request.Order.side,
                     Account.position_quantity reduction.state.account
                       request.instrument_id )
                 with
-                | Some policy, Order.Sell, position
+                | Order.Sell, position
                   when policy.Financing.locate_policy = Financing.Reject_order
                        && not (Scalar.Quantity.is_positive position) ->
                     let available =
@@ -530,7 +470,7 @@ module Interactive = struct
 
   let submit_recall_order reduction market_slice instrument quantity =
     let* request =
-      Order.request_v8 ~instrument_id:instrument.Instrument.id ~side:Order.Buy
+      Order.request ~instrument_id:instrument.Instrument.id ~side:Order.Buy
         ~quantity ~kind:Order.Market ~time_in_force:Order.Ioc
         ~origin:Order.Borrow_recall
     in
@@ -1004,58 +944,6 @@ module Interactive = struct
       if Z.fits_int64 fee then Ok (Scalar.Money.of_micros (Z.to_int64 fee))
       else Error "short borrow fee overflow"
 
-  let apply_legacy_borrow_fees reduction market_slice =
-    let span =
-      Ptime.diff market_slice.Market_slice.end_at market_slice.start_at
-    in
-    List.fold_left
-      (fun result instrument ->
-        let* reduction = result in
-        let quantity =
-          Account.position_quantity reduction.state.account
-            instrument.Instrument.id
-        in
-        if
-          (not (Scalar.Quantity.is_negative quantity))
-          || Risk.short_borrow_bps reduction.state.config.risk = 0
-        then Ok reduction
-        else
-          let* short_quantity = Scalar.Quantity.absolute quantity in
-          let* bar =
-            match Market_slice.bar market_slice instrument.id with
-            | Some value -> Ok value
-            | None -> Error "short position has no market slice bar"
-          in
-          let* notional = Scalar.Money.notional bar.open_price short_quantity in
-          let borrow_bps = Risk.short_borrow_bps reduction.state.config.risk in
-          let* fee = borrow_fee ~notional ~bps:borrow_bps span in
-          if Scalar.Money.equal fee Scalar.Money.zero then Ok reduction
-          else
-            let* account =
-              Account.apply_borrow_fee reduction.state.account
-                ~instrument_id:instrument.id
-                ~quote_currency:instrument.quote_currency ~fee
-            in
-            let reduction =
-              { reduction with state = { reduction.state with account } }
-            in
-            let causes = Option.to_list reduction.slice_event_id in
-            emit
-              (with_causes reduction causes)
-              (Audit.Borrow_fee_applied
-                 {
-                   instrument_id = instrument.id;
-                   quote_currency = instrument.quote_currency;
-                   short_quantity;
-                   reference_price = bar.open_price;
-                   borrow_bps;
-                   period_start = market_slice.start_at;
-                   period_end = market_slice.end_at;
-                   fee;
-                 }))
-      (Ok reduction)
-      (configured_instruments reduction.state)
-
   let apply_observed_borrow_fees reduction market_slice policy =
     let span =
       Ptime.diff market_slice.Market_slice.end_at market_slice.start_at
@@ -1242,85 +1130,73 @@ module Interactive = struct
       (configured_instruments reduction.state)
 
   let apply_financing reduction market_slice =
-    match reduction.state.config.financing with
-    | None -> apply_legacy_borrow_fees reduction market_slice
-    | Some policy ->
-        let* reduction = process_borrow_recalls reduction market_slice policy in
-        let* reduction =
-          apply_observed_borrow_fees reduction market_slice policy
-        in
-        apply_cash_interest reduction market_slice policy
+    let policy = reduction.state.config.financing in
+    let* reduction = process_borrow_recalls reduction market_slice policy in
+    let* reduction = apply_observed_borrow_fees reduction market_slice policy in
+    apply_cash_interest reduction market_slice policy
 
   let process_settlements reduction (market_slice : Market_slice.t) =
-    match reduction.state.config.settlement with
-    | None -> Ok reduction
-    | Some _ ->
-        List.fold_left
-          (fun result (instruction : Settlement.instruction) ->
-            let* reduction = result in
-            match instruction.status with
-            | Settlement.Settled _ | Settlement.Failed _ -> Ok reduction
-            | Settlement.Pending ->
-                if not (Settlement.is_due instruction market_slice.start_at)
-                then Ok reduction
-                else
-                  let failure =
-                    List.find_opt
-                      (fun (failure : Settlement.failure) ->
-                        String.equal failure.instruction_id
-                          instruction.instruction_id)
-                      market_slice.Market_slice.settlement_failures
-                  in
-                  let* instruction, account, event =
-                    match failure with
-                    | Some failure ->
-                        let* instruction =
-                          Settlement.fail instruction
-                            ~failed_at:market_slice.start_at
-                            ~reason:failure.reason
-                        in
-                        Ok
-                          ( instruction,
-                            reduction.state.account,
-                            Audit.Settlement_failed instruction )
-                    | None ->
-                        let* account =
-                          Account.apply_settlement reduction.state.account
-                            instruction
-                        in
-                        let* instruction =
-                          Settlement.settle instruction
-                            ~settled_at:market_slice.start_at
-                        in
-                        Ok
-                          ( instruction,
-                            account,
-                            Audit.Settlement_completed instruction )
-                  in
-                  let settlement_instructions =
-                    List.map
-                      (fun (current : Settlement.instruction) ->
-                        if
-                          String.equal current.instruction_id
-                            instruction.instruction_id
-                        then instruction
-                        else current)
-                      reduction.state.settlement_instructions
-                  in
-                  emit
-                    (with_causes
-                       {
-                         reduction with
-                         state =
-                           {
-                             reduction.state with
-                             account;
-                             settlement_instructions;
-                           };
-                       }
-                       (Option.to_list reduction.slice_event_id))
-                    event)
-          (Ok reduction) reduction.state.settlement_instructions
+    List.fold_left
+      (fun result (instruction : Settlement.instruction) ->
+        let* reduction = result in
+        match instruction.status with
+        | Settlement.Settled _ | Settlement.Failed _ -> Ok reduction
+        | Settlement.Pending ->
+            if not (Settlement.is_due instruction market_slice.start_at) then
+              Ok reduction
+            else
+              let failure =
+                List.find_opt
+                  (fun (failure : Settlement.failure) ->
+                    String.equal failure.instruction_id
+                      instruction.instruction_id)
+                  market_slice.Market_slice.settlement_failures
+              in
+              let* instruction, account, event =
+                match failure with
+                | Some failure ->
+                    let* instruction =
+                      Settlement.fail instruction
+                        ~failed_at:market_slice.start_at ~reason:failure.reason
+                    in
+                    Ok
+                      ( instruction,
+                        reduction.state.account,
+                        Audit.Settlement_failed instruction )
+                | None ->
+                    let* account =
+                      Account.apply_settlement reduction.state.account
+                        instruction
+                    in
+                    let* instruction =
+                      Settlement.settle instruction
+                        ~settled_at:market_slice.start_at
+                    in
+                    Ok
+                      ( instruction,
+                        account,
+                        Audit.Settlement_completed instruction )
+              in
+              let settlement_instructions =
+                List.map
+                  (fun (current : Settlement.instruction) ->
+                    if
+                      String.equal current.instruction_id
+                        instruction.instruction_id
+                    then instruction
+                    else current)
+                  reduction.state.settlement_instructions
+              in
+              emit
+                (with_causes
+                   {
+                     reduction with
+                     state =
+                       { reduction.state with account; settlement_instructions };
+                   }
+                   (Option.to_list reduction.slice_event_id))
+                event)
+      (Ok reduction) reduction.state.settlement_instructions
 
   let validate_target_ids state ids =
     let expected =
@@ -1637,18 +1513,15 @@ module Interactive = struct
         market_slice.cash_rate_observations
     in
     let settlement_failures_valid =
-      match state.config.settlement with
-      | None -> market_slice.settlement_failures = []
-      | Some _ ->
-          List.for_all
-            (fun (failure : Settlement.failure) ->
-              List.exists
-                (fun (instruction : Settlement.instruction) ->
-                  String.equal instruction.instruction_id failure.instruction_id
-                  && instruction.status = Settlement.Pending
-                  && Settlement.is_due instruction market_slice.start_at)
-                state.settlement_instructions)
-            market_slice.settlement_failures
+      List.for_all
+        (fun (failure : Settlement.failure) ->
+          List.exists
+            (fun (instruction : Settlement.instruction) ->
+              String.equal instruction.instruction_id failure.instruction_id
+              && instruction.status = Settlement.Pending
+              && Settlement.is_due instruction market_slice.start_at)
+            state.settlement_instructions)
+        market_slice.settlement_failures
     in
     if List.length ids <> List.length actual || actual <> expected then
       Error "market slice must contain each configured instrument exactly once"
@@ -1702,12 +1575,8 @@ module Interactive = struct
   let create_execution_fill execution ~id ~order_id ~instrument_id
       ~quote_currency ~side ~quantity ~price ~fee ~fee_components ~executed_at
       ~slice_sequence =
-    if Execution.fee_schedules execution = [] then
-      Fill.create ~id ~order_id ~instrument_id ~quote_currency ~side ~quantity
-        ~price ~fee ~executed_at ~slice_sequence
-    else
-      Fill.create_v9 ~id ~order_id ~instrument_id ~quote_currency ~side
-        ~quantity ~price ~fee ~fee_components ~executed_at ~slice_sequence
+    Fill.create ~id ~order_id ~instrument_id ~quote_currency ~side ~quantity
+      ~price ~fee ~fee_components ~executed_at ~slice_sequence
 
   let slice_open_marks market_slice =
     List.map
@@ -1738,11 +1607,7 @@ module Interactive = struct
             ~executed_at:proposed.executed_at
             ~slice_sequence:market_slice.Market_slice.slice_sequence
         in
-        let* account =
-          match state.config.settlement with
-          | None -> Account.apply_fill state.account fill
-          | Some _ -> Account.apply_unsettled_fill state.account fill
-        in
+        let* account = Account.apply_unsettled_fill state.account fill in
         let after_position = Account.position_quantity account instrument.id in
         let* after =
           Account.value account ~instruments ~marks
@@ -1755,8 +1620,9 @@ module Interactive = struct
       | Ok (fee_components, fee, account, after_position, after) -> (
           let checked =
             let* () =
-              match (state.config.settlement, order.Order.request.side) with
-              | Some settlement, Order.Buy -> (
+              let settlement = state.config.settlement in
+              match order.Order.request.side with
+              | Order.Buy -> (
                   let available =
                     match settlement.Settlement.cash_buying_power with
                     | Settlement.Total_cash ->
@@ -1787,7 +1653,7 @@ module Interactive = struct
                              (Risk.Settlement_cash_buying_power
                                 (instrument.quote_currency, available)))
                       else Ok ())
-              | Some settlement, Order.Sell
+              | Order.Sell
                 when settlement.position_availability
                      = Settlement.Settled_positions
                      && Scalar.Quantity.is_positive before_position ->
@@ -1805,7 +1671,7 @@ module Interactive = struct
                          (Risk.Settlement_position_availability
                             (instrument.id, available)))
                   else Ok ()
-              | None, _ | Some _, _ -> Ok ()
+              | Order.Sell -> Ok ()
             in
             let* () =
               Risk.check_post_fill_for state.config.risk
@@ -1828,9 +1694,9 @@ module Interactive = struct
       | None -> Error "fill instrument has no risk policy"
     in
     let* borrow_constraint =
-      match (state.config.financing, order.Order.request.side) with
-      | Some policy, Order.Sell
-        when not (Scalar.Quantity.is_positive before_position) ->
+      let policy = state.config.financing in
+      match order.Order.request.side with
+      | Order.Sell when not (Scalar.Quantity.is_positive before_position) ->
           let available =
             match
               Id.Instrument.Map.find_opt instrument.id state.latest_borrow
@@ -1856,7 +1722,7 @@ module Interactive = struct
                  match policy.Financing.locate_policy with
                  | Financing.Reject_order -> true
                  | Financing.Clip_fill -> false ))
-      | _ -> Ok None
+      | Order.Sell | Order.Buy -> Ok None
     in
     let quantity_limit =
       let risk_limit =
@@ -1963,12 +1829,8 @@ module Interactive = struct
                         Error "newly allocated fill ID was duplicated"
                     | Ok (oms, Oms.Applied order) -> (
                         match
-                          match reduction.state.config.settlement with
-                          | None ->
-                              Account.apply_fill reduction.state.account fill
-                          | Some _ ->
-                              Account.apply_unsettled_fill
-                                reduction.state.account fill
+                          Account.apply_unsettled_fill reduction.state.account
+                            fill
                         with
                         | Error _ as error -> error
                         | Ok account -> (
@@ -1980,26 +1842,23 @@ module Interactive = struct
                             | Error _ as error -> error
                             | Ok (reduction, event_id) ->
                                 let* reduction =
-                                  match reduction.state.config.settlement with
-                                  | None -> Ok reduction
-                                  | Some policy ->
-                                      let* instruction =
-                                        Settlement.instruction policy fill
-                                      in
-                                      let state =
-                                        {
-                                          reduction.state with
-                                          settlement_instructions =
-                                            reduction.state
-                                              .settlement_instructions
-                                            @ [ instruction ];
-                                        }
-                                      in
-                                      emit
-                                        (with_causes { reduction with state }
-                                           [ event_id ])
-                                        (Audit.Settlement_instruction_created
-                                           instruction)
+                                  let* instruction =
+                                    Settlement.instruction
+                                      reduction.state.config.settlement fill
+                                  in
+                                  let state =
+                                    {
+                                      reduction.state with
+                                      settlement_instructions =
+                                        reduction.state.settlement_instructions
+                                        @ [ instruction ];
+                                    }
+                                  in
+                                  emit
+                                    (with_causes { reduction with state }
+                                       [ event_id ])
+                                    (Audit.Settlement_instruction_created
+                                       instruction)
                                 in
                                 let* fill_pending =
                                   notification reduction
@@ -2055,30 +1914,16 @@ module Interactive = struct
           match limit with
           | None -> Ok reduction
           | Some limit ->
-              if
-                String.equal reduction.state.config.contract_version
-                  Contract.legacy_journal_version
-              then
-                emit reduction
-                  (Audit.Margin_limited
-                     {
-                       order_id = order.id;
-                       instrument_id = order.request.instrument_id;
-                       requested_quantity = proposed.quantity;
-                       permitted_quantity;
-                       price = proposed.price;
-                     })
-              else
-                emit reduction
-                  (Audit.Fill_clipped
-                     {
-                       order_id = order.id;
-                       instrument_id = order.request.instrument_id;
-                       proposed_quantity = proposed.quantity;
-                       permitted_quantity;
-                       price = proposed.price;
-                       limit;
-                     })
+              emit reduction
+                (Audit.Fill_clipped
+                   {
+                     order_id = order.id;
+                     instrument_id = order.request.instrument_id;
+                     proposed_quantity = proposed.quantity;
+                     permitted_quantity;
+                     price = proposed.price;
+                     limit;
+                   })
         in
         if Scalar.Quantity.is_zero permitted_quantity then
           Ok (reduction, permitted_quantity)
@@ -2096,12 +1941,8 @@ module Interactive = struct
           | None -> Error "immediate order disappeared during matching"
           | Some order -> (
               let reason =
-                if
-                  (not
-                     (String.equal reduction.state.config.contract_version "8"))
-                  && Order.is_market order
-                then Audit.Market_ioc
-                else if Order.is_fok order then Audit.Fill_or_kill
+                if Order.is_fok order then Audit.Fill_or_kill
+                else if Order.is_market order then Audit.Market_ioc
                 else Audit.Immediate_or_cancel
               in
               let result =
@@ -2222,7 +2063,8 @@ module Interactive = struct
                     Error "target order limit cannot cover one instrument lot"
                 | Ok quantity ->
                     Order.request ~instrument_id ~side ~quantity
-                      ~kind:Order.Market ~origin:Order.Target_rebalance
+                      ~kind:Order.Market ~time_in_force:Order.Ioc
+                      ~origin:Order.Target_rebalance
                     |> Result.map Option.some))
 
   let reconcile_targets reduction =
@@ -2296,7 +2138,8 @@ module Interactive = struct
             in
             let* request =
               Order.request ~instrument_id:instrument.id ~side ~quantity
-                ~kind:Order.Market ~origin:Order.Margin_liquidation
+                ~kind:Order.Market ~time_in_force:Order.Ioc
+                ~origin:Order.Margin_liquidation
             in
             submit_order (with_causes reduction causes) request)
       (Ok reduction)
@@ -2635,14 +2478,9 @@ module Make (Strategy_impl : Strategy.S) = struct
 
   type t = { engine : Interactive.t; strategy_state : Strategy_impl.state }
 
-  let create ~run_id ~scenario_sha256 ~config ~initial_cash ~strategy_state =
-    Interactive.create ~run_id ~scenario_sha256 ~config ~initial_cash
-    |> Result.map (fun engine -> { engine; strategy_state })
-
-  let create_with_portfolio ~run_id ~scenario_sha256 ~config ~initial_portfolio
-      ~strategy_state =
-    Interactive.create_with_portfolio ~run_id ~scenario_sha256 ~config
-      ~initial_portfolio
+  let create ~run_id ~scenario_sha256 ~config ~initial_portfolio ~strategy_state
+      =
+    Interactive.create ~run_id ~scenario_sha256 ~config ~initial_portfolio
     |> Result.map (fun engine -> { engine; strategy_state })
 
   let account state = Interactive.account state.engine

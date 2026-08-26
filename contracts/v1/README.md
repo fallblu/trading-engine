@@ -1,15 +1,19 @@
-# Trading Engine contract v1
+# Replay contract v1
 
-This frozen directory preserves the historical v1 process and file contract. The current runtime
-advertises v4 and v3 only; these artifacts remain available for provenance and schema-only
-compatibility testing by older consumers.
+This directory is the authoritative replay contract for Trading Engine.
 
-- `scenario.schema.json` validates batch replay inputs.
-- `scenario-stream.schema.json` validates each JSON Lines scenario-stream record.
-- `journal.schema.json` validates each JSON Lines audit record.
-- `fixtures/demo.scenario.json`, `fixtures/demo.scenario.jsonl`, and
-  `fixtures/demo.journal.jsonl` form the canonical valid conformance corpus.
+- `scenario.schema.json` defines batch replay input.
+- `scenario-stream.schema.json` defines the equivalent JSON Lines stream.
+- `journal.schema.json` defines append-only audit records.
+- `fixtures/` contains canonical scenarios and journals used by the conformance suite.
 
-Every batch scenario, scenario-stream record, and journal record carries
-`"contract_version": "1"`. Consumers must reject missing or unsupported versions before
-interpreting the rest of a document.
+Every scenario, stream record, and journal record carries `"contract_version": "1"`.
+Objects are strict unless a field is explicitly open, decimal values use canonical strings, and
+timestamps are bounded RFC 3339 instants. Runtime validation additionally enforces uniqueness,
+causal ordering, non-overlapping slices, resource limits, and configuration coverage.
+
+The contract models an explicit initial portfolio, instrument-level and grouped risk policy,
+execution and fee schedules, financing, settlement, venue calendars, lifecycle events, market
+data, strategy intents, and causal audit output. A successful replay ends with `run_completed`.
+
+Run `make check` to validate schemas, fixtures, runtime behavior, and deterministic output.

@@ -63,7 +63,7 @@ let trade_event ?(sequence = 2L) ?(second = 2) ?(price_value = "100")
 
 let quote_trade_slice events =
   let base = market_slice 2L in
-  T.Market_slice.create_v14 ~slice_sequence:base.slice_sequence
+  T.Market_slice.create ~slice_sequence:base.slice_sequence
     ~start_at:base.start_at ~end_at:base.end_at ~available_at:base.available_at
     ~received_at:base.received_at ~bars:base.bars ~fx_rates:base.fx_rates
     ~corporate_actions:base.corporate_actions
@@ -71,11 +71,12 @@ let quote_trade_slice events =
     ~cash_rate_observations:base.cash_rate_observations
     ~settlement_failures:base.settlement_failures
     ~lifecycle_events:base.lifecycle_events ~market_events:events
+    ~order_book_events:[]
   |> ok
 
 let quote_trade_execution ?(participation_bps = 10_000) () =
   let fees = conservative_execution () |> T.Execution.fee_schedules in
-  T.Execution.create_v2 ~participation_bps ~fee_schedules:fees |> ok
+  T.Execution.create ~participation_bps ~fee_schedules:fees |> ok
 
 let book_level price_value quantity_value =
   T.Order_book_event.level ~price:(price price_value)
@@ -123,7 +124,7 @@ let book_trade ?(sequence = 2L) ?(second = 2) ?(price_value = "99")
 
 let order_book_slice events =
   let base = market_slice 2L in
-  T.Market_slice.create_v15 ~slice_sequence:base.slice_sequence
+  T.Market_slice.create ~slice_sequence:base.slice_sequence
     ~start_at:base.start_at ~end_at:base.end_at ~available_at:base.available_at
     ~received_at:base.received_at ~bars:base.bars ~fx_rates:base.fx_rates
     ~corporate_actions:base.corporate_actions
@@ -231,8 +232,7 @@ let quote_trade_limits_fok_and_continuations () =
         (Result.is_error (continue (quantity "-1")))
   | _ -> Alcotest.fail "marketable limit did not execute");
   let oms, _ =
-    oms_with_order
-      (request_v8 ~kind:T.Order.Market ~time_in_force:T.Order.Fok ())
+    oms_with_order (request ~kind:T.Order.Market ~time_in_force:T.Order.Fok ())
   in
   let cursor =
     T.Execution.start_slice_quote_trade (quote_trade_execution ())
@@ -248,9 +248,7 @@ let quote_trade_limits_fok_and_continuations () =
 let quote_trade_stop_and_event_boundaries () =
   let oms, order =
     oms_with_order
-      (request_v8
-         ~kind:(T.Order.Stop (price "100"))
-         ~time_in_force:T.Order.Gtc ())
+      (request ~kind:(T.Order.Stop (price "100")) ~time_in_force:T.Order.Gtc ())
   in
   let cursor =
     T.Execution.start_slice_quote_trade (quote_trade_execution ())
@@ -344,8 +342,7 @@ let order_book_walks_depth_and_rejects_inconsistent_updates () =
         second.price
   | _ -> Alcotest.fail "second ask did not produce a fill");
   let fok_oms, _ =
-    oms_with_order
-      (request_v8 ~kind:T.Order.Market ~time_in_force:T.Order.Fok ())
+    oms_with_order (request ~kind:T.Order.Market ~time_in_force:T.Order.Fok ())
   in
   let fok_cursor =
     T.Execution.start_slice_order_book (order_book_execution ())
@@ -501,7 +498,7 @@ let order_book_walks_depth_and_rejects_inconsistent_updates () =
   let triggered_stop side trigger =
     let oms, order =
       oms_with_order
-        (request_v8 ~side
+        (request ~side
            ~kind:(T.Order.Stop (price trigger))
            ~time_in_force:T.Order.Gtc ())
     in
@@ -527,9 +524,7 @@ let order_book_walks_depth_and_rejects_inconsistent_updates () =
   triggered_stop T.Order.Sell "100";
   let waiting_stop_oms, _ =
     oms_with_order
-      (request_v8
-         ~kind:(T.Order.Stop (price "200"))
-         ~time_in_force:T.Order.Gtc ())
+      (request ~kind:(T.Order.Stop (price "200")) ~time_in_force:T.Order.Gtc ())
   in
   let waiting_stop_cursor =
     T.Execution.start_slice_order_book (order_book_execution ())
@@ -542,8 +537,7 @@ let order_book_walks_depth_and_rejects_inconsistent_updates () =
   | T.Execution.Finished _ -> ()
   | _ -> Alcotest.fail "untriggered order-book stop should remain dormant");
   let shallow_fok_oms, _ =
-    oms_with_order
-      (request_v8 ~kind:T.Order.Market ~time_in_force:T.Order.Fok ())
+    oms_with_order (request ~kind:T.Order.Market ~time_in_force:T.Order.Fok ())
   in
   let shallow_fok_cursor =
     T.Execution.start_slice_order_book (order_book_execution ())
@@ -732,14 +726,14 @@ let conservative_configuration_is_bounded () =
         (Result.is_error (create spread impact)))
     [ (-1, 0); (10_001, 0); (0, -1); (0, 10_001) ];
   Alcotest.(check bool)
-    "v2 participation bound enforced" true
+    "participation bound enforced" true
     (Result.is_error
-       (T.Execution.create_v2 ~participation_bps:(-1) ~fee_schedules:schedules));
+       (T.Execution.create ~participation_bps:(-1) ~fee_schedules:schedules));
   let schedule = List.hd schedules in
   Alcotest.(check bool)
     "duplicate fee schedules rejected" true
     (Result.is_error
-       (T.Execution.create_v2 ~participation_bps:10_000
+       (T.Execution.create ~participation_bps:10_000
           ~fee_schedules:[ schedule; schedule ]));
   Alcotest.(check bool)
     "missing instrument fee schedule rejected" true

@@ -54,19 +54,9 @@ type t = private {
   status : status;
 }
 
-val compatibility_time_in_force : kind -> time_in_force
-(** Preserve the pre-v8 mapping: market orders are IOC and all other kinds are
-    GTC. *)
+val default_time_in_force : kind -> time_in_force
 
 val request :
-  instrument_id:Id.Instrument.t ->
-  side:side ->
-  quantity:Scalar.Quantity.t ->
-  kind:kind ->
-  origin:origin ->
-  (request, string) result
-
-val request_v8 :
   instrument_id:Id.Instrument.t ->
   side:side ->
   quantity:Scalar.Quantity.t ->

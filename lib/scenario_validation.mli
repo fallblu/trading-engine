@@ -2,7 +2,6 @@
 
 val header :
   root:string ->
-  contract_version:string ->
   base_currency:string ->
   initial_cash:(string * Scalar.Money.t) list ->
   instruments:Instrument.t list ->

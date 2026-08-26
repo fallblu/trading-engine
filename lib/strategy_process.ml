@@ -7,7 +7,6 @@ type t = {
   transcript : Strategy_transcript.t;
   effects : Boundary_effects.t;
   timeout : float;
-  protocol_version : string;
   mutable next_sequence : int64;
 }
 
@@ -259,8 +258,7 @@ let exchange session ~stage ~expected_sequence request =
   in
   let* response = response in
   match
-    Strategy_protocol.response_of_string
-      ~protocol_version:session.protocol_version ~expected_sequence response
+    Strategy_protocol.response_of_string ~expected_sequence response
     |> Result.map_error
          (Diagnostic.annotate ~sequence:expected_sequence ~json_path:"$")
   with
@@ -299,8 +297,7 @@ let on_event session context event =
   let* sequence = next_sequence session in
   let* response =
     exchange_at session ~stage:"strategy event" ~sequence (fun ~sequence ->
-        Strategy_protocol.event_message
-          ~protocol_version:session.protocol_version ~sequence context event)
+        Strategy_protocol.event_message ~sequence context event)
   in
   match response with
   | Strategy_protocol.Intents intents -> Ok intents
@@ -317,8 +314,7 @@ let shutdown session =
   let* sequence = next_sequence session in
   let* response =
     exchange_at session ~stage:"strategy shutdown" ~sequence
-      (Strategy_protocol.shutdown_message_for
-         ~protocol_version:session.protocol_version)
+      Strategy_protocol.shutdown_message
   in
   match response with
   | Strategy_protocol.Stopped -> Ok ()
@@ -461,7 +457,6 @@ let run_session ~effects ~env ~command ~executable ~timeout ~transcript
         transcript;
         effects;
         timeout;
-        protocol_version = Strategy_protocol.protocol_version initialization;
         next_sequence = 1L;
       }
     in

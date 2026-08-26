@@ -16,21 +16,18 @@ export TZ=UTC
 
 compare_journal() {
   name=$1
-  scenario=$2
-  expected=$3
   actual="$temporary_root/$name.journal.jsonl"
-  standard_output="$temporary_root/$name.stdout"
-  standard_error="$temporary_root/$name.stderr"
 
   "$engine" \
-    --input "$repository_root/$scenario" \
+    --input "$repository_root/contracts/v1/fixtures/$name.scenario.json" \
     --journal "$actual" \
-    >"$standard_output" \
-    2>"$standard_error"
+    >"$temporary_root/$name.stdout" \
+    2>"$temporary_root/$name.stderr"
 
-  if ! cmp -s "$repository_root/$expected" "$actual"; then
+  expected="$repository_root/contracts/v1/fixtures/$name.journal.jsonl"
+  if ! cmp -s "$expected" "$actual"; then
     printf '%s\n' "error: $name journal differs from its canonical bytes" >&2
-    diff -u "$repository_root/$expected" "$actual" >&2 || true
+    diff -u "$expected" "$actual" >&2 || true
     exit 1
   fi
 
@@ -38,111 +35,7 @@ compare_journal() {
   printf '%s\n' "$name: exact journal match ($byte_count bytes)"
 }
 
-compare_journal \
-  v3-demo \
-  contracts/v3/fixtures/demo.scenario.json \
-  contracts/v3/fixtures/demo.journal.jsonl
-compare_journal \
-  v5-demo \
-  contracts/v5/fixtures/demo.scenario.json \
-  contracts/v5/fixtures/demo.journal.jsonl
-compare_journal \
-  v5-fill-clipped \
-  contracts/v5/fixtures/fill-clipped.scenario.json \
-  contracts/v5/fixtures/fill-clipped.journal.jsonl
-compare_journal \
-  v8-demo \
-  contracts/v8/fixtures/demo.scenario.json \
-  contracts/v8/fixtures/demo.journal.jsonl
-compare_journal \
-  v8-fill-clipped \
-  contracts/v8/fixtures/fill-clipped.scenario.json \
-  contracts/v8/fixtures/fill-clipped.journal.jsonl
-compare_journal \
-  v9-demo \
-  contracts/v9/fixtures/demo.scenario.json \
-  contracts/v9/fixtures/demo.journal.jsonl
-compare_journal \
-  v9-fill-clipped \
-  contracts/v9/fixtures/fill-clipped.scenario.json \
-  contracts/v9/fixtures/fill-clipped.journal.jsonl
-compare_journal \
-  v10-demo \
-  contracts/v10/fixtures/demo.scenario.json \
-  contracts/v10/fixtures/demo.journal.jsonl
-compare_journal \
-  v10-fill-clipped \
-  contracts/v10/fixtures/fill-clipped.scenario.json \
-  contracts/v10/fixtures/fill-clipped.journal.jsonl
-compare_journal \
-  v11-demo \
-  contracts/v11/fixtures/demo.scenario.json \
-  contracts/v11/fixtures/demo.journal.jsonl
-compare_journal \
-  v11-fill-clipped \
-  contracts/v11/fixtures/fill-clipped.scenario.json \
-  contracts/v11/fixtures/fill-clipped.journal.jsonl
-compare_journal \
-  v12-demo \
-  contracts/v12/fixtures/demo.scenario.json \
-  contracts/v12/fixtures/demo.journal.jsonl
-compare_journal \
-  v12-fill-clipped \
-  contracts/v12/fixtures/fill-clipped.scenario.json \
-  contracts/v12/fixtures/fill-clipped.journal.jsonl
-compare_journal \
-  v13-demo \
-  contracts/v13/fixtures/demo.scenario.json \
-  contracts/v13/fixtures/demo.journal.jsonl
-compare_journal \
-  v13-fill-clipped \
-  contracts/v13/fixtures/fill-clipped.scenario.json \
-  contracts/v13/fixtures/fill-clipped.journal.jsonl
-compare_journal \
-  v14-demo \
-  contracts/v14/fixtures/demo.scenario.json \
-  contracts/v14/fixtures/demo.journal.jsonl
-compare_journal \
-  v14-fill-clipped \
-  contracts/v14/fixtures/fill-clipped.scenario.json \
-  contracts/v14/fixtures/fill-clipped.journal.jsonl
-compare_journal \
-  v14-quote-trade \
-  contracts/v14/fixtures/quote-trade.scenario.json \
-  contracts/v14/fixtures/quote-trade.journal.jsonl
-compare_journal \
-  v15-demo \
-  contracts/v15/fixtures/demo.scenario.json \
-  contracts/v15/fixtures/demo.journal.jsonl
-compare_journal \
-  v15-fill-clipped \
-  contracts/v15/fixtures/fill-clipped.scenario.json \
-  contracts/v15/fixtures/fill-clipped.journal.jsonl
-compare_journal \
-  v15-quote-trade \
-  contracts/v15/fixtures/quote-trade.scenario.json \
-  contracts/v15/fixtures/quote-trade.journal.jsonl
-compare_journal \
-  v15-order-book \
-  contracts/v15/fixtures/order-book.scenario.json \
-  contracts/v15/fixtures/order-book.journal.jsonl
-
-compare_journal \
-  v16-demo \
-  contracts/v16/fixtures/demo.scenario.json \
-  contracts/v16/fixtures/demo.journal.jsonl
-
-compare_journal \
-  v16-fill-clipped \
-  contracts/v16/fixtures/fill-clipped.scenario.json \
-  contracts/v16/fixtures/fill-clipped.journal.jsonl
-
-compare_journal \
-  v16-quote-trade \
-  contracts/v16/fixtures/quote-trade.scenario.json \
-  contracts/v16/fixtures/quote-trade.journal.jsonl
-
-compare_journal \
-  v16-order-book \
-  contracts/v16/fixtures/order-book.scenario.json \
-  contracts/v16/fixtures/order-book.journal.jsonl
+compare_journal demo
+compare_journal fill-clipped
+compare_journal quote-trade
+compare_journal order-book

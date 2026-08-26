@@ -1,5 +1,5 @@
 {
-  "description": "Deterministic event-driven OCaml execution engine with versioned replay contracts and causal audit journals",
+  "description": "Deterministic OCaml trading replay engine",
   "homepage": "https://fallblu.github.io/trading-engine/",
   "topics": [
     "backtesting",

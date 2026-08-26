@@ -35,7 +35,7 @@ body:
     attributes:
       label: Contract versions
       description: Include scenario, journal, diagnostic, and strategy versions that apply.
-      placeholder: scenario v4, journal v4, strategy v3
+      placeholder: scenario v1, journal v1, strategy v1
     validations:
       required: true
   - type: textarea

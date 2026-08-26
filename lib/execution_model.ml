@@ -13,10 +13,8 @@ type t = (module S)
 
 type configuration_contract = {
   version : string;
-  previous_versions : string list;
   scenario_contract_versions : string list;
   required_fields : string list;
-  legacy_required_fields : string list;
   supported_order_types : string list;
   data_requirements : string list;
   limits : Yojson.Safe.t;
@@ -63,28 +61,9 @@ let supported = List.map name builtins
 
 let completed_bar_v1_contract =
   {
-    version = "2";
-    previous_versions = [ "1" ];
-    scenario_contract_versions =
-      [
-        "16";
-        "15";
-        "14";
-        "13";
-        "12";
-        "11";
-        "10";
-        "9";
-        "8";
-        "7";
-        "6";
-        "5";
-        "4";
-        "3";
-      ];
+    version = "1";
+    scenario_contract_versions = [ "1" ];
     required_fields = [ "version"; "participation_bps"; "fee_schedules" ];
-    legacy_required_fields =
-      [ "version"; "participation_bps"; "fixed_fee"; "fee_bps" ];
     supported_order_types = [ "market"; "limit"; "stop"; "stop_limit" ];
     data_requirements = [ "completed_ohlcv_bars" ];
     limits =
@@ -92,17 +71,13 @@ let completed_bar_v1_contract =
         [
           ( "participation_bps",
             `Assoc [ ("minimum", `Int 0); ("maximum", `Int 10_000) ] );
-          ("fee_bps", `Assoc [ ("minimum", `Int 0); ("maximum", `Int 10_000) ]);
-          ( "fixed_fee",
-            `Assoc [ ("minimum", `String "0"); ("unit", `String "money") ] );
         ];
   }
 
 let conservative_contract =
   {
     version = "1";
-    previous_versions = [];
-    scenario_contract_versions = [ "16"; "15"; "14"; "13" ];
+    scenario_contract_versions = [ "1" ];
     required_fields =
       [
         "version";
@@ -111,7 +86,6 @@ let conservative_contract =
         "spread_model";
         "impact_model";
       ];
-    legacy_required_fields = [];
     supported_order_types = [ "market"; "limit"; "stop"; "stop_limit" ];
     data_requirements =
       [ "completed_ohlcv_bars"; "bar_volume_for_linear_impact" ];
@@ -130,10 +104,8 @@ let conservative_contract =
 let quote_trade_contract =
   {
     version = "1";
-    previous_versions = [];
-    scenario_contract_versions = [ "16"; "15"; "14" ];
+    scenario_contract_versions = [ "1" ];
     required_fields = [ "version"; "participation_bps"; "fee_schedules" ];
-    legacy_required_fields = [];
     supported_order_types = [ "market"; "limit"; "stop"; "stop_limit" ];
     data_requirements =
       [
@@ -152,11 +124,9 @@ let quote_trade_contract =
 let order_book_contract =
   {
     version = "1";
-    previous_versions = [];
-    scenario_contract_versions = [ "16"; "15" ];
+    scenario_contract_versions = [ "1" ];
     required_fields =
       [ "version"; "participation_bps"; "fee_schedules"; "max_depth_levels" ];
-    legacy_required_fields = [];
     supported_order_types = [ "market"; "limit"; "stop"; "stop_limit" ];
     data_requirements =
       [
@@ -190,13 +160,10 @@ let configuration_contract model =
 let supports_configuration model version =
   let contract = configuration_contract model in
   String.equal contract.version version
-  || List.mem version contract.previous_versions
 
 let required_fields model version =
   let contract = configuration_contract model in
   if String.equal version contract.version then Ok contract.required_fields
-  else if List.mem version contract.previous_versions then
-    Ok contract.legacy_required_fields
   else
     Error
       (Printf.sprintf
@@ -216,18 +183,13 @@ let capabilities_to_yojson () =
          `Assoc
            [
              ("name", `String (name model));
-             ( "configuration_versions",
-               strings (contract.version :: contract.previous_versions) );
+             ("configuration_versions", strings [ contract.version ]);
              ( "scenario_contract_versions",
                strings contract.scenario_contract_versions );
              ("required_fields", strings contract.required_fields);
              ( "configuration_required_fields",
-               `Assoc
-                 ((contract.version, strings contract.required_fields)
-                 :: List.map
-                      (fun version ->
-                        (version, strings contract.legacy_required_fields))
-                      contract.previous_versions) );
+               `Assoc [ (contract.version, strings contract.required_fields) ]
+             );
              ("supported_order_types", strings contract.supported_order_types);
              ("data_requirements", strings contract.data_requirements);
              ("limits", contract.limits);
