@@ -12,6 +12,29 @@ let identifier_validation () =
     "round trip" "order-1"
     (T.Id.Order.of_string_exn "order-1" |> T.Id.Order.to_string)
 
+let instrument_validation () =
+  let create ?(symbol = "TEST") ?(quote_currency = "USD")
+      ?(lot_size = quantity "1") () =
+    T.Instrument.create
+      ~id:(instrument_id "test-equity")
+      ~symbol ~quote_currency ~tick_size:(price "0.01") ~lot_size
+  in
+  Alcotest.(check bool)
+    "empty symbol rejected" true
+    (Result.is_error (create ~symbol:"" ()));
+  Alcotest.(check bool)
+    "symbol whitespace rejected" true
+    (Result.is_error (create ~symbol:"BAD SYMBOL" ()));
+  Alcotest.(check bool)
+    "quote currency whitespace rejected" true
+    (Result.is_error (create ~quote_currency:" BAD" ()));
+  Alcotest.(check bool)
+    "zero lot size rejected" true
+    (Result.is_error (create ~lot_size:T.Scalar.Quantity.zero ()));
+  Alcotest.(check string)
+    "rendered instrument" "TEST (test-equity)"
+    (Format.asprintf "%a" T.Instrument.pp (create () |> ok))
+
 let scalar_decimal_round_trip () =
   let values = [ "0"; "1"; "1.25"; "-0.5"; "999999.000001" ] in
   List.iter
@@ -541,6 +564,7 @@ let typed_metric_validation () =
 let tests =
   [
     Alcotest.test_case "identifier validation" `Quick identifier_validation;
+    Alcotest.test_case "instrument validation" `Quick instrument_validation;
     Alcotest.test_case "fixed-point decimal round trip" `Quick
       scalar_decimal_round_trip;
     Alcotest.test_case "checked overflow" `Quick scalar_overflow_is_rejected;
