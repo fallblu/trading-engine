@@ -119,7 +119,7 @@ class RepositoryMetadataTest(unittest.TestCase):
 
     def test_compatibility_gate_is_pinned_and_canary_is_optional(self) -> None:
         workflow = (GITHUB / "workflows/ci.yml").read_text(encoding="utf-8")
-        revision = "ade8c05e435c56d8df8eba88fed1284652fd731b"
+        revision = "6874e175098519eef9904edf0bb9f27b244982e4"
 
         self.assertIn(f"PERSISTRA_COMPAT_REVISION: {revision}", workflow)
         self.assertIn("ref: ${{ env.PERSISTRA_COMPAT_REVISION }}", workflow)
