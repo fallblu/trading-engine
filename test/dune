@@ -22,109 +22,7 @@
   test_scenario
   test_engine)
  (deps
-  ../contracts/v7/fixtures/demo.journal.jsonl
-  ../contracts/v7/fixtures/demo.scenario.json
-  ../contracts/v7/fixtures/demo.scenario.jsonl
-  ../contracts/v7/fixtures/fill-clipped.journal.jsonl
-  ../contracts/v7/fixtures/fill-clipped.scenario.json
-  ../contracts/v7/journal.schema.json
-  ../contracts/v7/scenario-stream.schema.json
-  ../contracts/v7/scenario.schema.json
-  ../contracts/v8/fixtures/demo.journal.jsonl
-  ../contracts/v8/fixtures/demo.scenario.json
-  ../contracts/v8/fixtures/demo.scenario.jsonl
-  ../contracts/v8/fixtures/fill-clipped.journal.jsonl
-  ../contracts/v8/fixtures/fill-clipped.scenario.json
-  ../contracts/v8/journal.schema.json
-  ../contracts/v8/scenario-stream.schema.json
-  ../contracts/v8/scenario.schema.json
-  ../contracts/v9/fixtures/demo.journal.jsonl
-  ../contracts/v9/fixtures/demo.scenario.json
-  ../contracts/v9/fixtures/demo.scenario.jsonl
-  ../contracts/v9/fixtures/fill-clipped.journal.jsonl
-  ../contracts/v9/fixtures/fill-clipped.scenario.json
-  ../contracts/v9/journal.schema.json
-  ../contracts/v9/scenario-stream.schema.json
-  ../contracts/v9/scenario.schema.json
-  ../contracts/v10/fixtures/demo.journal.jsonl
-  ../contracts/v10/fixtures/demo.scenario.json
-  ../contracts/v10/fixtures/demo.scenario.jsonl
-  ../contracts/v10/fixtures/fill-clipped.journal.jsonl
-  ../contracts/v10/fixtures/fill-clipped.scenario.json
-  ../contracts/v10/journal.schema.json
-  ../contracts/v10/scenario-stream.schema.json
-  ../contracts/v10/scenario.schema.json
-  ../contracts/v11/fixtures/demo.journal.jsonl
-  ../contracts/v11/fixtures/demo.scenario.json
-  ../contracts/v11/fixtures/demo.scenario.jsonl
-  ../contracts/v11/fixtures/fill-clipped.journal.jsonl
-  ../contracts/v11/fixtures/fill-clipped.scenario.json
-  ../contracts/v11/journal.schema.json
-  ../contracts/v11/scenario-stream.schema.json
-  ../contracts/v11/scenario.schema.json
-  ../contracts/v12/fixtures/demo.journal.jsonl
-  ../contracts/v12/fixtures/demo.scenario.json
-  ../contracts/v12/fixtures/demo.scenario.jsonl
-  ../contracts/v12/fixtures/fill-clipped.journal.jsonl
-  ../contracts/v12/fixtures/fill-clipped.scenario.json
-  ../contracts/v12/journal.schema.json
-  ../contracts/v12/scenario-stream.schema.json
-  ../contracts/v12/scenario.schema.json
-  ../contracts/v13/fixtures/demo.journal.jsonl
-  ../contracts/v13/fixtures/demo.scenario.json
-  ../contracts/v13/fixtures/demo.scenario.jsonl
-  ../contracts/v13/fixtures/fill-clipped.journal.jsonl
-  ../contracts/v13/fixtures/fill-clipped.scenario.json
-  ../contracts/v13/journal.schema.json
-  ../contracts/v13/scenario-stream.schema.json
-  ../contracts/v13/scenario.schema.json
-  ../contracts/v15/fixtures/demo.journal.jsonl
-  ../contracts/v15/fixtures/demo.scenario.json
-  ../contracts/v15/fixtures/demo.scenario.jsonl
-  ../contracts/v15/fixtures/fill-clipped.journal.jsonl
-  ../contracts/v15/fixtures/fill-clipped.scenario.json
-  ../contracts/v15/fixtures/quote-trade.journal.jsonl
-  ../contracts/v15/fixtures/quote-trade.scenario.json
-  ../contracts/v15/fixtures/quote-trade.scenario.jsonl
-  ../contracts/v15/fixtures/order-book.journal.jsonl
-  ../contracts/v15/fixtures/order-book.scenario.json
-  ../contracts/v15/fixtures/order-book.scenario.jsonl
-  ../contracts/v15/journal.schema.json
-  ../contracts/v15/scenario-stream.schema.json
-  ../contracts/v15/scenario.schema.json
-  ../contracts/v6/fixtures/demo.scenario.json
-  ../contracts/v6/fixtures/demo.scenario.jsonl
-  ../contracts/v5/fixtures/demo.scenario.json
-  ../contracts/v5/fixtures/demo.scenario.jsonl
-  ../contracts/v4/fixtures/demo.scenario.json
-  ../contracts/v3/fixtures/demo.journal.jsonl
-  ../contracts/v3/fixtures/demo.scenario.json
-  ../contracts/v3/fixtures/demo.scenario.jsonl
-  ../contracts/conformance/cases.json
-  ../contracts/strategy/v5/fixtures/external.strategy.jsonl
-  ../contracts/strategy/v6/fixtures/external.strategy.jsonl
-  ../contracts/strategy/v7/fixtures/external.strategy.jsonl
-  ../contracts/strategy/v8/fixtures/external.strategy.jsonl
-  ../contracts/strategy/v9/fixtures/external.strategy.jsonl
-  ../contracts/strategy/v10/fixtures/external.strategy.jsonl
-  ../contracts/strategy/v11/fixtures/external.strategy.jsonl
-  ../contracts/strategy/v13/fixtures/external.strategy.jsonl
-  ../contracts/strategy/v14/fixtures/external.strategy.jsonl
-  ../contracts/v16/fixtures/demo.journal.jsonl
-  ../contracts/v16/fixtures/demo.scenario.json
-  ../contracts/v16/fixtures/demo.scenario.jsonl
-  ../contracts/v16/fixtures/fill-clipped.journal.jsonl
-  ../contracts/v16/fixtures/fill-clipped.scenario.json
-  ../contracts/v16/fixtures/order-book.journal.jsonl
-  ../contracts/v16/fixtures/order-book.scenario.json
-  ../contracts/v16/fixtures/order-book.scenario.jsonl
-  ../contracts/v16/fixtures/quote-trade.journal.jsonl
-  ../contracts/v16/fixtures/quote-trade.scenario.json
-  ../contracts/v16/fixtures/quote-trade.scenario.jsonl
-  ../contracts/v16/journal.schema.json
-  ../contracts/v16/scenario-stream.schema.json
-  ../contracts/v16/scenario.schema.json
-  ../contracts/strategy/v4/fixtures/external.strategy.jsonl
+  (source_tree ../contracts)
   fake_strategy.py)
  (libraries
   trading_engine
@@ -146,358 +44,43 @@
  (alias runtest)
  (deps
   validate_schemas.py
-  ../contracts/v15/fixtures/demo.journal.jsonl
-  ../contracts/v15/fixtures/demo.scenario.json
-  ../contracts/v15/fixtures/demo.scenario.jsonl
-  ../contracts/v15/journal.schema.json
-  ../contracts/v15/scenario-stream.schema.json
-  ../contracts/v15/scenario.schema.json)
+  ../contracts/v1/scenario.schema.json
+  ../contracts/v1/scenario-stream.schema.json
+  ../contracts/v1/journal.schema.json
+  ../contracts/v1/fixtures/demo.scenario.json
+  ../contracts/v1/fixtures/demo.scenario.jsonl
+  ../contracts/v1/fixtures/demo.journal.jsonl)
  (action
   (run
    python3
    %{dep:validate_schemas.py}
-   %{dep:../contracts/v15/scenario.schema.json}
-   %{dep:../contracts/v15/scenario-stream.schema.json}
-   %{dep:../contracts/v15/journal.schema.json}
-   %{dep:../contracts/v15/fixtures/demo.scenario.json}
-   %{dep:../contracts/v15/fixtures/demo.scenario.jsonl}
-   %{dep:../contracts/v15/fixtures/demo.journal.jsonl})))
-
-(rule
- (alias runtest)
- (deps
-  validate_schemas.py
-  ../contracts/v15/fixtures/quote-trade.journal.jsonl
-  ../contracts/v15/fixtures/quote-trade.scenario.json
-  ../contracts/v15/fixtures/quote-trade.scenario.jsonl
-  ../contracts/v15/journal.schema.json
-  ../contracts/v15/scenario-stream.schema.json
-  ../contracts/v15/scenario.schema.json)
- (action
-  (run
-   python3
-   %{dep:validate_schemas.py}
-   %{dep:../contracts/v15/scenario.schema.json}
-   %{dep:../contracts/v15/scenario-stream.schema.json}
-   %{dep:../contracts/v15/journal.schema.json}
-   %{dep:../contracts/v15/fixtures/quote-trade.scenario.json}
-   %{dep:../contracts/v15/fixtures/quote-trade.scenario.jsonl}
-   %{dep:../contracts/v15/fixtures/quote-trade.journal.jsonl})))
+   %{dep:../contracts/v1/scenario.schema.json}
+   %{dep:../contracts/v1/scenario-stream.schema.json}
+   %{dep:../contracts/v1/journal.schema.json}
+   %{dep:../contracts/v1/fixtures/demo.scenario.json}
+   %{dep:../contracts/v1/fixtures/demo.scenario.jsonl}
+   %{dep:../contracts/v1/fixtures/demo.journal.jsonl})))
 
 (rule
  (alias runtest)
  (deps
   validate_strategy_schema.py
-  ../contracts/v15/scenario.schema.json
-  ../contracts/v15/journal.schema.json
+  ../contracts/v1/scenario.schema.json
+  ../contracts/v1/journal.schema.json
   ../contracts/diagnostic/v1/diagnostic.schema.json
-  ../contracts/strategy/v13/message.schema.json
-  ../contracts/strategy/v13/transcript.schema.json
-  ../contracts/strategy/v13/fixtures/external.strategy.jsonl)
+  ../contracts/strategy/v1/message.schema.json
+  ../contracts/strategy/v1/transcript.schema.json
+  ../contracts/strategy/v1/fixtures/external.strategy.jsonl)
  (action
   (run
    python3
    %{dep:validate_strategy_schema.py}
-   %{dep:../contracts/v15/scenario.schema.json}
-   %{dep:../contracts/v15/journal.schema.json}
+   %{dep:../contracts/v1/scenario.schema.json}
+   %{dep:../contracts/v1/journal.schema.json}
    %{dep:../contracts/diagnostic/v1/diagnostic.schema.json}
-   %{dep:../contracts/strategy/v13/message.schema.json}
-   %{dep:../contracts/strategy/v13/transcript.schema.json}
-   %{dep:../contracts/strategy/v13/fixtures/external.strategy.jsonl})))
-
-(rule
- (alias runtest)
- (deps
-  validate_schemas.py
-  ../contracts/v15/fixtures/order-book.journal.jsonl
-  ../contracts/v15/fixtures/order-book.scenario.json
-  ../contracts/v15/fixtures/order-book.scenario.jsonl
-  ../contracts/v15/journal.schema.json
-  ../contracts/v15/scenario-stream.schema.json
-  ../contracts/v15/scenario.schema.json)
- (action
-  (run
-   python3
-   %{dep:validate_schemas.py}
-   %{dep:../contracts/v15/scenario.schema.json}
-   %{dep:../contracts/v15/scenario-stream.schema.json}
-   %{dep:../contracts/v15/journal.schema.json}
-   %{dep:../contracts/v15/fixtures/order-book.scenario.json}
-   %{dep:../contracts/v15/fixtures/order-book.scenario.jsonl}
-   %{dep:../contracts/v15/fixtures/order-book.journal.jsonl})))
-
-(rule
- (alias runtest)
- (deps
-  validate_schemas.py
-  ../contracts/v13/fixtures/demo.journal.jsonl
-  ../contracts/v13/fixtures/demo.scenario.json
-  ../contracts/v13/fixtures/demo.scenario.jsonl
-  ../contracts/v13/journal.schema.json
-  ../contracts/v13/scenario-stream.schema.json
-  ../contracts/v13/scenario.schema.json)
- (action
-  (run
-   python3
-   %{dep:validate_schemas.py}
-   %{dep:../contracts/v13/scenario.schema.json}
-   %{dep:../contracts/v13/scenario-stream.schema.json}
-   %{dep:../contracts/v13/journal.schema.json}
-   %{dep:../contracts/v13/fixtures/demo.scenario.json}
-   %{dep:../contracts/v13/fixtures/demo.scenario.jsonl}
-   %{dep:../contracts/v13/fixtures/demo.journal.jsonl})))
-
-(rule
- (alias runtest)
- (deps
-  validate_schemas.py
-  ../contracts/v13/fixtures/fill-clipped.journal.jsonl
-  ../contracts/v13/fixtures/fill-clipped.scenario.json
-  ../contracts/v13/fixtures/demo.scenario.jsonl
-  ../contracts/v13/journal.schema.json
-  ../contracts/v13/scenario-stream.schema.json
-  ../contracts/v13/scenario.schema.json)
- (action
-  (run
-   python3
-   %{dep:validate_schemas.py}
-   %{dep:../contracts/v13/scenario.schema.json}
-   %{dep:../contracts/v13/scenario-stream.schema.json}
-   %{dep:../contracts/v13/journal.schema.json}
-   %{dep:../contracts/v13/fixtures/fill-clipped.scenario.json}
-   %{dep:../contracts/v13/fixtures/demo.scenario.jsonl}
-   %{dep:../contracts/v13/fixtures/fill-clipped.journal.jsonl})))
-
-(rule
- (alias runtest)
- (deps
-  validate_strategy_schema.py
-  ../contracts/v13/scenario.schema.json
-  ../contracts/v13/journal.schema.json
-  ../contracts/diagnostic/v1/diagnostic.schema.json
-  ../contracts/strategy/v11/message.schema.json
-  ../contracts/strategy/v11/transcript.schema.json
-  ../contracts/strategy/v11/fixtures/external.strategy.jsonl)
- (action
-  (run
-   python3
-   %{dep:validate_strategy_schema.py}
-   %{dep:../contracts/v13/scenario.schema.json}
-   %{dep:../contracts/v13/journal.schema.json}
-   %{dep:../contracts/diagnostic/v1/diagnostic.schema.json}
-   %{dep:../contracts/strategy/v11/message.schema.json}
-   %{dep:../contracts/strategy/v11/transcript.schema.json}
-   %{dep:../contracts/strategy/v11/fixtures/external.strategy.jsonl})))
-
-(rule
- (alias runtest)
- (deps
-  validate_schemas.py
-  ../contracts/v12/fixtures/demo.journal.jsonl
-  ../contracts/v12/fixtures/demo.scenario.json
-  ../contracts/v12/fixtures/demo.scenario.jsonl
-  ../contracts/v12/journal.schema.json
-  ../contracts/v12/scenario-stream.schema.json
-  ../contracts/v12/scenario.schema.json)
- (action
-  (run
-   python3
-   %{dep:validate_schemas.py}
-   %{dep:../contracts/v12/scenario.schema.json}
-   %{dep:../contracts/v12/scenario-stream.schema.json}
-   %{dep:../contracts/v12/journal.schema.json}
-   %{dep:../contracts/v12/fixtures/demo.scenario.json}
-   %{dep:../contracts/v12/fixtures/demo.scenario.jsonl}
-   %{dep:../contracts/v12/fixtures/demo.journal.jsonl})))
-
-(rule
- (alias runtest)
- (deps
-  validate_schemas.py
-  ../contracts/v12/fixtures/fill-clipped.journal.jsonl
-  ../contracts/v12/fixtures/fill-clipped.scenario.json
-  ../contracts/v12/fixtures/demo.scenario.jsonl
-  ../contracts/v12/journal.schema.json
-  ../contracts/v12/scenario-stream.schema.json
-  ../contracts/v12/scenario.schema.json)
- (action
-  (run
-   python3
-   %{dep:validate_schemas.py}
-   %{dep:../contracts/v12/scenario.schema.json}
-   %{dep:../contracts/v12/scenario-stream.schema.json}
-   %{dep:../contracts/v12/journal.schema.json}
-   %{dep:../contracts/v12/fixtures/fill-clipped.scenario.json}
-   %{dep:../contracts/v12/fixtures/demo.scenario.jsonl}
-   %{dep:../contracts/v12/fixtures/fill-clipped.journal.jsonl})))
-
-(rule
- (alias runtest)
- (deps
-  validate_strategy_schema.py
-  ../contracts/v12/scenario.schema.json
-  ../contracts/v12/journal.schema.json
-  ../contracts/diagnostic/v1/diagnostic.schema.json
-  ../contracts/strategy/v10/message.schema.json
-  ../contracts/strategy/v10/transcript.schema.json
-  ../contracts/strategy/v10/fixtures/external.strategy.jsonl)
- (action
-  (run
-   python3
-   %{dep:validate_strategy_schema.py}
-   %{dep:../contracts/v12/scenario.schema.json}
-   %{dep:../contracts/v12/journal.schema.json}
-   %{dep:../contracts/diagnostic/v1/diagnostic.schema.json}
-   %{dep:../contracts/strategy/v10/message.schema.json}
-   %{dep:../contracts/strategy/v10/transcript.schema.json}
-   %{dep:../contracts/strategy/v10/fixtures/external.strategy.jsonl})))
-
-(rule
- (alias runtest)
- (deps
-  validate_schemas.py
-  ../contracts/v11/fixtures/demo.journal.jsonl
-  ../contracts/v11/fixtures/demo.scenario.json
-  ../contracts/v11/fixtures/demo.scenario.jsonl
-  ../contracts/v11/journal.schema.json
-  ../contracts/v11/scenario-stream.schema.json
-  ../contracts/v11/scenario.schema.json)
- (action
-  (run
-   python3
-   %{dep:validate_schemas.py}
-   %{dep:../contracts/v11/scenario.schema.json}
-   %{dep:../contracts/v11/scenario-stream.schema.json}
-   %{dep:../contracts/v11/journal.schema.json}
-   %{dep:../contracts/v11/fixtures/demo.scenario.json}
-   %{dep:../contracts/v11/fixtures/demo.scenario.jsonl}
-   %{dep:../contracts/v11/fixtures/demo.journal.jsonl})))
-
-(rule
- (alias runtest)
- (deps
-  validate_schemas.py
-  ../contracts/v11/fixtures/fill-clipped.journal.jsonl
-  ../contracts/v11/fixtures/fill-clipped.scenario.json
-  ../contracts/v11/fixtures/demo.scenario.jsonl
-  ../contracts/v11/journal.schema.json
-  ../contracts/v11/scenario-stream.schema.json
-  ../contracts/v11/scenario.schema.json)
- (action
-  (run
-   python3
-   %{dep:validate_schemas.py}
-   %{dep:../contracts/v11/scenario.schema.json}
-   %{dep:../contracts/v11/scenario-stream.schema.json}
-   %{dep:../contracts/v11/journal.schema.json}
-   %{dep:../contracts/v11/fixtures/fill-clipped.scenario.json}
-   %{dep:../contracts/v11/fixtures/demo.scenario.jsonl}
-   %{dep:../contracts/v11/fixtures/fill-clipped.journal.jsonl})))
-
-(rule
- (alias runtest)
- (deps
-  validate_strategy_schema.py
-  ../contracts/v11/scenario.schema.json
-  ../contracts/v11/journal.schema.json
-  ../contracts/diagnostic/v1/diagnostic.schema.json
-  ../contracts/strategy/v9/message.schema.json
-  ../contracts/strategy/v9/transcript.schema.json
-  ../contracts/strategy/v9/fixtures/external.strategy.jsonl)
- (action
-  (run
-   python3
-   %{dep:validate_strategy_schema.py}
-   %{dep:../contracts/v11/scenario.schema.json}
-   %{dep:../contracts/v11/journal.schema.json}
-   %{dep:../contracts/diagnostic/v1/diagnostic.schema.json}
-   %{dep:../contracts/strategy/v9/message.schema.json}
-   %{dep:../contracts/strategy/v9/transcript.schema.json}
-   %{dep:../contracts/strategy/v9/fixtures/external.strategy.jsonl})))
-
-(rule
- (alias runtest)
- (deps
-  validate_schemas.py
-  ../contracts/v10/fixtures/demo.journal.jsonl
-  ../contracts/v10/fixtures/demo.scenario.json
-  ../contracts/v10/fixtures/demo.scenario.jsonl
-  ../contracts/v10/journal.schema.json
-  ../contracts/v10/scenario-stream.schema.json
-  ../contracts/v10/scenario.schema.json)
- (action
-  (run
-   python3
-   %{dep:validate_schemas.py}
-   %{dep:../contracts/v10/scenario.schema.json}
-   %{dep:../contracts/v10/scenario-stream.schema.json}
-   %{dep:../contracts/v10/journal.schema.json}
-   %{dep:../contracts/v10/fixtures/demo.scenario.json}
-   %{dep:../contracts/v10/fixtures/demo.scenario.jsonl}
-   %{dep:../contracts/v10/fixtures/demo.journal.jsonl})))
-
-(rule
- (alias runtest)
- (deps
-  validate_schemas.py
-  ../contracts/v10/fixtures/fill-clipped.journal.jsonl
-  ../contracts/v10/fixtures/fill-clipped.scenario.json
-  ../contracts/v10/fixtures/demo.scenario.jsonl
-  ../contracts/v10/journal.schema.json
-  ../contracts/v10/scenario-stream.schema.json
-  ../contracts/v10/scenario.schema.json)
- (action
-  (run
-   python3
-   %{dep:validate_schemas.py}
-   %{dep:../contracts/v10/scenario.schema.json}
-   %{dep:../contracts/v10/scenario-stream.schema.json}
-   %{dep:../contracts/v10/journal.schema.json}
-   %{dep:../contracts/v10/fixtures/fill-clipped.scenario.json}
-   %{dep:../contracts/v10/fixtures/demo.scenario.jsonl}
-   %{dep:../contracts/v10/fixtures/fill-clipped.journal.jsonl})))
-
-(rule
- (alias runtest)
- (deps
-  validate_schemas.py
-  ../contracts/v9/fixtures/demo.journal.jsonl
-  ../contracts/v9/fixtures/demo.scenario.json
-  ../contracts/v9/fixtures/demo.scenario.jsonl
-  ../contracts/v9/journal.schema.json
-  ../contracts/v9/scenario-stream.schema.json
-  ../contracts/v9/scenario.schema.json)
- (action
-  (run
-   python3
-   %{dep:validate_schemas.py}
-   %{dep:../contracts/v9/scenario.schema.json}
-   %{dep:../contracts/v9/scenario-stream.schema.json}
-   %{dep:../contracts/v9/journal.schema.json}
-   %{dep:../contracts/v9/fixtures/demo.scenario.json}
-   %{dep:../contracts/v9/fixtures/demo.scenario.jsonl}
-   %{dep:../contracts/v9/fixtures/demo.journal.jsonl})))
-
-(rule
- (alias runtest)
- (deps
-  validate_schemas.py
-  ../contracts/v9/fixtures/fill-clipped.journal.jsonl
-  ../contracts/v9/fixtures/fill-clipped.scenario.json
-  ../contracts/v9/fixtures/demo.scenario.jsonl
-  ../contracts/v9/journal.schema.json
-  ../contracts/v9/scenario-stream.schema.json
-  ../contracts/v9/scenario.schema.json)
- (action
-  (run
-   python3
-   %{dep:validate_schemas.py}
-   %{dep:../contracts/v9/scenario.schema.json}
-   %{dep:../contracts/v9/scenario-stream.schema.json}
-   %{dep:../contracts/v9/journal.schema.json}
-   %{dep:../contracts/v9/fixtures/fill-clipped.scenario.json}
-   %{dep:../contracts/v9/fixtures/demo.scenario.jsonl}
-   %{dep:../contracts/v9/fixtures/fill-clipped.journal.jsonl})))
+   %{dep:../contracts/strategy/v1/message.schema.json}
+   %{dep:../contracts/strategy/v1/transcript.schema.json}
+   %{dep:../contracts/strategy/v1/fixtures/external.strategy.jsonl})))
 
 (rule
  (alias runtest)
@@ -511,200 +94,11 @@
  (deps
   ../bin/main.exe
   fake_strategy.py
-  ../contracts/strategy/v6/fixtures/external.scenario.json
-  ../contracts/strategy/v6/fixtures/external.scenario.jsonl
-  ../contracts/strategy/v6/fixtures/external.strategy.jsonl
-  ../contracts/v8/fixtures/demo.scenario.json
-  ../contracts/v8/fixtures/demo.scenario.jsonl))
-
-(rule
- (alias runtest)
- (deps
-  validate_strategy_schema.py
-  ../contracts/v10/scenario.schema.json
-  ../contracts/v10/journal.schema.json
-  ../contracts/diagnostic/v1/diagnostic.schema.json
-  ../contracts/strategy/v8/message.schema.json
-  ../contracts/strategy/v8/transcript.schema.json
-  ../contracts/strategy/v8/fixtures/external.strategy.jsonl)
- (action
-  (run
-   python3
-   %{dep:validate_strategy_schema.py}
-   %{dep:../contracts/v10/scenario.schema.json}
-   %{dep:../contracts/v10/journal.schema.json}
-   %{dep:../contracts/diagnostic/v1/diagnostic.schema.json}
-   %{dep:../contracts/strategy/v8/message.schema.json}
-   %{dep:../contracts/strategy/v8/transcript.schema.json}
-   %{dep:../contracts/strategy/v8/fixtures/external.strategy.jsonl})))
-
-(rule
- (alias runtest)
- (deps
-  validate_strategy_schema.py
-  ../contracts/v9/scenario.schema.json
-  ../contracts/v9/journal.schema.json
-  ../contracts/diagnostic/v1/diagnostic.schema.json
-  ../contracts/strategy/v7/message.schema.json
-  ../contracts/strategy/v7/transcript.schema.json
-  ../contracts/strategy/v7/fixtures/external.strategy.jsonl)
- (action
-  (run
-   python3
-   %{dep:validate_strategy_schema.py}
-   %{dep:../contracts/v9/scenario.schema.json}
-   %{dep:../contracts/v9/journal.schema.json}
-   %{dep:../contracts/diagnostic/v1/diagnostic.schema.json}
-   %{dep:../contracts/strategy/v7/message.schema.json}
-   %{dep:../contracts/strategy/v7/transcript.schema.json}
-   %{dep:../contracts/strategy/v7/fixtures/external.strategy.jsonl})))
-
-(rule
- (alias runtest)
- (deps
-  validate_schemas.py
-  ../contracts/v8/fixtures/demo.journal.jsonl
-  ../contracts/v8/fixtures/demo.scenario.json
-  ../contracts/v8/fixtures/demo.scenario.jsonl
-  ../contracts/v8/journal.schema.json
-  ../contracts/v8/scenario-stream.schema.json
-  ../contracts/v8/scenario.schema.json)
- (action
-  (run
-   python3
-   %{dep:validate_schemas.py}
-   %{dep:../contracts/v8/scenario.schema.json}
-   %{dep:../contracts/v8/scenario-stream.schema.json}
-   %{dep:../contracts/v8/journal.schema.json}
-   %{dep:../contracts/v8/fixtures/demo.scenario.json}
-   %{dep:../contracts/v8/fixtures/demo.scenario.jsonl}
-   %{dep:../contracts/v8/fixtures/demo.journal.jsonl})))
-
-(rule
- (alias runtest)
- (deps
-  validate_schemas.py
-  ../contracts/v8/fixtures/fill-clipped.journal.jsonl
-  ../contracts/v8/fixtures/fill-clipped.scenario.json
-  ../contracts/v8/fixtures/demo.scenario.jsonl
-  ../contracts/v8/journal.schema.json
-  ../contracts/v8/scenario-stream.schema.json
-  ../contracts/v8/scenario.schema.json)
- (action
-  (run
-   python3
-   %{dep:validate_schemas.py}
-   %{dep:../contracts/v8/scenario.schema.json}
-   %{dep:../contracts/v8/scenario-stream.schema.json}
-   %{dep:../contracts/v8/journal.schema.json}
-   %{dep:../contracts/v8/fixtures/fill-clipped.scenario.json}
-   %{dep:../contracts/v8/fixtures/demo.scenario.jsonl}
-   %{dep:../contracts/v8/fixtures/fill-clipped.journal.jsonl})))
-
-(rule
- (alias runtest)
- (deps
-  validate_schemas.py
-  ../contracts/v7/fixtures/demo.journal.jsonl
-  ../contracts/v7/fixtures/demo.scenario.json
-  ../contracts/v7/fixtures/demo.scenario.jsonl
-  ../contracts/v7/journal.schema.json
-  ../contracts/v7/scenario-stream.schema.json
-  ../contracts/v7/scenario.schema.json)
- (action
-  (run
-   python3
-   %{dep:validate_schemas.py}
-   %{dep:../contracts/v7/scenario.schema.json}
-   %{dep:../contracts/v7/scenario-stream.schema.json}
-   %{dep:../contracts/v7/journal.schema.json}
-   %{dep:../contracts/v7/fixtures/demo.scenario.json}
-   %{dep:../contracts/v7/fixtures/demo.scenario.jsonl}
-   %{dep:../contracts/v7/fixtures/demo.journal.jsonl})))
-
-(rule
- (alias runtest)
- (deps
-  validate_schemas.py
-  ../contracts/v7/fixtures/fill-clipped.journal.jsonl
-  ../contracts/v7/fixtures/fill-clipped.scenario.json
-  ../contracts/v7/fixtures/demo.scenario.jsonl
-  ../contracts/v7/journal.schema.json
-  ../contracts/v7/scenario-stream.schema.json
-  ../contracts/v7/scenario.schema.json)
- (action
-  (run
-   python3
-   %{dep:validate_schemas.py}
-   %{dep:../contracts/v7/scenario.schema.json}
-   %{dep:../contracts/v7/scenario-stream.schema.json}
-   %{dep:../contracts/v7/journal.schema.json}
-   %{dep:../contracts/v7/fixtures/fill-clipped.scenario.json}
-   %{dep:../contracts/v7/fixtures/demo.scenario.jsonl}
-   %{dep:../contracts/v7/fixtures/fill-clipped.journal.jsonl})))
-
-(rule
- (alias runtest)
- (deps
-  validate_schemas.py
-  ../contracts/v3/fixtures/demo.journal.jsonl
-  ../contracts/v3/fixtures/demo.scenario.json
-  ../contracts/v3/fixtures/demo.scenario.jsonl
-  ../contracts/v3/journal.schema.json
-  ../contracts/v3/scenario-stream.schema.json
-  ../contracts/v3/scenario.schema.json)
- (action
-  (run
-   python3
-   %{dep:validate_schemas.py}
-   %{dep:../contracts/v3/scenario.schema.json}
-   %{dep:../contracts/v3/scenario-stream.schema.json}
-   %{dep:../contracts/v3/journal.schema.json}
-   %{dep:../contracts/v3/fixtures/demo.scenario.json}
-   %{dep:../contracts/v3/fixtures/demo.scenario.jsonl}
-   %{dep:../contracts/v3/fixtures/demo.journal.jsonl})))
-
-(rule
- (alias runtest)
- (deps
-  validate_strategy_schema.py
-  ../contracts/v8/scenario.schema.json
-  ../contracts/v8/journal.schema.json
-  ../contracts/diagnostic/v1/diagnostic.schema.json
-  ../contracts/strategy/v6/message.schema.json
-  ../contracts/strategy/v6/transcript.schema.json
-  ../contracts/strategy/v6/fixtures/external.strategy.jsonl)
- (action
-  (run
-   python3
-   %{dep:validate_strategy_schema.py}
-   %{dep:../contracts/v8/scenario.schema.json}
-   %{dep:../contracts/v8/journal.schema.json}
-   %{dep:../contracts/diagnostic/v1/diagnostic.schema.json}
-   %{dep:../contracts/strategy/v6/message.schema.json}
-   %{dep:../contracts/strategy/v6/transcript.schema.json}
-   %{dep:../contracts/strategy/v6/fixtures/external.strategy.jsonl})))
-
-(rule
- (alias runtest)
- (deps
-  validate_strategy_schema.py
-  ../contracts/v7/scenario.schema.json
-  ../contracts/v7/journal.schema.json
-  ../contracts/diagnostic/v1/diagnostic.schema.json
-  ../contracts/strategy/v5/message.schema.json
-  ../contracts/strategy/v5/transcript.schema.json
-  ../contracts/strategy/v5/fixtures/external.strategy.jsonl)
- (action
-  (run
-   python3
-   %{dep:validate_strategy_schema.py}
-   %{dep:../contracts/v7/scenario.schema.json}
-   %{dep:../contracts/v7/journal.schema.json}
-   %{dep:../contracts/diagnostic/v1/diagnostic.schema.json}
-   %{dep:../contracts/strategy/v5/message.schema.json}
-   %{dep:../contracts/strategy/v5/transcript.schema.json}
-   %{dep:../contracts/strategy/v5/fixtures/external.strategy.jsonl})))
+  ../contracts/strategy/v1/fixtures/external.scenario.json
+  ../contracts/strategy/v1/fixtures/external.scenario.jsonl
+  ../contracts/strategy/v1/fixtures/external.strategy.jsonl
+  ../contracts/v1/fixtures/demo.scenario.json
+  ../contracts/v1/fixtures/demo.scenario.jsonl))
 
 (rule
  (alias runtest)
@@ -752,7 +146,7 @@
  (deps
   test_benchmark_replay.py
   ../bench/benchmark_replay.py
-  ../contracts/v9/fixtures/demo.scenario.json)
+  ../contracts/v1/fixtures/demo.scenario.json)
  (action
   (run python3 %{dep:test_benchmark_replay.py})))
 
@@ -761,14 +155,14 @@
  (deps
   validate_cli_result.py
   ../contracts/cli/v1/result.schema.json
-  ../contracts/v16/journal.schema.json
-  ../contracts/v16/fixtures/demo.scenario.json
+  ../contracts/v1/journal.schema.json
+  ../contracts/v1/fixtures/demo.scenario.json
   ../bin/main.exe)
  (action
   (run
    python3
    %{dep:validate_cli_result.py}
    %{dep:../contracts/cli/v1/result.schema.json}
-   %{dep:../contracts/v16/journal.schema.json}
+   %{dep:../contracts/v1/journal.schema.json}
    %{dep:../bin/main.exe}
-   %{dep:../contracts/v16/fixtures/demo.scenario.json})))
+   %{dep:../contracts/v1/fixtures/demo.scenario.json})))

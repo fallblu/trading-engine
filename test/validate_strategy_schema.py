@@ -93,7 +93,7 @@ def main() -> None:
     extra_field["unexpected"] = True
     expect_invalid(message_validator, extra_field)
     unsupported_version = copy.deepcopy(records[1]["message"])
-    unsupported_version["strategy_protocol_version"] = "1"
+    unsupported_version["strategy_protocol_version"] = "2"
     expect_invalid(message_validator, unsupported_version)
     malformed_sequence = copy.deepcopy(records[1]["message"])
     malformed_sequence["strategy_sequence"] = "01"

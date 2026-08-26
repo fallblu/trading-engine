@@ -16,7 +16,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_EXECUTABLE = ROOT / "_build/default/bin/main.exe"
-FIXTURE = ROOT / "contracts/v5/fixtures/demo.scenario.json"
+FIXTURE = ROOT / "contracts/v1/fixtures/demo.scenario.json"
 
 
 def timestamp(value: datetime) -> str:
@@ -51,7 +51,10 @@ def dense_scenario(size: int) -> dict[str, object]:
                     {
                         "type": "emit_metric",
                         "name": "dense_schedule",
-                        "value": str(sequence),
+                        "value": {"type": "numeric", "value": str(sequence)},
+                        "unit": None,
+                        "dimensions": {},
+                        "aggregation": "last",
                     }
                 ],
             }

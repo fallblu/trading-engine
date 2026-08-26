@@ -15,6 +15,4 @@ success document moves to standard error. Its journal artifact is named `stdout`
 `run_completed` record signals successful completion. A consumer must also require a zero process
 exit status. Strategy protocol messages remain confined to the supervised child process.
 
-This result contract is independent of the scenario contract version. Its `valuation` uses the
-current v16 valuation shape so consumers receive one stable automation model for older accepted
-scenarios.
+The result contract reports the normalized replay contract v1 valuation.

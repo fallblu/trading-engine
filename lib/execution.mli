@@ -45,12 +45,6 @@ val cursor : (oms:Oms.t -> (step, string) result) -> cursor
 
 val create :
   participation_bps:int ->
-  fixed_fee:Scalar.Money.t ->
-  fee_bps:int ->
-  (t, string) result
-
-val create_v2 :
-  participation_bps:int ->
   fee_schedules:Fee_schedule.t list ->
   (t, string) result
 
@@ -70,8 +64,6 @@ val create_order_book :
 
 val participation_bps : t -> int
 val book_depth_limit : t -> int option
-val fixed_fee : t -> Scalar.Money.t
-val fee_bps : t -> int
 val fee_schedules : t -> Fee_schedule.t list
 val cost_model : t -> cost_model option
 
@@ -141,8 +133,8 @@ val fold_slice :
 (** Fold executable orders in liquidation-first, then sell-before-buy/FIFO
     order. The callback returns the quantity it actually applied; only that
     quantity consumes the shared per-instrument slice capacity. Returns an error
-    when a dormant stop triggers because this compatibility helper has no
-    callback through which to persist trigger state. *)
+    when a dormant stop triggers because the callback cannot persist trigger
+    state. *)
 
 val match_slice :
   t ->

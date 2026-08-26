@@ -22,7 +22,7 @@ body:
     id: contracts
     attributes:
       label: Contract versions
-      placeholder: scenario v3, journal v3, strategy v3
+      placeholder: scenario v1, journal v1, strategy v1
     validations:
       required: true
   - type: dropdown

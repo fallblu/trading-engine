@@ -5,15 +5,14 @@ type t = private {
   metadata : Yojson.Safe.t;
   run_id : Id.Run.t;
   base_currency : string;
-  initial_cash : (string * Scalar.Money.t) list;
-  initial_portfolio : Initial_portfolio.t option;
+  initial_portfolio : Initial_portfolio.t;
   instruments : Instrument.t list;
   venue_calendars : Venue_calendar.t list;
   risk : Risk.t;
   execution_model : Execution_model.t;
   execution : Execution.t;
-  financing : Financing.policy option;
-  settlement : Settlement.policy option;
+  financing : Financing.policy;
+  settlement : Settlement.policy;
   max_internal_events : int;
   schedule : (int64 * Strategy.intent list) list;
   slices : Market_slice.t list;
@@ -24,15 +23,14 @@ type stream_header = private {
   metadata : Yojson.Safe.t;
   run_id : Id.Run.t;
   base_currency : string;
-  initial_cash : (string * Scalar.Money.t) list;
-  initial_portfolio : Initial_portfolio.t option;
+  initial_portfolio : Initial_portfolio.t;
   instruments : Instrument.t list;
   venue_calendars : Venue_calendar.t list;
   risk : Risk.t;
   execution_model : Execution_model.t;
   execution : Execution.t;
-  financing : Financing.policy option;
-  settlement : Settlement.policy option;
+  financing : Financing.policy;
+  settlement : Settlement.policy;
   max_internal_events : int;
 }
 
@@ -45,11 +43,7 @@ type stream_item = private {
 val of_yojson : Yojson.Safe.t -> (t, Diagnostic.t) result
 val of_string : string -> (t, Diagnostic.t) result
 val read_file : string -> (t, Diagnostic.t) result
-
-val intent_of_yojson :
-  ?contract_version:string ->
-  Yojson.Safe.t ->
-  (Strategy.intent, Diagnostic.t) result
+val intent_of_yojson : Yojson.Safe.t -> (Strategy.intent, Diagnostic.t) result
 
 val stream_header_of_yojson :
   contract_version:string ->

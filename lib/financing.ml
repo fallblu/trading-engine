@@ -39,11 +39,6 @@ let policy ~day_count ~compounding ~borrow_missing_data ~cash_missing_data
     recall_policy;
   }
 
-let legacy_policy =
-  policy ~day_count:Actual_365 ~compounding:Simple ~borrow_missing_data:Zero
-    ~cash_missing_data:Zero ~locate_policy:Clip_fill
-    ~recall_policy:Reject_new_shorts
-
 let valid_currency value =
   String.length value > 0
   && String.for_all

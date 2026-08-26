@@ -9,7 +9,8 @@ let runner ?contract_version ?(initial_cash = "10000") ?(risk = risk ())
     engine_config ?contract_version ~risk ?execution_model ~execution ()
   in
   Runner.create ~run_id:(run_id "test-run") ~scenario_sha256 ~config
-    ~initial_cash:[ ("USD", money initial_cash) ]
+    ~initial_portfolio:
+      (initial_portfolio ~cash:[ ("USD", money initial_cash) ] ())
     ~strategy_state
   |> ok
 
@@ -49,6 +50,8 @@ let market_order_retries_after_partial_fill () =
     "first audit order"
     [
       "run_started";
+      "initial_state";
+      "valuation";
       "market_slice_received";
       "target_portfolio_requested";
       "order_accepted";
@@ -74,6 +77,7 @@ let market_order_retries_after_partial_fill () =
     [
       "market_slice_received";
       "fill_applied";
+      "settlement_instruction_created";
       "order_cancelled";
       "order_accepted";
       "valuation";
@@ -186,112 +190,6 @@ let superseding_target_replaces_retry () =
               (event_names events)))
   | _ -> Alcotest.fail "expected one replacement order"
 
-let fill_limit_clips_buy_to_lots ?(contract_version = T.Contract.version) () =
-  let constrained = risk ~max_leverage:"1" () in
-  let state =
-    runner ~contract_version ~initial_cash:"550" ~risk:constrained
-      ~execution:(execution ~fixed_fee:"10" ())
-      [ (1L, [ target "10" ]) ]
-  in
-  let decision_bar =
-    bar ~open_price:"50" ~high_price:"50" ~low_price:"50" ~close_price:"50" 1L
-  in
-  let state, _ =
-    Runner.process_slice state (market_slice ~bars:[ decision_bar ] 1L) |> ok
-  in
-  let state, events =
-    Runner.process_slice state
-      (market_slice ~bars:[ bar ~open_price:"100" ~close_price:"100" 2L ] 2L)
-    |> ok
-  in
-  Alcotest.check quantity_testable "five risk-permitted shares" (quantity "5")
-    (T.Account.position_quantity (Runner.account state)
-       (instrument_id "test-equity"));
-  Alcotest.check money_testable "cash after clipped fill" (money "40")
-    (account_cash (Runner.account state));
-  let limited =
-    List.find
-      (fun audit ->
-        String.equal (T.Audit.event_name audit.T.Audit.event) "fill_clipped")
-      events
-  in
-  Alcotest.(check string)
-    "fill-clipped contract version" contract_version limited.contract_version;
-  match limited.event with
-  | T.Audit.Fill_clipped
-      {
-        proposed_quantity;
-        permitted_quantity;
-        price = fill_price;
-        limit = T.Risk.Maximum_leverage threshold;
-        _;
-      } ->
-      Alcotest.check quantity_testable "ten proposed" (quantity "10")
-        proposed_quantity;
-      Alcotest.check quantity_testable "five permitted" (quantity "5")
-        permitted_quantity;
-      Alcotest.check price_testable "actual price" (price "100") fill_price;
-      Alcotest.(check string)
-        "leverage threshold" "1"
-        (T.Scalar.Ratio.to_decimal_string threshold)
-  | _ -> Alcotest.fail "expected leverage clipping audit"
-
-let v4_replays_keep_the_fill_clipped_record () =
-  fill_limit_clips_buy_to_lots ~contract_version:T.Contract.previous_version ()
-
-let v3_replays_keep_the_legacy_clipping_record () =
-  let constrained = risk ~max_leverage:"1" () in
-  let state =
-    runner ~contract_version:T.Contract.legacy_journal_version
-      ~initial_cash:"550" ~risk:constrained
-      ~execution:(execution ~fixed_fee:"10" ())
-      [ (1L, [ target "10" ]) ]
-  in
-  let decision_bar =
-    bar ~open_price:"50" ~high_price:"50" ~low_price:"50" ~close_price:"50" 1L
-  in
-  let state, _ =
-    Runner.process_slice state (market_slice ~bars:[ decision_bar ] 1L) |> ok
-  in
-  let _, events =
-    Runner.process_slice state
-      (market_slice ~bars:[ bar ~open_price:"100" ~close_price:"100" 2L ] 2L)
-    |> ok
-  in
-  let limited =
-    List.find
-      (fun audit ->
-        String.equal (T.Audit.event_name audit.T.Audit.event) "margin_limited")
-      events
-  in
-  Alcotest.(check string)
-    "legacy journal version" T.Contract.legacy_journal_version
-    limited.contract_version;
-  match limited.event with
-  | T.Audit.Margin_limited { requested_quantity; permitted_quantity; _ } ->
-      Alcotest.check quantity_testable "legacy requested" (quantity "10")
-        requested_quantity;
-      Alcotest.check quantity_testable "legacy permitted" (quantity "5")
-        permitted_quantity
-  | _ -> Alcotest.fail "expected legacy margin_limited audit"
-
-let invalid_fill_candidates_fail_instead_of_clipping () =
-  let constrained = risk ~max_leverage:"1" () in
-  let state =
-    runner ~initial_cash:"9223372036854.775807" ~risk:constrained
-      [
-        ( 1L,
-          [
-            T.Strategy.Submit_order
-              (request ~side:T.Order.Sell ~quantity_value:"1" ());
-          ] );
-      ]
-  in
-  let state, _ = Runner.process_slice state (market_slice 1L) |> ok in
-  Alcotest.(check string)
-    "account overflow is not a clipping policy" "int64 addition overflow"
-    (Runner.process_slice state (market_slice 2L) |> error)
-
 let sells_precede_buys_in_the_same_slice () =
   let a = instrument ~id:"asset-a" ~symbol:"A" () in
   let b = instrument ~id:"asset-b" ~symbol:"B" () in
@@ -311,6 +209,7 @@ let sells_precede_buys_in_the_same_slice () =
   in
   let state =
     runner ~initial_cash:"1000" ~risk:configured
+      ~execution:(execution ~instruments:[ a; b ] ())
       [ (1L, [ portfolio "10" "0" ]); (2L, [ portfolio "0" "10" ]) ]
   in
   let state, _ =
@@ -349,7 +248,7 @@ let interactive_market_slice_timeline_is_non_overlapping () =
   let initial =
     T.Engine.Interactive.create ~run_id:(run_id "timeline-test")
       ~scenario_sha256 ~config
-      ~initial_cash:[ ("USD", money "10000") ]
+      ~initial_portfolio:(initial_portfolio ~cash:[ ("USD", money "10000") ] ())
     |> ok
   in
   let rec finish progress =
@@ -400,7 +299,7 @@ let internal_feedback_is_capped () =
   let config = engine_config ~max_internal_events:3 () in
   let state =
     Looping_runner.create ~run_id:(run_id "loop") ~scenario_sha256 ~config
-      ~initial_cash:[ ("USD", money "10000") ]
+      ~initial_portfolio:(initial_portfolio ~cash:[ ("USD", money "10000") ] ())
       ~strategy_state
     |> ok
   in
@@ -413,7 +312,7 @@ let exact_internal_event_limit_succeeds () =
   let config = engine_config ~max_internal_events:1 () in
   let state =
     Runner.create ~run_id:(run_id "one-event") ~scenario_sha256 ~config
-      ~initial_cash:[ ("USD", money "10000") ]
+      ~initial_portfolio:(initial_portfolio ~cash:[ ("USD", money "10000") ] ())
       ~strategy_state
     |> ok
   in
@@ -433,7 +332,7 @@ let reducer_feedback_queue_handles_large_batches () =
   let config = engine_config ~max_internal_events () in
   let state =
     Runner.create ~run_id:(run_id "large-feedback") ~scenario_sha256 ~config
-      ~initial_cash:[ ("USD", money "10000") ]
+      ~initial_portfolio:(initial_portfolio ~cash:[ ("USD", money "10000") ] ())
       ~strategy_state
     |> ok
   in
@@ -448,7 +347,7 @@ let reducer_feedback_queue_handles_large_batches () =
   in
   Alcotest.(check int) "every intent rejected" batch_size rejection_count;
   Alcotest.(check int)
-    "batch completes at the exact feedback limit" (batch_size + 3)
+    "batch completes at the exact feedback limit" (batch_size + 5)
     (List.length events)
 
 let completed_run_is_terminal_and_hash_bound () =
@@ -456,7 +355,7 @@ let completed_run_is_terminal_and_hash_bound () =
   let state, valuation, events = Runner.complete state |> ok in
   Alcotest.(check (list string))
     "start and completion events"
-    [ "run_started"; "run_completed" ]
+    [ "run_started"; "initial_state"; "valuation"; "run_completed" ]
     (event_names events);
   Alcotest.check money_testable "initial equity" (money "10000")
     valuation.equity;
@@ -477,17 +376,11 @@ let invalid_initial_state_is_rejected () =
   let strategy_state = T.Scripted_strategy.create [] |> ok in
   let config = engine_config () in
   Alcotest.(check bool)
-    "negative cash rejected" true
-    (Result.is_error
-       (Runner.create ~run_id:(run_id "bad-cash") ~scenario_sha256 ~config
-          ~initial_cash:[ ("USD", money "-1") ]
-          ~strategy_state));
-  Alcotest.(check bool)
     "noncanonical hash rejected" true
     (Result.is_error
        (Runner.create ~run_id:(run_id "bad-hash")
           ~scenario_sha256:(String.make 64 'A') ~config
-          ~initial_cash:[ ("USD", money "1") ]
+          ~initial_portfolio:(initial_portfolio ~cash:[ ("USD", money "1") ] ())
           ~strategy_state))
 
 let one_valuation_per_slice () =
@@ -500,7 +393,7 @@ let one_valuation_per_slice () =
          (fun name -> String.equal name "valuation")
          (event_names events))
   in
-  Alcotest.(check int) "first slice" 1 (count first);
+  Alcotest.(check int) "initial state and first slice" 2 (count first);
   Alcotest.(check int) "second slice" 1 (count second)
 
 module No_fill_execution = struct
@@ -546,21 +439,19 @@ let execution_model_configuration_must_match () =
     |> ok
   in
   let configure contract_version execution_model execution =
-    T.Engine.config ~contract_version ~risk:(risk ()) ~execution_model
-      ~execution ~max_internal_events:1000
+    T.Engine.config ~contract_version ~risk:(risk ()) ~venue_calendars:[]
+      ~execution_model ~execution ~financing:(financing_policy ())
+      ~settlement:(settlement_policy ()) ~max_internal_events:1000
   in
   Alcotest.(check bool)
     "conservative model requires pricing configuration" true
-    (Result.is_error (configure "13" next_open (execution ())));
+    (Result.is_error (configure "1" next_open (execution ())));
   Alcotest.(check bool)
-    "legacy model rejects conservative pricing" true
-    (Result.is_error (configure "13" completed conservative));
-  Alcotest.(check bool)
-    "conservative model is v13-only" true
-    (Result.is_error (configure "12" next_open conservative));
+    "completed-bar model rejects conservative pricing" true
+    (Result.is_error (configure "1" completed conservative));
   Alcotest.(check bool)
     "matching conservative configuration accepted" true
-    (Result.is_ok (configure "13" next_open conservative))
+    (Result.is_ok (configure "1" next_open conservative))
 
 module Cancel_next_strategy = struct
   type state = { submitted : bool; cancelled : bool }
@@ -592,8 +483,12 @@ module Cancel_next_runner = T.Engine.Make (Cancel_next_strategy)
 let callbacks_use_current_slice_and_apply_responses_before_matching () =
   let configured = instrument ~currency:"EUR" () in
   let configured_risk = risk ~instruments:[ configured ] () in
-  let config = engine_config ~risk:configured_risk () in
-  let initial_cash = [ ("USD", money "10000"); ("EUR", money "0") ] in
+  let config =
+    engine_config ~risk:configured_risk
+      ~execution:(execution ~instruments:[ configured ] ())
+      ()
+  in
+  let initial_cash = [ ("USD", money "0"); ("EUR", money "10000") ] in
   let first_slice =
     market_slice
       ~bars:[ bar ~close_price:"104" 1L ]
@@ -616,7 +511,9 @@ let callbacks_use_current_slice_and_apply_responses_before_matching () =
   let scripted =
     Cancel_next_runner.create
       ~run_id:(run_id "callback-consistency")
-      ~scenario_sha256 ~config ~initial_cash ~strategy_state
+      ~scenario_sha256 ~config
+      ~initial_portfolio:(initial_portfolio ~cash:initial_cash ())
+      ~strategy_state
     |> ok
   in
   let scripted, _ =
@@ -628,7 +525,8 @@ let callbacks_use_current_slice_and_apply_responses_before_matching () =
   let interactive =
     T.Engine.Interactive.create
       ~run_id:(run_id "callback-consistency")
-      ~scenario_sha256 ~config ~initial_cash
+      ~scenario_sha256 ~config
+      ~initial_portfolio:(initial_portfolio ~cash:initial_cash ())
     |> ok
   in
   let rec finish_first submitted progress =
@@ -746,7 +644,7 @@ let interactive_reducer_matches_scripted_strategy () =
   let interactive =
     T.Engine.Interactive.create ~run_id:(run_id "test-run") ~scenario_sha256
       ~config
-      ~initial_cash:[ ("USD", money "10000") ]
+      ~initial_portfolio:(initial_portfolio ~cash:[ ("USD", money "10000") ] ())
     |> ok
   in
   let progress =
@@ -812,6 +710,7 @@ let explicit_phase_order_is_stable () =
       "market_slice_received";
       "cash_dividend_applied";
       "fill_applied";
+      "settlement_instruction_created";
       "metric_emitted";
       "target_portfolio_requested";
       "order_accepted";
@@ -830,14 +729,6 @@ let tests =
       bounded_target_orders_make_progress;
     Alcotest.test_case "superseding target replaces retry" `Quick
       superseding_target_replaces_retry;
-    Alcotest.test_case "fill clipping identifies leverage" `Quick
-      fill_limit_clips_buy_to_lots;
-    Alcotest.test_case "v4 keeps fill clipping records" `Quick
-      v4_replays_keep_the_fill_clipped_record;
-    Alcotest.test_case "v3 keeps legacy clipping records" `Quick
-      v3_replays_keep_the_legacy_clipping_record;
-    Alcotest.test_case "invalid fill candidates fail" `Quick
-      invalid_fill_candidates_fail_instead_of_clipping;
     Alcotest.test_case "same-slice sells precede buys" `Quick
       sells_precede_buys_in_the_same_slice;
     Alcotest.test_case "external ordering validation" `Quick

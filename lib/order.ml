@@ -55,14 +55,14 @@ type t = {
   status : status;
 }
 
-let compatibility_time_in_force = function Market -> Ioc | _ -> Gtc
+let default_time_in_force = function Market -> Ioc | _ -> Gtc
 
 let valid_stop_limit side trigger_price limit_price =
   match side with
   | Buy -> Scalar.Price.compare limit_price trigger_price >= 0
   | Sell -> Scalar.Price.compare limit_price trigger_price <= 0
 
-let request_v8 ~instrument_id ~side ~quantity ~kind ~time_in_force ~origin =
+let request ~instrument_id ~side ~quantity ~kind ~time_in_force ~origin =
   if not (Scalar.Quantity.is_positive quantity) then
     Error "order quantity must be positive"
   else
@@ -73,11 +73,6 @@ let request_v8 ~instrument_id ~side ~quantity ~kind ~time_in_force ~origin =
           "buy stop-limit prices require limit >= trigger and sell stop-limit \
            prices require limit <= trigger"
     | _ -> Ok { instrument_id; side; quantity; kind; time_in_force; origin }
-
-let request ~instrument_id ~side ~quantity ~kind ~origin =
-  request_v8 ~instrument_id ~side ~quantity ~kind
-    ~time_in_force:(compatibility_time_in_force kind)
-    ~origin
 
 let make ~id ~created_event_id ~sequence ~created_at
     ~eligible_after_slice_sequence ~request ~status =

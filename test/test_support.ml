@@ -54,6 +54,10 @@ let test_account ?(base_currency = "USD") ?initial_cash () =
   in
   T.Account.create ~base_currency ~initial_cash |> ok
 
+let initial_portfolio ?(base_currency = "USD") ?cash () =
+  let cash = Option.value cash ~default:[ (base_currency, money "10000") ] in
+  T.Initial_portfolio.cash_only ~base_currency ~cash |> ok
+
 let account_cash ?(currency = "USD") account =
   T.Account.cash account currency |> Option.get
 
@@ -61,8 +65,11 @@ let account_value ?(instruments = [ instrument () ])
     ?(fx_rates = [ ("USD", price "1") ]) account ~marks =
   T.Account.value account ~instruments ~marks ~fx_rates |> ok
 
-let market_slice ?bars ?fx_rates ?(corporate_actions = []) ?start_at ?end_at
-    ?available_at ?received_at sequence =
+let market_slice ?bars ?fx_rates ?(corporate_actions = [])
+    ?(borrow_observations = []) ?(cash_rate_observations = [])
+    ?(settlement_failures = []) ?(lifecycle_events = []) ?(market_events = [])
+    ?(order_book_events = []) ?start_at ?end_at ?available_at ?received_at
+    sequence =
   let day = day sequence in
   let start_at =
     Option.value start_at
@@ -83,20 +90,25 @@ let market_slice ?bars ?fx_rates ?(corporate_actions = []) ?start_at ?end_at
   let bars = Option.value bars ~default:[ bar sequence ] in
   let fx_rates = Option.value fx_rates ~default:[ fx_mark () ] in
   T.Market_slice.create ~slice_sequence:sequence ~start_at ~end_at ~available_at
-    ~received_at ~bars ~fx_rates ~corporate_actions
+    ~received_at ~bars ~fx_rates ~corporate_actions ~borrow_observations
+    ~cash_rate_observations ~settlement_failures ~lifecycle_events
+    ~market_events ~order_book_events
   |> ok
 
 let request ?(instrument = instrument_id "test-equity") ?(side = T.Order.Buy)
     ?(quantity_value = "10") ?(kind = T.Order.Market) ?(origin = T.Order.Direct)
-    () =
+    ?time_in_force () =
+  let time_in_force =
+    Option.value time_in_force ~default:(T.Order.default_time_in_force kind)
+  in
   T.Order.request ~instrument_id:instrument ~side
-    ~quantity:(quantity quantity_value) ~kind ~origin
+    ~quantity:(quantity quantity_value) ~kind ~time_in_force ~origin
   |> ok
 
-let request_v8 ?(instrument = instrument_id "test-equity") ?(side = T.Order.Buy)
-    ?(quantity_value = "10") ?(kind = T.Order.Market)
+let current_request ?(instrument = instrument_id "test-equity")
+    ?(side = T.Order.Buy) ?(quantity_value = "10") ?(kind = T.Order.Market)
     ?(time_in_force = T.Order.Gtc) ?(origin = T.Order.Direct) () =
-  T.Order.request_v8 ~instrument_id:instrument ~side
+  T.Order.request ~instrument_id:instrument ~side
     ~quantity:(quantity quantity_value) ~kind ~time_in_force ~origin
   |> ok
 
@@ -122,48 +134,94 @@ let fill ?(id = "fill-1") ?(price_value = "100") ?(quantity_value = "1")
   T.Fill.create ~id:(fill_id id) ~order_id:order.T.Order.id
     ~instrument_id:order.request.instrument_id ~side:order.request.side
     ~quote_currency:"USD" ~quantity:(quantity quantity_value)
-    ~price:(price price_value) ~fee:(money fee_value) ~executed_at
-    ~slice_sequence
+    ~price:(price price_value) ~fee:(money fee_value) ~fee_components:[]
+    ~executed_at ~slice_sequence
   |> ok
 
-let execution ?(participation_bps = 10_000) ?(fixed_fee = "0") ?(fee_bps = 0) ()
-    =
-  T.Execution.create ~participation_bps ~fixed_fee:(money fixed_fee) ~fee_bps
+let zero_fee_schedule instrument =
+  let component =
+    T.Fee_schedule.create_component ~name:"zero"
+      ~currency:instrument.T.Instrument.quote_currency
+      ~basis:(T.Fee_schedule.Fixed T.Scalar.Money.zero)
+      ~rounding:T.Fee_schedule.Up ~applicability:T.Fee_schedule.Any
+    |> ok
+  in
+  T.Fee_schedule.create
+    ~schedule_id:(T.Id.Instrument.to_string instrument.id ^ "-fees-v1")
+    ~instrument_id:instrument.id ~settlement_currency:instrument.quote_currency
+    ~minimum:None ~maximum:None ~components:[ component ]
   |> ok
+
+let execution ?(participation_bps = 10_000) ?fee_schedules
+    ?(instruments = [ instrument () ]) () =
+  let fee_schedules =
+    Option.value fee_schedules ~default:(List.map zero_fee_schedule instruments)
+  in
+  T.Execution.create ~participation_bps ~fee_schedules |> ok
 
 let risk ?(base_currency = "USD") ?(instruments = [ instrument () ])
     ?(max_order = "1000") ?(max_long = "1000") ?(max_short = "1000")
     ?(max_gross = "1000000000") ?(max_leverage = "2")
-    ?(initial_margin_bps = 5000) ?(maintenance_margin_bps = 2500)
-    ?(short_borrow_bps = 100) () =
-  T.Risk.create ~base_currency ~instruments
-    ~max_order_quantity:(quantity max_order)
-    ~max_long_position:(quantity max_long)
-    ~max_short_position:(quantity max_short)
+    ?(initial_margin_bps = 5000) ?(maintenance_margin_bps = 2500) () =
+  let instrument_policies =
+    List.map
+      (fun instrument ->
+        T.Risk.create_instrument_policy ~instrument
+          ~max_order_quantity:(quantity max_order)
+          ~max_long_position:(quantity max_long)
+          ~max_short_position:(quantity max_short) ~max_notional_exposure:None
+          ~initial_margin_bps ~maintenance_margin_bps ~shorting_allowed:true
+        |> ok)
+      instruments
+  in
+  T.Risk.create ~base_currency ~instruments ~instrument_policies ~groups:[]
     ~max_gross_exposure:(money max_gross)
     ~max_leverage:(T.Scalar.Ratio.of_decimal_string max_leverage |> ok)
-    ~initial_margin_bps ~maintenance_margin_bps ~short_borrow_bps
+  |> ok
+
+let financing_policy () =
+  T.Financing.policy ~day_count:T.Financing.Actual_365
+    ~compounding:T.Financing.Simple ~borrow_missing_data:T.Financing.Zero
+    ~cash_missing_data:T.Financing.Zero ~locate_policy:T.Financing.Clip_fill
+    ~recall_policy:T.Financing.Reject_new_shorts
+
+let settlement_policy ?(instruments = [ instrument () ]) () =
+  let dates month count =
+    List.init count (fun index ->
+        Printf.sprintf "2026-%02d-%02d" month (index + 1))
+  in
+  let calendar =
+    T.Settlement.calendar ~calendar_id:"test-settlement" ~version:"1"
+      ~business_dates:(dates 1 31 @ dates 2 28 @ dates 3 31)
+    |> ok
+  in
+  let rules =
+    List.map
+      (fun instrument ->
+        T.Settlement.rule ~instrument_id:instrument.T.Instrument.id
+          ~calendar_id:"test-settlement" ~lag_business_days:1
+        |> ok)
+      instruments
+  in
+  T.Settlement.policy ~cash_buying_power:T.Settlement.Total_cash
+    ~position_availability:T.Settlement.Total_positions ~calendars:[ calendar ]
+    ~rules
   |> ok
 
 let engine_config ?(contract_version = T.Contract.version) ?(risk = risk ())
-    ?execution_model ?(execution = execution ()) ?(max_internal_events = 1000)
+    ?(venue_calendars = []) ?execution_model ?(execution = execution ())
+    ?(financing = financing_policy ()) ?settlement ?(max_internal_events = 1000)
     () =
   let execution_model =
     Option.value execution_model
       ~default:(T.Execution_model.find "completed_bar_v1" |> ok)
   in
-  T.Engine.config ~contract_version ~risk ~execution_model ~execution
-    ~max_internal_events
-  |> ok
-
-let engine_config_v8 ?(risk = risk ()) ?(venue_calendars = []) ?execution_model
-    ?(execution = execution ()) ?(max_internal_events = 1000) () =
-  let execution_model =
-    Option.value execution_model
-      ~default:(T.Execution_model.find "completed_bar_v1" |> ok)
+  let settlement =
+    Option.value settlement
+      ~default:(settlement_policy ~instruments:(T.Risk.instruments risk) ())
   in
-  T.Engine.config_v8 ~contract_version:"8" ~risk ~venue_calendars
-    ~execution_model ~execution ~max_internal_events
+  T.Engine.config ~contract_version ~risk ~venue_calendars ~execution_model
+    ~execution ~financing ~settlement ~max_internal_events
   |> ok
 
 let risk_check risk ~account ~oms request =

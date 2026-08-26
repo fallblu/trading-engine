@@ -33,10 +33,9 @@ let fx_mark ~currency ~rate =
 let compare_bar left right =
   Id.Instrument.compare left.Bar.instrument_id right.Bar.instrument_id
 
-let create_v15 ~slice_sequence ~start_at ~end_at ~available_at ~received_at
-    ~bars ~fx_rates ~corporate_actions ~borrow_observations
-    ~cash_rate_observations ~settlement_failures ~lifecycle_events
-    ~market_events ~order_book_events =
+let create ~slice_sequence ~start_at ~end_at ~available_at ~received_at ~bars
+    ~fx_rates ~corporate_actions ~borrow_observations ~cash_rate_observations
+    ~settlement_failures ~lifecycle_events ~market_events ~order_book_events =
   if Int64.compare slice_sequence 0L <= 0 then
     Error "market slice sequence must be positive"
   else if Ptime.compare start_at end_at >= 0 then
@@ -185,46 +184,6 @@ let create_v15 ~slice_sequence ~start_at ~end_at ~available_at ~received_at
           cash_rate_observations;
           settlement_failures;
         }
-
-let create_v16 = create_v15
-
-let create_v14 ~slice_sequence ~start_at ~end_at ~available_at ~received_at
-    ~bars ~fx_rates ~corporate_actions ~borrow_observations
-    ~cash_rate_observations ~settlement_failures ~lifecycle_events
-    ~market_events =
-  create_v15 ~slice_sequence ~start_at ~end_at ~available_at ~received_at ~bars
-    ~fx_rates ~corporate_actions ~borrow_observations ~cash_rate_observations
-    ~settlement_failures ~lifecycle_events ~market_events ~order_book_events:[]
-
-let create_v12 ~slice_sequence ~start_at ~end_at ~available_at ~received_at
-    ~bars ~fx_rates ~corporate_actions ~borrow_observations
-    ~cash_rate_observations ~settlement_failures ~lifecycle_events =
-  create_v15 ~slice_sequence ~start_at ~end_at ~available_at ~received_at ~bars
-    ~fx_rates ~corporate_actions ~borrow_observations ~cash_rate_observations
-    ~settlement_failures ~lifecycle_events ~market_events:[]
-    ~order_book_events:[]
-
-let create_v13 = create_v12
-
-let create_v11 ~slice_sequence ~start_at ~end_at ~available_at ~received_at
-    ~bars ~fx_rates ~corporate_actions ~borrow_observations
-    ~cash_rate_observations ~settlement_failures =
-  create_v12 ~slice_sequence ~start_at ~end_at ~available_at ~received_at ~bars
-    ~fx_rates ~corporate_actions ~borrow_observations ~cash_rate_observations
-    ~settlement_failures ~lifecycle_events:[]
-
-let create_v10 ~slice_sequence ~start_at ~end_at ~available_at ~received_at
-    ~bars ~fx_rates ~corporate_actions ~borrow_observations
-    ~cash_rate_observations =
-  create_v11 ~slice_sequence ~start_at ~end_at ~available_at ~received_at ~bars
-    ~fx_rates ~corporate_actions ~borrow_observations ~cash_rate_observations
-    ~settlement_failures:[]
-
-let create ~slice_sequence ~start_at ~end_at ~available_at ~received_at ~bars
-    ~fx_rates ~corporate_actions =
-  create_v10 ~slice_sequence ~start_at ~end_at ~available_at ~received_at ~bars
-    ~fx_rates ~corporate_actions ~borrow_observations:[]
-    ~cash_rate_observations:[]
 
 let bar state instrument_id =
   List.find_opt

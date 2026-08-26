@@ -7,15 +7,14 @@ type initialization = {
   metadata : Yojson.Safe.t;
   run_id : Id.Run.t;
   base_currency : string;
-  initial_cash : (string * Scalar.Money.t) list;
-  initial_portfolio : Initial_portfolio.t option;
+  initial_portfolio : Initial_portfolio.t;
   instruments : Instrument.t list;
   venue_calendars : Venue_calendar.t list;
   risk : Risk.t;
   execution_model : Execution_model.t;
   execution : Execution.t;
-  financing : Financing.policy option;
-  settlement : Settlement.policy option;
+  financing : Financing.policy;
+  settlement : Settlement.policy;
 }
 
 type identity = { name : Id.Strategy.t; version : string option }
@@ -41,10 +40,10 @@ let ratio value = string (Scalar.Ratio.to_decimal_string value)
 let timestamp value = string (Codec.ptime_to_string value)
 let instrument_id value = string (Id.Instrument.to_string value)
 
-let message ~protocol_version ~sequence:message_sequence ~message_type payload =
+let message ~sequence:message_sequence ~message_type payload =
   `Assoc
     [
-      ("strategy_protocol_version", string protocol_version);
+      ("strategy_protocol_version", string version);
       ("strategy_sequence", sequence message_sequence);
       ("message_type", string message_type);
       ("payload", payload);
@@ -101,10 +100,6 @@ let group_kind_to_string = function
   | Risk.Custom -> "custom"
 
 let nullable render = Option.fold ~none:`Null ~some:render
-
-let modern_protocol protocol_version =
-  List.mem protocol_version
-    [ "14"; "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6"; "5" ]
 
 let financing_to_yojson policy =
   `Assoc
@@ -186,33 +181,19 @@ let group_to_yojson (group : Risk.group) =
           ] );
     ]
 
-let risk_to_yojson ~protocol_version risk =
-  if modern_protocol protocol_version then
-    `Assoc
-      [
-        ("max_gross_exposure", money (Risk.max_gross_exposure risk));
-        ("max_leverage", ratio (Risk.max_leverage risk));
-        ("short_borrow_bps", `Int (Risk.short_borrow_bps risk));
-        ( "instrument_policies",
-          `List
-            (List.map instrument_policy_to_yojson
-               (Risk.instrument_policies risk)) );
-        ("groups", `List (List.map group_to_yojson (Risk.groups risk)));
-      ]
-  else
-    `Assoc
-      [
-        ("max_order_quantity", quantity (Risk.max_order_quantity risk));
-        ("max_long_position", quantity (Risk.max_long_position risk));
-        ("max_short_position", quantity (Risk.max_short_position risk));
-        ("max_gross_exposure", money (Risk.max_gross_exposure risk));
-        ("max_leverage", ratio (Risk.max_leverage risk));
-        ("initial_margin_bps", `Int (Risk.initial_margin_bps risk));
-        ("maintenance_margin_bps", `Int (Risk.maintenance_margin_bps risk));
-        ("short_borrow_bps", `Int (Risk.short_borrow_bps risk));
-      ]
+let risk_to_yojson risk =
+  `Assoc
+    [
+      ("max_gross_exposure", money (Risk.max_gross_exposure risk));
+      ("max_leverage", ratio (Risk.max_leverage risk));
+      ( "instrument_policies",
+        `List
+          (List.map instrument_policy_to_yojson (Risk.instrument_policies risk))
+      );
+      ("groups", `List (List.map group_to_yojson (Risk.groups risk)));
+    ]
 
-let execution_to_yojson ~protocol_version model execution =
+let execution_to_yojson model execution =
   let fee_component_to_yojson component =
     let value =
       match Fee_schedule.component_basis component with
@@ -253,148 +234,60 @@ let execution_to_yojson ~protocol_version model execution =
                (Fee_schedule.components schedule)) );
       ]
   in
-  if
-    List.mem protocol_version [ "14"; "13"; "12"; "11" ]
-    && List.mem
-         (Execution_model.name model)
-         [ "completed_bar_next_open_v1"; "completed_bar_adverse_touch_v1" ]
-  then
-    let costs = Execution.cost_model execution |> Option.get in
-    `Assoc
-      [
-        ("model", string (Execution_model.name model));
-        ( "configuration",
-          `Assoc
-            [
-              ("version", string "1");
-              ("participation_bps", `Int (Execution.participation_bps execution));
-              ( "fee_schedules",
-                `List
-                  (List.map fee_schedule_to_yojson
-                     (Execution.fee_schedules execution)) );
-              ( "spread_model",
-                `Assoc
-                  [
-                    ("model", string "fixed_half_spread_v1");
-                    ("half_spread_bps", `Int costs.half_spread_bps);
-                  ] );
-              ( "impact_model",
-                `Assoc
-                  [
-                    ("model", string "linear_participation_v1");
-                    ("coefficient_bps", `Int costs.impact_coefficient_bps);
-                    ( "missing_volume_policy",
-                      string
-                        (match costs.missing_volume_policy with
-                        | Execution.Reject_missing_volume -> "reject"
-                        | Zero_impact -> "zero_impact") );
-                  ] );
-            ] );
-      ]
-  else if
-    List.mem protocol_version [ "14"; "13"; "12" ]
-    && String.equal (Execution_model.name model) "quote_trade_v1"
-  then
-    `Assoc
-      [
-        ("model", string (Execution_model.name model));
-        ( "configuration",
-          `Assoc
-            [
-              ("version", string "1");
-              ("participation_bps", `Int (Execution.participation_bps execution));
-              ( "fee_schedules",
-                `List
-                  (List.map fee_schedule_to_yojson
-                     (Execution.fee_schedules execution)) );
-            ] );
-      ]
-  else if
-    List.mem protocol_version [ "14"; "13" ]
-    && String.equal (Execution_model.name model) "order_book_v1"
-  then
-    `Assoc
-      [
-        ("model", string (Execution_model.name model));
-        ( "configuration",
-          `Assoc
-            [
-              ("version", string "1");
-              ("participation_bps", `Int (Execution.participation_bps execution));
-              ( "fee_schedules",
-                `List
-                  (List.map fee_schedule_to_yojson
-                     (Execution.fee_schedules execution)) );
-              ( "max_depth_levels",
-                `Int (Option.get (Execution.book_depth_limit execution)) );
-            ] );
-      ]
-  else if
-    List.mem protocol_version [ "14"; "13"; "12"; "11"; "10"; "9"; "8"; "7" ]
-  then
-    `Assoc
-      [
-        ("model", string (Execution_model.name model));
-        ( "configuration",
-          `Assoc
-            [
-              ("version", string "2");
-              ("participation_bps", `Int (Execution.participation_bps execution));
-              ( "fee_schedules",
-                `List
-                  (List.map fee_schedule_to_yojson
-                     (Execution.fee_schedules execution)) );
-            ] );
-      ]
-  else if modern_protocol protocol_version then
-    `Assoc
-      [
-        ("model", string (Execution_model.name model));
-        ( "configuration",
-          `Assoc
-            [
-              ("version", string "1");
-              ("participation_bps", `Int (Execution.participation_bps execution));
-              ("fixed_fee", money (Execution.fixed_fee execution));
-              ("fee_bps", `Int (Execution.fee_bps execution));
-            ] );
-      ]
-  else
-    `Assoc
-      [
-        ("model", string (Execution_model.name model));
-        ("participation_bps", `Int (Execution.participation_bps execution));
-        ("fixed_fee", money (Execution.fixed_fee execution));
-        ("fee_bps", `Int (Execution.fee_bps execution));
-      ]
-
-let protocol_version initialization =
-  match initialization.scenario_contract_version with
-  | "16" -> "14"
-  | "15" -> "13"
-  | "14" -> "12"
-  | "13" -> "11"
-  | "12" -> "10"
-  | "11" -> "9"
-  | "10" -> "8"
-  | "9" -> "7"
-  | "8" -> "6"
-  | "7" -> "5"
-  | "6" -> "4"
-  | _ -> "3"
+  let configuration =
+    [
+      ("version", string "1");
+      ("participation_bps", `Int (Execution.participation_bps execution));
+      ( "fee_schedules",
+        `List
+          (List.map fee_schedule_to_yojson (Execution.fee_schedules execution))
+      );
+    ]
+  in
+  let configuration =
+    match Execution_model.name model with
+    | "completed_bar_next_open_v1" | "completed_bar_adverse_touch_v1" ->
+        let costs = Execution.cost_model execution |> Option.get in
+        configuration
+        @ [
+            ( "spread_model",
+              `Assoc
+                [
+                  ("model", string "fixed_half_spread_v1");
+                  ("half_spread_bps", `Int costs.half_spread_bps);
+                ] );
+            ( "impact_model",
+              `Assoc
+                [
+                  ("model", string "linear_participation_v1");
+                  ("coefficient_bps", `Int costs.impact_coefficient_bps);
+                  ( "missing_volume_policy",
+                    string
+                      (match costs.missing_volume_policy with
+                      | Execution.Reject_missing_volume -> "reject"
+                      | Zero_impact -> "zero_impact") );
+                ] );
+          ]
+    | "order_book_v1" ->
+        configuration
+        @ [
+            ( "max_depth_levels",
+              `Int (Option.get (Execution.book_depth_limit execution)) );
+          ]
+    | _ -> configuration
+  in
+  `Assoc
+    [
+      ("model", string (Execution_model.name model));
+      ("configuration", `Assoc configuration);
+    ]
 
 let initialize_message ~sequence:message_sequence initialization =
-  let protocol_version = protocol_version initialization in
   let instruments =
     List.sort
       (fun left right ->
         Id.Instrument.compare left.Instrument.id right.Instrument.id)
       initialization.instruments
-  in
-  let initial_cash =
-    List.sort
-      (fun (left, _) (right, _) -> String.compare left right)
-      initialization.initial_cash
   in
   let venue_calendars =
     List.sort
@@ -410,111 +303,48 @@ let initialize_message ~sequence:message_sequence initialization =
       ("scenario_sha256", string initialization.scenario_sha256);
       ("run_id", string (Id.Run.to_string initialization.run_id));
       ("base_currency", string initialization.base_currency);
-      ("initial_cash", `List (List.map cash_balance_to_yojson initial_cash));
+      ( "initial_portfolio",
+        Codec.initial_portfolio_to_yojson initialization.initial_portfolio );
+      ( "venue_calendars",
+        `List (List.map venue_calendar_to_yojson venue_calendars) );
+      ("financing", financing_to_yojson initialization.financing);
+      ("settlement", settlement_to_yojson initialization.settlement);
       ("instruments", `List (List.map instrument_to_yojson instruments));
-      ("risk", risk_to_yojson ~protocol_version initialization.risk);
+      ("risk", risk_to_yojson initialization.risk);
       ( "execution",
-        execution_to_yojson ~protocol_version initialization.execution_model
+        execution_to_yojson initialization.execution_model
           initialization.execution );
       ("metadata", initialization.metadata);
     ]
   in
-  let fields =
-    if
-      List.mem protocol_version
-        [ "14"; "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6" ]
-    then
-      let initial_portfolio =
-        Option.fold ~none:`Null ~some:Codec.initial_portfolio_to_yojson
-          initialization.initial_portfolio
-      in
-      List.concat
-        [
-          List.take 6 fields;
-          [
-            ("initial_portfolio", initial_portfolio);
-            ( "venue_calendars",
-              `List (List.map venue_calendar_to_yojson venue_calendars) );
-          ];
-          (if
-             List.mem protocol_version
-               [ "14"; "13"; "12"; "11"; "10"; "9"; "8" ]
-           then
-             [
-               ( "financing",
-                 Option.fold ~none:`Null ~some:financing_to_yojson
-                   initialization.financing );
-             ]
-           else []);
-          (if List.mem protocol_version [ "14"; "13"; "12"; "11"; "10"; "9" ]
-           then
-             [
-               ( "settlement",
-                 Option.fold ~none:`Null ~some:settlement_to_yojson
-                   initialization.settlement );
-             ]
-           else []);
-          List.drop 6 fields;
-        ]
-    else if modern_protocol protocol_version then
-      let initial_portfolio =
-        Option.fold ~none:`Null ~some:Codec.initial_portfolio_to_yojson
-          initialization.initial_portfolio
-      in
-      List.concat
-        [
-          List.take 6 fields;
-          [ ("initial_portfolio", initial_portfolio) ];
-          List.drop 6 fields;
-        ]
-    else fields
-  in
-  message ~protocol_version ~sequence:message_sequence
-    ~message_type:"initialize" (`Assoc fields)
+  message ~sequence:message_sequence ~message_type:"initialize" (`Assoc fields)
 
-let cash_attribution_to_yojson ~protocol_version
-    (balance : Account.cash_attribution) =
+let cash_attribution_to_yojson (balance : Account.cash_attribution) =
   `Assoc
-    ([
-       ("currency", string balance.currency);
-       ("amount", money balance.amount);
-       ("fx_rate", price balance.fx_rate);
-       ("base_value", money balance.base_value);
-     ]
-    @ (if List.mem protocol_version [ "14"; "13"; "12"; "11"; "10"; "9"; "8" ]
-       then
-         [
-           ("interest", money balance.interest);
-           ("base_interest", money balance.base_interest);
-         ]
-       else [])
-    @
-    if List.mem protocol_version [ "14"; "13"; "12"; "11"; "10"; "9" ] then
-      [
-        ("settled_amount", money balance.settled_amount);
-        ("unsettled_amount", money balance.unsettled_amount);
-        ("base_settled_value", money balance.base_settled_value);
-        ("base_unsettled_value", money balance.base_unsettled_value);
-      ]
-    else [])
+    [
+      ("currency", string balance.currency);
+      ("amount", money balance.amount);
+      ("fx_rate", price balance.fx_rate);
+      ("base_value", money balance.base_value);
+      ("interest", money balance.interest);
+      ("base_interest", money balance.base_interest);
+      ("settled_amount", money balance.settled_amount);
+      ("unsettled_amount", money balance.unsettled_amount);
+      ("base_settled_value", money balance.base_settled_value);
+      ("base_unsettled_value", money balance.base_unsettled_value);
+    ]
 
-let marked_position_to_yojson ~protocol_version
-    (position : Strategy.marked_position) =
+let marked_position_to_yojson (position : Strategy.marked_position) =
   `Assoc
-    ([
-       ("instrument_id", instrument_id position.instrument_id);
-       ("quantity", quantity position.quantity);
-       ("mark", price position.mark);
-       ("base_market_value", money position.base_market_value);
-       ("weight", Option.fold ~none:`Null ~some:weight position.weight);
-     ]
-    @
-    if List.mem protocol_version [ "14"; "13"; "12"; "11"; "10"; "9" ] then
-      [
-        ("settled_quantity", quantity position.settled_quantity);
-        ("unsettled_quantity", quantity position.unsettled_quantity);
-      ]
-    else [])
+    [
+      ("instrument_id", instrument_id position.instrument_id);
+      ("quantity", quantity position.quantity);
+      ("mark", price position.mark);
+      ("base_market_value", money position.base_market_value);
+      ("weight", Option.fold ~none:`Null ~some:weight position.weight);
+      ("settled_quantity", quantity position.settled_quantity);
+      ("unsettled_quantity", quantity position.unsettled_quantity);
+    ]
 
 let group_exposure_to_yojson (exposure : Risk.group_exposure) =
   `Assoc
@@ -528,7 +358,7 @@ let group_exposure_to_yojson (exposure : Risk.group_exposure) =
         Option.fold ~none:`Null ~some:weight exposure.concentration );
     ]
 
-let context_to_yojson ~protocol_version context =
+let context_to_yojson context =
   let portfolio = Strategy.portfolio context in
   let cash_balances =
     List.sort
@@ -566,103 +396,50 @@ let context_to_yojson ~protocol_version context =
       ("weights_available", `Bool (Option.is_some portfolio.cash_weight));
       ("cash_weight", Option.fold ~none:`Null ~some:weight portfolio.cash_weight);
       ( "cash_balances",
-        `List
-          (List.map
-             (cash_attribution_to_yojson ~protocol_version)
-             cash_balances) );
-      ( "positions",
-        `List (List.map (marked_position_to_yojson ~protocol_version) positions)
-      );
+        `List (List.map cash_attribution_to_yojson cash_balances) );
+      ("positions", `List (List.map marked_position_to_yojson positions));
+      ( "group_exposures",
+        `List (List.map group_exposure_to_yojson portfolio.group_exposures) );
     ]
-  in
-  let portfolio_fields =
-    if modern_protocol protocol_version then
-      portfolio_fields
-      @ [
-          ( "group_exposures",
-            `List (List.map group_exposure_to_yojson portfolio.group_exposures)
-          );
-        ]
-    else portfolio_fields
   in
   `Assoc
     [
       ("now", timestamp (Strategy.now context));
       ("portfolio", `Assoc portfolio_fields);
-      ( "working_orders",
-        `List
-          (List.map
-             (if
-                List.mem protocol_version
-                  [ "14"; "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6" ]
-              then Codec.order_to_yojson_v8
-              else Codec.order_to_yojson)
-             working_orders) );
+      ("working_orders", `List (List.map Codec.order_to_yojson working_orders));
       ("latest_bars", `List (List.map Codec.bar_to_yojson latest_bars));
     ]
 
-let event_to_yojson ~protocol_version = function
+let event_to_yojson = function
   | Strategy.Market_slice_closed market_slice ->
       `Assoc
         [
           ("type", string "market_slice_closed");
-          ( "market_slice",
-            if String.equal protocol_version "14" then
-              Codec.market_slice_to_yojson_v16 market_slice
-            else if String.equal protocol_version "13" then
-              Codec.market_slice_to_yojson_v15 market_slice
-            else if String.equal protocol_version "12" then
-              Codec.market_slice_to_yojson_v14 market_slice
-            else if String.equal protocol_version "11" then
-              Codec.market_slice_to_yojson_v13 market_slice
-            else if String.equal protocol_version "10" then
-              Codec.market_slice_to_yojson_v12 market_slice
-            else if String.equal protocol_version "9" then
-              Codec.market_slice_to_yojson_v11 market_slice
-            else if String.equal protocol_version "8" then
-              Codec.market_slice_to_yojson_v10 market_slice
-            else Codec.market_slice_to_yojson market_slice );
+          ("market_slice", Codec.market_slice_to_yojson market_slice);
         ]
   | Strategy.Fill_received fill ->
       `Assoc
         [
-          ("type", string "fill_received");
-          ( "fill",
-            if
-              List.mem protocol_version
-                [ "14"; "13"; "12"; "11"; "10"; "9"; "8"; "7" ]
-            then Codec.fill_to_yojson_v9 fill
-            else Codec.fill_to_yojson fill );
+          ("type", string "fill_received"); ("fill", Codec.fill_to_yojson fill);
         ]
   | Strategy.Order_updated order ->
       `Assoc
         [
           ("type", string "order_updated");
-          ( "order",
-            if
-              List.mem protocol_version
-                [ "14"; "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6" ]
-            then Codec.order_to_yojson_v8 order
-            else Codec.order_to_yojson order );
+          ("order", Codec.order_to_yojson order);
         ]
   | Strategy.Intent_rejected reason ->
       `Assoc [ ("type", string "intent_rejected"); ("reason", string reason) ]
 
-let event_message ?(protocol_version = version) ~sequence:message_sequence
-    context event =
-  message ~protocol_version ~sequence:message_sequence ~message_type:"event"
+let event_message ~sequence:message_sequence context event =
+  message ~sequence:message_sequence ~message_type:"event"
     (`Assoc
        [
-         ("context", context_to_yojson ~protocol_version context);
-         ("event", event_to_yojson ~protocol_version event);
+         ("context", context_to_yojson context); ("event", event_to_yojson event);
        ])
 
-let shutdown_message_for ~protocol_version ~sequence:message_sequence =
-  message ~protocol_version ~sequence:message_sequence ~message_type:"shutdown"
-    (`Assoc [])
-
 let shutdown_message ~sequence =
-  shutdown_message_for ~protocol_version:version ~sequence
+  message ~sequence ~message_type:"shutdown" (`Assoc [])
 
 let object_fields ~name ~expected = function
   | `Assoc fields ->
@@ -712,7 +489,7 @@ let parse_ready_payload json =
   let* version = optional_string ~name:"strategy_version" version_json in
   Ok (Ready { name; version })
 
-let parse_intents_payload ~protocol_version json =
+let parse_intents_payload json =
   let* fields =
     object_fields ~name:"strategy intents payload" ~expected:[ "intents" ] json
   in
@@ -727,19 +504,7 @@ let parse_intents_payload ~protocol_version json =
         (fun result value ->
           let* intents = result in
           let* intent =
-            Scenario.intent_of_yojson
-              ~contract_version:
-                (if String.equal protocol_version "14" then "16"
-                 else if List.mem protocol_version [ "14"; "13" ] then "15"
-                 else if String.equal protocol_version "12" then "14"
-                 else if String.equal protocol_version "11" then "13"
-                 else if String.equal protocol_version "10" then "12"
-                 else if String.equal protocol_version "9" then "11"
-                 else if String.equal protocol_version "8" then "10"
-                 else if String.equal protocol_version "7" then "9"
-                 else if String.equal protocol_version "6" then "8"
-                 else "7")
-              value
+            Scenario.intent_of_yojson value
             |> Result.map_error Diagnostic.to_human
           in
           Ok (intent :: intents))
@@ -751,7 +516,7 @@ let parse_stopped_payload json =
   let* _ = object_fields ~name:"strategy stopped payload" ~expected:[] json in
   Ok Stopped
 
-let response_of_yojson_result ~protocol_version ~expected_sequence json =
+let response_of_yojson_result ~expected_sequence json =
   let* fields =
     object_fields ~name:"strategy response"
       ~expected:
@@ -767,7 +532,7 @@ let response_of_yojson_result ~protocol_version ~expected_sequence json =
   let* supplied_version =
     required_string ~name:"strategy_protocol_version" version_json
   in
-  if not (String.equal supplied_version protocol_version) then
+  if not (String.equal supplied_version version) then
     Error ("unsupported strategy protocol version: " ^ supplied_version)
   else
     let* sequence_json = field fields "strategy_sequence" in
@@ -787,20 +552,19 @@ let response_of_yojson_result ~protocol_version ~expected_sequence json =
       let* payload = field fields "payload" in
       match message_type with
       | "ready" -> parse_ready_payload payload
-      | "intents" -> parse_intents_payload ~protocol_version payload
+      | "intents" -> parse_intents_payload payload
       | "stopped" -> parse_stopped_payload payload
       | "error" ->
           parse_error_payload payload
           |> Result.map (fun message -> Failed message)
       | value -> Error ("unsupported strategy response type: " ^ value)
 
-let response_of_yojson ?(protocol_version = version) ~expected_sequence json =
+let response_of_yojson ~expected_sequence json =
   let json_path =
     match json with
     | `Assoc fields -> (
         match List.assoc_opt "strategy_protocol_version" fields with
-        | Some (`String supplied)
-          when not (String.equal supplied protocol_version) ->
+        | Some (`String supplied) when not (String.equal supplied version) ->
             "$.strategy_protocol_version"
         | _ -> (
             match List.assoc_opt "strategy_sequence" fields with
@@ -832,14 +596,13 @@ let response_of_yojson ?(protocol_version = version) ~expected_sequence json =
            (Printf.sprintf "intent count is %d; limit is %d" observed
               Resource_limits.intents_per_batch))
   | _ ->
-      response_of_yojson_result ~protocol_version ~expected_sequence json
+      response_of_yojson_result ~expected_sequence json
       |> Result.map_error (fun message ->
           Diagnostic.make ~code:Diagnostic.Strategy_protocol
             ~phase:Diagnostic.Strategy ~sequence:expected_sequence ~json_path
             message)
 
-let response_of_string ?(protocol_version = version) ~expected_sequence document
-    =
+let response_of_string ~expected_sequence document =
   if String.length document > max_message_bytes then
     Error
       (Diagnostic.make ~code:Diagnostic.Resource_limit
@@ -849,7 +612,7 @@ let response_of_string ?(protocol_version = version) ~expected_sequence document
   else
     try
       let json = Yojson.Safe.from_string document in
-      response_of_yojson ~protocol_version ~expected_sequence json
+      response_of_yojson ~expected_sequence json
       |> Result.map (fun response -> (response, json))
     with Yojson.Json_error message as exception_ ->
       Error
@@ -863,17 +626,9 @@ let direction_to_string = function
   | Strategy_to_engine -> "strategy_to_engine"
 
 let transcript_record ~transcript_sequence ~direction ~message =
-  let protocol_version =
-    match message with
-    | `Assoc fields -> (
-        match List.assoc_opt "strategy_protocol_version" fields with
-        | Some (`String value) -> value
-        | _ -> version)
-    | _ -> version
-  in
   `Assoc
     [
-      ("strategy_protocol_version", string protocol_version);
+      ("strategy_protocol_version", string version);
       ("transcript_sequence", sequence transcript_sequence);
       ("direction", string (direction_to_string direction));
       ("message", message);

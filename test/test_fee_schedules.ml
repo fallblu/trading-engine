@@ -106,7 +106,7 @@ let rebate_settles_and_is_attributed () =
   Alcotest.check money_testable "negative rebate" (money "-0.1") fee;
   let request = request ~quantity_value:"1" () in
   let fill =
-    T.Fill.create_v9 ~id:(fill_id "rebate-fill")
+    T.Fill.create ~id:(fill_id "rebate-fill")
       ~order_id:(order_id "rebate-order") ~instrument_id:request.instrument_id
       ~quote_currency:"USD" ~side:T.Order.Buy ~quantity:(quantity "1")
       ~price:(price "100") ~fee ~fee_components

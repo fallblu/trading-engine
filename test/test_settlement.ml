@@ -60,7 +60,7 @@ let calendar_and_trade_date_accounting () =
 
 let slice ?(settlement_failures = []) sequence =
   let date = match sequence with 1L -> "02" | 2L -> "03" | _ -> "04" in
-  T.Market_slice.create_v11 ~slice_sequence:sequence
+  T.Market_slice.create ~slice_sequence:sequence
     ~start_at:(timestamp ("2026-01-" ^ date ^ "T14:30:00Z"))
     ~end_at:(timestamp ("2026-01-" ^ date ^ "T21:00:00Z"))
     ~available_at:(timestamp ("2026-01-" ^ date ^ "T21:00:01Z"))
@@ -68,15 +68,15 @@ let slice ?(settlement_failures = []) sequence =
     ~bars:[ bar sequence ]
     ~fx_rates:[ fx_mark () ]
     ~corporate_actions:[] ~borrow_observations:[] ~cash_rate_observations:[]
-    ~settlement_failures
+    ~settlement_failures ~lifecycle_events:[] ~market_events:[]
+    ~order_book_events:[]
   |> ok
 
 let runner ?(initial_cash = "1000") ?schedule policy run =
   let config =
-    T.Engine.config_v11 ~contract_version:"11" ~risk:(risk ())
-      ~venue_calendars:[]
+    T.Engine.config ~contract_version:"1" ~risk:(risk ()) ~venue_calendars:[]
       ~execution_model:(T.Execution_model.find "completed_bar_v1" |> ok)
-      ~execution:(execution ()) ~financing:T.Financing.legacy_policy
+      ~execution:(execution ()) ~financing:(financing_policy ())
       ~settlement:policy ~max_internal_events:1000
     |> ok
   in
@@ -98,7 +98,8 @@ let runner ?(initial_cash = "1000") ?schedule policy run =
   in
   let strategy_state = T.Scripted_strategy.create schedule |> ok in
   Runner.create ~run_id:(run_id run) ~scenario_sha256 ~config
-    ~initial_cash:[ ("USD", money initial_cash) ]
+    ~initial_portfolio:
+      (initial_portfolio ~cash:[ ("USD", money initial_cash) ] ())
     ~strategy_state
   |> ok
 

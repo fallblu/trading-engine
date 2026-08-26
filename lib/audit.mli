@@ -75,13 +75,6 @@ type event =
   | Settlement_instruction_created of Settlement.instruction
   | Settlement_completed of Settlement.instruction
   | Settlement_failed of Settlement.instruction
-  | Margin_limited of {
-      order_id : Id.Order.t;
-      instrument_id : Id.Instrument.t;
-      requested_quantity : Scalar.Quantity.t;
-      permitted_quantity : Scalar.Quantity.t;
-      price : Scalar.Price.t;
-    }
   | Fill_clipped of {
       order_id : Id.Order.t;
       instrument_id : Id.Instrument.t;
@@ -89,16 +82,6 @@ type event =
       permitted_quantity : Scalar.Quantity.t;
       price : Scalar.Price.t;
       limit : Risk.fill_limit;
-    }
-  | Borrow_fee_applied of {
-      instrument_id : Id.Instrument.t;
-      quote_currency : string;
-      short_quantity : Scalar.Quantity.t;
-      reference_price : Scalar.Price.t;
-      borrow_bps : int;
-      period_start : Ptime.t;
-      period_end : Ptime.t;
-      fee : Scalar.Money.t;
     }
   | Borrow_charge_applied of {
       observation : Financing.borrow_observation;

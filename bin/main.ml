@@ -80,8 +80,7 @@ let success_to_yojson success =
             ("rejected_orders", int64 counts.rejected_orders);
           ] );
       ( "valuation",
-        Trading_engine.Codec.account_valuation_to_yojson ~contract_version:"16"
-          success.valuation );
+        Trading_engine.Codec.account_valuation_to_yojson success.valuation );
       ( "artifacts",
         `Assoc
           [
