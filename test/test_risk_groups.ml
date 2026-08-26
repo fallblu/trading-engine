@@ -40,10 +40,9 @@ let setup ?(groups = []) ?(shorting_allowed = true) () =
     ]
   in
   let risk =
-    T.Risk.create_v7 ~base_currency:"USD" ~instruments:[ first; second ]
+    T.Risk.create ~base_currency:"USD" ~instruments:[ first; second ]
       ~instrument_policies:policies ~groups ~max_gross_exposure:(money "100000")
       ~max_leverage:(T.Scalar.Ratio.of_decimal_string "10" |> ok)
-      ~short_borrow_bps:0
     |> ok
   in
   (first, second, risk)
@@ -52,11 +51,10 @@ let exact_coverage_and_short_policy () =
   let first = instrument ~id:"first" ~symbol:"FIRST" () in
   let second = instrument ~id:"second" ~symbol:"SECOND" () in
   let result =
-    T.Risk.create_v7 ~base_currency:"USD" ~instruments:[ first; second ]
+    T.Risk.create ~base_currency:"USD" ~instruments:[ first; second ]
       ~instrument_policies:[ policy first () ]
       ~groups:[] ~max_gross_exposure:(money "100000")
       ~max_leverage:(T.Scalar.Ratio.of_decimal_string "10" |> ok)
-      ~short_borrow_bps:0
   in
   Alcotest.(check string)
     "policy required for every instrument"
@@ -141,7 +139,7 @@ let initialized_positions_use_instrument_margin_and_groups () =
   let second = instrument ~id:"second" ~symbol:"SECOND" () in
   let group_limit = limits ~gross:"150" () in
   let risk =
-    T.Risk.create_v7 ~base_currency:"USD" ~instruments:[ first; second ]
+    T.Risk.create ~base_currency:"USD" ~instruments:[ first; second ]
       ~instrument_policies:
         [
           policy first ~initial_margin_bps:10_000 ~maintenance_margin_bps:5000
@@ -151,7 +149,6 @@ let initialized_positions_use_instrument_margin_and_groups () =
       ~groups:[ group "initial-group" [ first; second ] group_limit ]
       ~max_gross_exposure:(money "100000")
       ~max_leverage:(T.Scalar.Ratio.of_decimal_string "10" |> ok)
-      ~short_borrow_bps:0
     |> ok
   in
   let account = test_account () in
@@ -195,7 +192,7 @@ let reserved_result ?(side = T.Order.Buy) ?(initial_cash = "10000")
          group_limits)
   in
   let risk =
-    T.Risk.create_v7 ~base_currency:"USD" ~instruments:[ first; second ]
+    T.Risk.create ~base_currency:"USD" ~instruments:[ first; second ]
       ~instrument_policies:
         [
           policy first ~max_long ~max_short ~max_notional ~shorting_allowed
@@ -206,7 +203,6 @@ let reserved_result ?(side = T.Order.Buy) ?(initial_cash = "10000")
         ]
       ~groups ~max_gross_exposure:(money max_gross)
       ~max_leverage:(T.Scalar.Ratio.of_decimal_string max_leverage |> ok)
-      ~short_borrow_bps:0
     |> ok
   in
   let account = test_account ~initial_cash:[ ("USD", money initial_cash) ] () in
@@ -328,7 +324,7 @@ let constructors_reject_ambiguous_policies () =
           ~group_kind:T.Risk.Custom ~instrument_ids:[ first.id; first.id ]
           ~limits:valid_limits))
 
-let create_v7_rejects_inconsistent_configuration () =
+let create_rejects_inconsistent_configuration () =
   let first = instrument ~id:"first" ~symbol:"FIRST" () in
   let second = instrument ~id:"second" ~symbol:"SECOND" () in
   let first_policy = policy first () in
@@ -341,22 +337,19 @@ let create_v7_rejects_inconsistent_configuration () =
   in
   let create ?(base_currency = "USD") ?(instruments = [ first; second ])
       ?(policies = [ first_policy; second_policy ]) ?(groups = [ valid_group ])
-      ?(max_gross = "100000") ?(short_borrow_bps = 0) () =
-    T.Risk.create_v7 ~base_currency ~instruments ~instrument_policies:policies
+      ?(max_gross = "100000") () =
+    T.Risk.create ~base_currency ~instruments ~instrument_policies:policies
       ~groups ~max_gross_exposure:(money max_gross)
       ~max_leverage:(T.Scalar.Ratio.of_decimal_string "10" |> ok)
-      ~short_borrow_bps
   in
   List.iter
     (fun result ->
       Alcotest.(check bool)
-        "invalid v7 configuration" true (Result.is_error result))
+        "invalid risk configuration" true (Result.is_error result))
     [
       create ~base_currency:"" ();
       create ~instruments:[] ~policies:[] ~groups:[] ();
       create ~max_gross:"0" ();
-      create ~short_borrow_bps:(-1) ();
-      create ~short_borrow_bps:10_001 ();
       create ~instruments:[ first; first ] ();
       create ~policies:[ first_policy; unknown_policy ] ();
       create ~policies:[ first_policy; first_policy ] ();
@@ -379,7 +372,7 @@ let admission_result ?(side = T.Order.Buy) ?(initial_cash = "10000")
          group_limits)
   in
   let risk =
-    T.Risk.create_v7 ~base_currency:"USD" ~instruments:[ first; second ]
+    T.Risk.create ~base_currency:"USD" ~instruments:[ first; second ]
       ~instrument_policies:
         [
           policy first ~max_order ~max_long ~max_short ~max_notional
@@ -390,7 +383,6 @@ let admission_result ?(side = T.Order.Buy) ?(initial_cash = "10000")
         ]
       ~groups ~max_gross_exposure:(money max_gross)
       ~max_leverage:(T.Scalar.Ratio.of_decimal_string max_leverage |> ok)
-      ~short_borrow_bps:0
     |> ok
   in
   T.Risk.check risk
@@ -400,7 +392,7 @@ let admission_result ?(side = T.Order.Buy) ?(initial_cash = "10000")
     ~fx_rates:[ ("USD", price "1") ]
     (request ~instrument:first.id ~side ~quantity_value:"10" ())
 
-let admission_enforces_every_v7_limit () =
+let admission_enforces_every_limit () =
   let check_error expected result =
     Alcotest.(check string) "admission error" expected (error result)
   in
@@ -436,12 +428,11 @@ let group_exposures_include_short_and_zero_equity () =
   let first = instrument ~id:"first" ~symbol:"FIRST" () in
   let second = instrument ~id:"second" ~symbol:"SECOND" () in
   let risk =
-    T.Risk.create_v7 ~base_currency:"USD" ~instruments:[ first; second ]
+    T.Risk.create ~base_currency:"USD" ~instruments:[ first; second ]
       ~instrument_policies:[ policy first (); policy second () ]
       ~groups:[ group "group" [ first ] (limits ~gross:"100000" ()) ]
       ~max_gross_exposure:(money "100000")
       ~max_leverage:(T.Scalar.Ratio.of_decimal_string "10" |> ok)
-      ~short_borrow_bps:0
     |> ok
   in
   let order =
@@ -476,7 +467,7 @@ let initial_result ?(side = T.Order.Buy) ?(initial_cash = "10000")
          group_limits)
   in
   let risk =
-    T.Risk.create_v7 ~base_currency:"USD" ~instruments:[ first; second ]
+    T.Risk.create ~base_currency:"USD" ~instruments:[ first; second ]
       ~instrument_policies:
         [
           policy first ~max_long ~max_short ~max_notional ~shorting_allowed
@@ -487,7 +478,6 @@ let initial_result ?(side = T.Order.Buy) ?(initial_cash = "10000")
         ]
       ~groups ~max_gross_exposure:(money max_gross)
       ~max_leverage:(T.Scalar.Ratio.of_decimal_string max_leverage |> ok)
-      ~short_borrow_bps:0
     |> ok
   in
   let order =
@@ -504,7 +494,7 @@ let initial_result ?(side = T.Order.Buy) ?(initial_cash = "10000")
   in
   T.Risk.check_initial risk valuation
 
-let initial_portfolio_enforces_every_v7_limit () =
+let initial_portfolio_enforces_every_limit () =
   let check_error expected result =
     Alcotest.(check string) "initial portfolio error" expected (error result)
   in
@@ -535,25 +525,35 @@ let initial_portfolio_enforces_every_v7_limit () =
   initial_result ~group_limits:(limits ~concentration:"0.05" ()) ()
   |> check_error "initial portfolio exceeds group group-a maximum concentration"
 
-let legacy_and_policy_boundaries_are_rejected () =
+let risk_and_policy_boundaries_are_rejected () =
   let first = instrument ~id:"first" ~symbol:"FIRST" () in
   let large_lot = instrument ~id:"large" ~symbol:"LARGE" ~lot_size:"2" () in
   let ratio = T.Scalar.Ratio.of_decimal_string "10" |> ok in
   let create ?(base_currency = "USD") ?(instruments = [ first ])
       ?(max_order = "10") ?(max_long = "10") ?(max_short = "10")
-      ?(max_gross = "1000") ?(initial = 5000) ?(maintenance = 2500)
-      ?(borrow = 0) () =
-    T.Risk.create ~base_currency ~instruments
-      ~max_order_quantity:(quantity max_order)
-      ~max_long_position:(quantity max_long)
-      ~max_short_position:(quantity max_short)
-      ~max_gross_exposure:(money max_gross) ~max_leverage:ratio
-      ~initial_margin_bps:initial ~maintenance_margin_bps:maintenance
-      ~short_borrow_bps:borrow
+      ?(max_gross = "1000") ?(initial = 5000) ?(maintenance = 2500) () =
+    let instrument_policies =
+      List.map
+        (fun instrument ->
+          T.Risk.create_instrument_policy ~instrument
+            ~max_order_quantity:(quantity max_order)
+            ~max_long_position:(quantity max_long)
+            ~max_short_position:(quantity max_short) ~max_notional_exposure:None
+            ~initial_margin_bps:initial ~maintenance_margin_bps:maintenance
+            ~shorting_allowed:true)
+        instruments
+    in
+    match List.find_opt Result.is_error instrument_policies with
+    | Some (Error message) -> Error message
+    | Some (Ok _) -> assert false
+    | None ->
+        T.Risk.create ~base_currency ~instruments
+          ~instrument_policies:(List.map Result.get_ok instrument_policies)
+          ~groups:[] ~max_gross_exposure:(money max_gross) ~max_leverage:ratio
   in
   List.iter
     (fun result ->
-      Alcotest.(check bool) "invalid legacy risk" true (Result.is_error result))
+      Alcotest.(check bool) "invalid risk" true (Result.is_error result))
     [
       create ~base_currency:"" ();
       create ~max_order:"0" ();
@@ -565,8 +565,6 @@ let legacy_and_policy_boundaries_are_rejected () =
       create ~initial:10_001 ();
       create ~maintenance:10_001 ();
       create ~initial:1000 ~maintenance:2000 ();
-      create ~borrow:(-1) ();
-      create ~borrow:10_001 ();
       create ~instruments:[] ();
       create ~instruments:[ large_lot ] ~max_order:"1" ();
       create ~instruments:[ large_lot ] ~max_long:"1" ();
@@ -594,29 +592,30 @@ let legacy_and_policy_boundaries_are_rejected () =
     ]
 
 let public_checks_cover_success_and_diagnostics () =
-  let legacy = risk ~max_order:"7" ~max_long:"7" ~max_short:"7" () in
+  let configured = risk ~max_order:"7" ~max_long:"7" ~max_short:"7" () in
   Alcotest.(check bool)
     "position accepted" true
-    (Result.is_ok (T.Risk.check_position legacy (quantity "7")));
+    (Result.is_ok (T.Risk.check_position configured (quantity "7")));
   Alcotest.(check string)
     "long rejected" "position would exceed the maximum long position"
-    (T.Risk.check_position legacy (quantity "8") |> error);
+    (T.Risk.check_position configured (quantity "8") |> error);
   Alcotest.(check string)
     "short rejected" "position would exceed the maximum short position"
-    (T.Risk.check_position legacy (quantity "-8") |> error);
+    (T.Risk.check_position configured (quantity "-8") |> error);
   Alcotest.(check string)
     "unknown policy" "position refers to an unknown instrument risk policy"
-    (T.Risk.check_position_for legacy (instrument_id "unknown") (quantity "1")
+    (T.Risk.check_position_for configured (instrument_id "unknown")
+       (quantity "1")
     |> error);
   let unknown_request = request ~instrument:(instrument_id "unknown") () in
   Alcotest.(check string)
     "unknown instrument" "order refers to an unknown instrument"
-    (T.Risk.check legacy ~account:(test_account ()) ~oms:T.Oms.empty ~marks:[]
-       ~fx_rates:[] unknown_request
+    (T.Risk.check configured ~account:(test_account ()) ~oms:T.Oms.empty
+       ~marks:[] ~fx_rates:[] unknown_request
     |> error);
   Alcotest.(check string)
-    "legacy order limit" "order exceeds the maximum order quantity"
-    (risk_check legacy ~account:(test_account ()) ~oms:T.Oms.empty
+    "order limit" "order exceeds the instrument maximum order quantity"
+    (risk_check configured ~account:(test_account ()) ~oms:T.Oms.empty
        (request ~quantity_value:"8" ())
     |> error);
   (match reserved_result ~include_mark:false () with
@@ -641,7 +640,7 @@ let public_checks_cover_success_and_diagnostics () =
     (Result.is_ok
        (admission_result ~group_limits:(limits ~gross:"10000" ()) ()))
 
-let legacy_post_fill_covers_gross_and_reduction () =
+let post_fill_covers_gross_and_reduction () =
   let first = instrument () in
   let before_account = test_account () in
   let before =
@@ -660,7 +659,7 @@ let legacy_post_fill_covers_gross_and_reduction () =
        ~after_position:(quantity "10") ~before ~after
    with
   | Error (T.Risk.Limit (T.Risk.Maximum_gross_exposure _)) -> ()
-  | _ -> Alcotest.fail "expected legacy gross fill limit");
+  | _ -> Alcotest.fail "expected gross fill limit");
   Alcotest.(check bool)
     "gross-reducing fill accepted" true
     (Result.is_ok
@@ -681,18 +680,18 @@ let tests =
       clipping_taxonomy_is_exact;
     Alcotest.test_case "constructors reject ambiguous policies" `Quick
       constructors_reject_ambiguous_policies;
-    Alcotest.test_case "v7 rejects inconsistent configuration" `Quick
-      create_v7_rejects_inconsistent_configuration;
-    Alcotest.test_case "admission enforces every v7 limit" `Quick
-      admission_enforces_every_v7_limit;
+    Alcotest.test_case "current constructor rejects inconsistent configuration"
+      `Quick create_rejects_inconsistent_configuration;
+    Alcotest.test_case "admission enforces every current limit" `Quick
+      admission_enforces_every_limit;
     Alcotest.test_case "group exposures include short and zero equity" `Quick
       group_exposures_include_short_and_zero_equity;
-    Alcotest.test_case "initial portfolio enforces every v7 limit" `Quick
-      initial_portfolio_enforces_every_v7_limit;
-    Alcotest.test_case "legacy and policy boundaries are rejected" `Quick
-      legacy_and_policy_boundaries_are_rejected;
+    Alcotest.test_case "initial portfolio enforces every current limit" `Quick
+      initial_portfolio_enforces_every_limit;
+    Alcotest.test_case "risk and policy boundaries are rejected" `Quick
+      risk_and_policy_boundaries_are_rejected;
     Alcotest.test_case "public checks cover success and diagnostics" `Quick
       public_checks_cover_success_and_diagnostics;
-    Alcotest.test_case "legacy post-fill covers gross and reduction" `Quick
-      legacy_post_fill_covers_gross_and_reduction;
+    Alcotest.test_case "post-fill covers gross and reduction" `Quick
+      post_fill_covers_gross_and_reduction;
   ]

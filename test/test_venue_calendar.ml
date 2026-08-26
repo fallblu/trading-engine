@@ -95,7 +95,7 @@ let ambiguous_phase_policies_are_rejected () =
 
 let scenario_contract_requires_calendar_coverage () =
   let document =
-    Yojson.Safe.from_file "../contracts/v5/fixtures/demo.scenario.json"
+    Yojson.Safe.from_file "../contracts/v1/fixtures/demo.scenario.json"
   in
   let scenario = T.Scenario.of_yojson document |> ok in
   Alcotest.(check int)
@@ -144,15 +144,6 @@ let scenario_contract_requires_calendar_coverage () =
   Alcotest.(check (option string))
     "coverage path" (Some "$.venue_calendars") uncovered.context.json_path
 
-let v4_remains_a_calendar_free_compatibility_contract () =
-  let scenario =
-    T.Scenario.read_file "../contracts/v4/fixtures/demo.scenario.json" |> ok
-  in
-  Alcotest.(check string) "v4 retained" "4" scenario.contract_version;
-  Alcotest.(check int)
-    "no inferred calendars" 0
-    (List.length scenario.venue_calendars)
-
 let tests =
   [
     Alcotest.test_case "explicit policies and missing dates" `Quick
@@ -161,6 +152,4 @@ let tests =
       ambiguous_phase_policies_are_rejected;
     Alcotest.test_case "scenario calendar coverage" `Quick
       scenario_contract_requires_calendar_coverage;
-    Alcotest.test_case "v4 compatibility does not infer calendars" `Quick
-      v4_remains_a_calendar_free_compatibility_contract;
   ]

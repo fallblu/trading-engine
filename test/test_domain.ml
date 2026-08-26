@@ -95,7 +95,9 @@ let market_slice_validation () =
       ~received_at
       ~bars:[ bar 1L ]
       ~fx_rates:[ fx_mark () ]
-      ~corporate_actions:[]
+      ~corporate_actions:[] ~borrow_observations:[] ~cash_rate_observations:[]
+      ~settlement_failures:[] ~lifecycle_events:[] ~market_events:[]
+      ~order_book_events:[]
   in
   Alcotest.(check bool)
     "premature availability rejected" true (Result.is_error result)
@@ -187,7 +189,7 @@ let market_event_validation () =
   Alcotest.(check bool)
     "nonmonotonic ingest rejected" true
     (Result.is_error
-       (T.Market_slice.create_v14 ~slice_sequence:base.slice_sequence
+       (T.Market_slice.create ~slice_sequence:base.slice_sequence
           ~start_at:base.start_at ~end_at:base.end_at
           ~available_at:base.available_at ~received_at:base.received_at
           ~bars:base.bars ~fx_rates:base.fx_rates
@@ -196,7 +198,7 @@ let market_event_validation () =
           ~cash_rate_observations:base.cash_rate_observations
           ~settlement_failures:base.settlement_failures
           ~lifecycle_events:base.lifecycle_events
-          ~market_events:[ first; second ]))
+          ~market_events:[ first; second ] ~order_book_events:[]))
 
 let order_book_event_validation () =
   let instrument_id = instrument_id "book-validation" in
@@ -477,23 +479,19 @@ let risk_limits_cover_lots () =
   Alcotest.(check bool)
     "order limit smaller than lot rejected" true
     (Result.is_error
-       (T.Risk.create ~base_currency:"USD" ~instruments:[ configured ]
+       (T.Risk.create_instrument_policy ~instrument:configured
           ~max_order_quantity:(quantity "5") ~max_long_position:(quantity "100")
-          ~max_short_position:(quantity "100")
-          ~max_gross_exposure:(money "1000000")
-          ~max_leverage:(T.Scalar.Ratio.of_decimal_string "2" |> ok)
+          ~max_short_position:(quantity "100") ~max_notional_exposure:None
           ~initial_margin_bps:5000 ~maintenance_margin_bps:2500
-          ~short_borrow_bps:100));
+          ~shorting_allowed:true));
   Alcotest.(check bool)
     "position limit smaller than lot rejected" true
     (Result.is_error
-       (T.Risk.create ~base_currency:"USD" ~instruments:[ configured ]
+       (T.Risk.create_instrument_policy ~instrument:configured
           ~max_order_quantity:(quantity "100") ~max_long_position:(quantity "5")
-          ~max_short_position:(quantity "100")
-          ~max_gross_exposure:(money "1000000")
-          ~max_leverage:(T.Scalar.Ratio.of_decimal_string "2" |> ok)
+          ~max_short_position:(quantity "100") ~max_notional_exposure:None
           ~initial_margin_bps:5000 ~maintenance_margin_bps:2500
-          ~short_borrow_bps:100))
+          ~shorting_allowed:true))
 
 let typed_metric_validation () =
   let numeric = T.Metric.numeric_of_string "-12.5" |> ok in

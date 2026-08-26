@@ -440,7 +440,7 @@ let order_book_event_to_yojson event =
               string (Market_event.aggressor_side_to_string aggressor_side) );
           ])
 
-let versioned_market_slice_to_yojson ~contract_version market_slice =
+let market_slice_to_yojson market_slice =
   `Assoc
     [
       ("slice_sequence", int64 market_slice.Market_slice.slice_sequence);
@@ -454,108 +454,33 @@ let versioned_market_slice_to_yojson ~contract_version market_slice =
         `List
           (List.map corporate_action_to_yojson market_slice.corporate_actions)
       );
+      ( "borrow_observations",
+        `List
+          (List.map borrow_observation_to_yojson
+             market_slice.Market_slice.borrow_observations) );
+      ( "cash_rate_observations",
+        `List
+          (List.map cash_rate_observation_to_yojson
+             market_slice.Market_slice.cash_rate_observations) );
+      ( "settlement_failures",
+        `List
+          (List.map settlement_failure_to_yojson
+             market_slice.Market_slice.settlement_failures) );
+      ( "lifecycle_events",
+        `List
+          (List.map lifecycle_event_to_yojson
+             market_slice.Market_slice.lifecycle_events) );
+      ( "market_events",
+        `List
+          (List.map market_event_to_yojson
+             market_slice.Market_slice.market_events) );
+      ( "order_book_events",
+        `List
+          (List.map order_book_event_to_yojson
+             market_slice.Market_slice.order_book_events) );
     ]
-  |> function
-  | `Assoc fields
-    when List.mem contract_version [ "16"; "15"; "14"; "13"; "12"; "11"; "10" ]
-    ->
-      let settlement =
-        if List.mem contract_version [ "16"; "15"; "14"; "13"; "12"; "11" ] then
-          [
-            ( "settlement_failures",
-              `List
-                (List.map settlement_failure_to_yojson
-                   market_slice.Market_slice.settlement_failures) );
-          ]
-        else []
-      in
-      let lifecycle =
-        if List.mem contract_version [ "16"; "15"; "14"; "13"; "12" ] then
-          [
-            ( "lifecycle_events",
-              `List
-                (List.map lifecycle_event_to_yojson
-                   market_slice.Market_slice.lifecycle_events) );
-          ]
-        else []
-      in
-      let market_events =
-        if List.mem contract_version [ "16"; "15"; "14" ] then
-          [
-            ( "market_events",
-              `List
-                (List.map market_event_to_yojson
-                   market_slice.Market_slice.market_events) );
-          ]
-        else []
-      in
-      let order_book_events =
-        if List.mem contract_version [ "16"; "15" ] then
-          [
-            ( "order_book_events",
-              `List
-                (List.map order_book_event_to_yojson
-                   market_slice.Market_slice.order_book_events) );
-          ]
-        else []
-      in
-      `Assoc
-        (fields
-        @ [
-            ( "borrow_observations",
-              `List
-                (List.map borrow_observation_to_yojson
-                   market_slice.Market_slice.borrow_observations) );
-            ( "cash_rate_observations",
-              `List
-                (List.map cash_rate_observation_to_yojson
-                   market_slice.Market_slice.cash_rate_observations) );
-          ]
-        @ settlement @ lifecycle @ market_events @ order_book_events)
-  | json -> json
-
-let market_slice_to_yojson market_slice =
-  versioned_market_slice_to_yojson ~contract_version:"9" market_slice
-
-let market_slice_to_yojson_v10 market_slice =
-  versioned_market_slice_to_yojson ~contract_version:"10" market_slice
-
-let market_slice_to_yojson_v11 market_slice =
-  versioned_market_slice_to_yojson ~contract_version:"11" market_slice
-
-let market_slice_to_yojson_v12 market_slice =
-  versioned_market_slice_to_yojson ~contract_version:"12" market_slice
-
-let market_slice_to_yojson_v13 market_slice =
-  versioned_market_slice_to_yojson ~contract_version:"13" market_slice
-
-let market_slice_to_yojson_v14 market_slice =
-  versioned_market_slice_to_yojson ~contract_version:"14" market_slice
-
-let market_slice_to_yojson_v15 market_slice =
-  versioned_market_slice_to_yojson ~contract_version:"15" market_slice
-
-let market_slice_to_yojson_v16 market_slice =
-  versioned_market_slice_to_yojson ~contract_version:"16" market_slice
 
 let request_fields request =
-  let kind, limit_price =
-    match request.Order.kind with
-    | Order.Market -> ("market", `Null)
-    | Order.Limit value -> ("limit", price value)
-    | Order.Stop value -> ("stop", price value)
-    | Order.Stop_limit { limit_price; _ } -> ("stop_limit", price limit_price)
-  in
-  [
-    ("instrument_id", instrument_id request.instrument_id);
-    ("side", string (Order.side_to_string request.side));
-    ("quantity", quantity request.quantity);
-    ("order_kind", string kind);
-    ("limit_price", limit_price);
-    ("origin", string (Order.origin_to_string request.origin));
-  ]
-
-let request_fields_v8 request =
   let kind, trigger_price, limit_price =
     match request.Order.kind with
     | Order.Market -> ("market", `Null, `Null)
@@ -596,27 +521,6 @@ let order_to_yojson order =
     | Order.Rejected reason -> string reason
     | _ -> `Null
   in
-  `Assoc
-    ((("order_id", order_id order.id) :: request_fields order.request)
-    @ [
-        ("created_event_id", string (Id.Event.to_string order.created_event_id));
-        ("updated_event_id", string (Id.Event.to_string order.updated_event_id));
-        ("created_sequence", int64 order.created_sequence);
-        ("created_at", timestamp order.created_at);
-        ( "eligible_after_slice_sequence",
-          int64 order.eligible_after_slice_sequence );
-        ("filled_quantity", quantity order.filled_quantity);
-        ("filled_notional", money order.filled_notional);
-        ("status", string (Order.status_to_string order.status));
-        ("rejection_reason", rejection_reason);
-      ])
-
-let order_to_yojson_v8 order =
-  let rejection_reason =
-    match order.Order.status with
-    | Order.Rejected reason -> string reason
-    | _ -> `Null
-  in
   let triggered_at, triggered_slice_sequence =
     match order.trigger_state with
     | Some (Order.Triggered { triggered_at; triggered_slice_sequence }) ->
@@ -624,7 +528,7 @@ let order_to_yojson_v8 order =
     | Some Order.Dormant | None -> (`Null, `Null)
   in
   `Assoc
-    ((("order_id", order_id order.id) :: request_fields_v8 order.request)
+    ((("order_id", order_id order.id) :: request_fields order.request)
     @ [
         ("created_event_id", string (Id.Event.to_string order.created_event_id));
         ("updated_event_id", string (Id.Event.to_string order.updated_event_id));
@@ -640,12 +544,15 @@ let order_to_yojson_v8 order =
         ("rejection_reason", rejection_reason);
       ])
 
-let versioned_order_to_yojson ~contract_version order =
-  if
-    List.mem contract_version
-      [ "16"; "15"; "14"; "13"; "12"; "11"; "10"; "9"; "8" ]
-  then order_to_yojson_v8 order
-  else order_to_yojson order
+let calculated_fee_component_to_yojson component =
+  `Assoc
+    [
+      ("name", string component.Fee_schedule.name);
+      ("kind", string component.kind);
+      ("currency", string component.currency);
+      ("amount", money component.amount);
+      ("quote_amount", money component.quote_amount);
+    ]
 
 let fill_to_yojson fill =
   `Assoc
@@ -659,32 +566,12 @@ let fill_to_yojson fill =
       ("price", price fill.price);
       ("notional", money fill.notional);
       ("fee", money fill.fee);
+      ( "fee_components",
+        `List (List.map calculated_fee_component_to_yojson fill.fee_components)
+      );
       ("executed_at", timestamp fill.executed_at);
       ("slice_sequence", int64 fill.slice_sequence);
     ]
-
-let calculated_fee_component_to_yojson component =
-  `Assoc
-    [
-      ("name", string component.Fee_schedule.name);
-      ("kind", string component.kind);
-      ("currency", string component.currency);
-      ("amount", money component.amount);
-      ("quote_amount", money component.quote_amount);
-    ]
-
-let fill_to_yojson_v9 fill =
-  match fill_to_yojson fill with
-  | `Assoc fields ->
-      `Assoc
-        (fields
-        @ [
-            ( "fee_components",
-              `List
-                (List.map calculated_fee_component_to_yojson
-                   fill.Fill.fee_components) );
-          ])
-  | _ -> assert false
 
 let initial_position_to_yojson (position : Initial_portfolio.position) =
   `Assoc
@@ -726,12 +613,26 @@ let initial_portfolio_to_yojson (portfolio : Initial_portfolio.t) =
       ("fx_rates", `List fx_rates);
     ]
 
+let execution_fee_component_attribution_to_yojson component =
+  `Assoc
+    [
+      ("name", string component.Account.name);
+      ("kind", string component.kind);
+      ("currency", string component.currency);
+      ("amount", money component.amount);
+      ("quote_currency", string component.quote_currency);
+      ("quote_amount", money component.quote_amount);
+      ("base_amount", money component.base_amount);
+    ]
+
 let position_attribution_to_yojson position =
   `Assoc
     [
       ("instrument_id", instrument_id position.Account.instrument_id);
       ("quote_currency", string position.quote_currency);
       ("quantity", quantity position.quantity);
+      ("settled_quantity", quantity position.settled_quantity);
+      ("unsettled_quantity", quantity position.unsettled_quantity);
       ("mark", price position.mark);
       ("fx_rate", price position.fx_rate);
       ("market_value", money position.market_value);
@@ -746,82 +647,32 @@ let position_attribution_to_yojson position =
       ("base_dividend_pnl", money position.base_dividend_pnl);
       ("execution_fees", money position.execution_fees);
       ("base_execution_fees", money position.base_execution_fees);
+      ( "execution_fee_components",
+        `List
+          (List.map execution_fee_component_attribution_to_yojson
+             position.execution_fee_components) );
       ("borrow_fees", money position.borrow_fees);
       ("base_borrow_fees", money position.base_borrow_fees);
       ("total_fees", money position.total_fees);
       ("base_total_fees", money position.base_total_fees);
     ]
 
-let execution_fee_component_attribution_to_yojson component =
-  `Assoc
-    [
-      ("name", string component.Account.name);
-      ("kind", string component.kind);
-      ("currency", string component.currency);
-      ("amount", money component.amount);
-      ("quote_currency", string component.quote_currency);
-      ("quote_amount", money component.quote_amount);
-      ("base_amount", money component.base_amount);
-    ]
-
-let position_attribution_to_yojson_v9 position =
-  match position_attribution_to_yojson position with
-  | `Assoc fields ->
-      `Assoc
-        (fields
-        @ [
-            ( "execution_fee_components",
-              `List
-                (List.map execution_fee_component_attribution_to_yojson
-                   position.Account.execution_fee_components) );
-          ])
-  | _ -> assert false
-
-let position_attribution_to_yojson_v11 position =
-  match position_attribution_to_yojson_v9 position with
-  | `Assoc fields ->
-      `Assoc
-        (fields
-        @ [
-            ("settled_quantity", quantity position.Account.settled_quantity);
-            ("unsettled_quantity", quantity position.unsettled_quantity);
-          ])
-  | _ -> assert false
-
 let cash_attribution_to_yojson cash =
   `Assoc
     [
       ("currency", string cash.Account.currency);
       ("amount", money cash.amount);
+      ("settled_amount", money cash.settled_amount);
+      ("unsettled_amount", money cash.unsettled_amount);
       ("fx_rate", price cash.fx_rate);
       ("base_value", money cash.base_value);
+      ("base_settled_value", money cash.base_settled_value);
+      ("base_unsettled_value", money cash.base_unsettled_value);
+      ("interest", money cash.interest);
+      ("base_interest", money cash.base_interest);
     ]
 
-let cash_attribution_to_yojson_v10 cash =
-  match cash_attribution_to_yojson cash with
-  | `Assoc fields ->
-      `Assoc
-        (fields
-        @ [
-            ("interest", money cash.Account.interest);
-            ("base_interest", money cash.base_interest);
-          ])
-  | _ -> assert false
-
-let cash_attribution_to_yojson_v11 cash =
-  match cash_attribution_to_yojson_v10 cash with
-  | `Assoc fields ->
-      `Assoc
-        (fields
-        @ [
-            ("settled_amount", money cash.Account.settled_amount);
-            ("unsettled_amount", money cash.unsettled_amount);
-            ("base_settled_value", money cash.base_settled_value);
-            ("base_unsettled_value", money cash.base_unsettled_value);
-          ])
-  | _ -> assert false
-
-let account_valuation_to_yojson ?(contract_version = "8") valuation =
+let account_valuation_to_yojson valuation =
   `Assoc
     [
       ("base_currency", string valuation.Account.base_currency);
@@ -836,59 +687,20 @@ let account_valuation_to_yojson ?(contract_version = "8") valuation =
       ("equity", money valuation.equity);
       ("dividend_pnl", money valuation.dividend_pnl);
       ("execution_fees", money valuation.execution_fees);
+      ( "execution_fee_components",
+        `List
+          (List.map execution_fee_component_attribution_to_yojson
+             valuation.Account.execution_fee_components) );
       ("borrow_fees", money valuation.borrow_fees);
       ("total_fees", money valuation.total_fees);
+      ("cash_interest", money valuation.cash_interest);
+      ("settled_cash", money valuation.settled_cash);
+      ("unsettled_cash", money valuation.unsettled_cash);
       ( "cash_balances",
-        `List
-          (List.map
-             (if
-                List.mem contract_version [ "16"; "15"; "14"; "13"; "12"; "11" ]
-              then cash_attribution_to_yojson_v11
-              else if String.equal contract_version "10" then
-                cash_attribution_to_yojson_v10
-              else cash_attribution_to_yojson)
-             valuation.cash_balances) );
+        `List (List.map cash_attribution_to_yojson valuation.cash_balances) );
       ( "positions",
-        `List
-          (List.map
-             (if
-                List.mem contract_version [ "16"; "15"; "14"; "13"; "12"; "11" ]
-              then position_attribution_to_yojson_v11
-              else if
-                String.equal contract_version "9"
-                || String.equal contract_version "10"
-              then position_attribution_to_yojson_v9
-              else position_attribution_to_yojson)
-             valuation.positions) );
+        `List (List.map position_attribution_to_yojson valuation.positions) );
     ]
-  |> function
-  | `Assoc fields
-    when List.mem contract_version
-           [ "16"; "15"; "14"; "13"; "12"; "11"; "10"; "9" ] ->
-      let financing =
-        if
-          List.mem contract_version [ "16"; "15"; "14"; "13"; "12"; "11"; "10" ]
-        then [ ("cash_interest", money valuation.Account.cash_interest) ]
-        else []
-      in
-      let settlement =
-        if List.mem contract_version [ "16"; "15"; "14"; "13"; "12"; "11" ] then
-          [
-            ("settled_cash", money valuation.Account.settled_cash);
-            ("unsettled_cash", money valuation.unsettled_cash);
-          ]
-        else []
-      in
-      `Assoc
-        (fields
-        @ [
-            ( "execution_fee_components",
-              `List
-                (List.map execution_fee_component_attribution_to_yojson
-                   valuation.Account.execution_fee_components) );
-          ]
-        @ financing @ settlement)
-  | json -> json
 
 let margin_to_yojson margin =
   `Assoc
@@ -912,27 +724,18 @@ let group_exposure_to_yojson (exposure : Risk.group_exposure) =
         Option.fold ~none:`Null ~some:weight exposure.concentration );
     ]
 
-let valuation_to_yojson ~contract_version valuation =
-  match
-    account_valuation_to_yojson ~contract_version valuation.Audit.account
-  with
+let valuation_to_yojson valuation =
+  match account_valuation_to_yojson valuation.Audit.account with
   | `Assoc fields ->
-      let fields = fields @ [ ("margin", margin_to_yojson valuation.margin) ] in
-      let fields =
-        if
-          List.mem contract_version
-            [ "16"; "15"; "14"; "13"; "12"; "11"; "10"; "9"; "8" ]
-        then
-          fields
-          @ [
-              ( "group_exposures",
-                `List
-                  (List.map group_exposure_to_yojson
-                     valuation.margin.Risk.group_exposures) );
-            ]
-        else fields
-      in
-      `Assoc fields
+      `Assoc
+        (fields
+        @ [
+            ("margin", margin_to_yojson valuation.margin);
+            ( "group_exposures",
+              `List
+                (List.map group_exposure_to_yojson
+                   valuation.margin.Risk.group_exposures) );
+          ])
   | _ -> assert false
 
 let order_counts_to_yojson counts =
@@ -1014,7 +817,7 @@ let metric_to_yojson metric =
     | Some aggregation ->
         [ ("aggregation", string (Metric.aggregation_to_string aggregation)) ])
 
-let payload_to_yojson ~contract_version = function
+let payload_to_yojson = function
   | Audit.Run_started { scenario_sha256; execution_model } ->
       `Assoc
         [
@@ -1025,10 +828,10 @@ let payload_to_yojson ~contract_version = function
       `Assoc
         [
           ("portfolio", initial_portfolio_to_yojson portfolio);
-          ("valuation", valuation_to_yojson ~contract_version valuation);
+          ("valuation", valuation_to_yojson valuation);
         ]
   | Audit.Market_slice_received market_slice ->
-      versioned_market_slice_to_yojson ~contract_version market_slice
+      market_slice_to_yojson market_slice
   | Audit.Target_portfolio_requested { basis; targets } ->
       `Assoc
         [
@@ -1036,13 +839,12 @@ let payload_to_yojson ~contract_version = function
           ("targets", `List (List.map requested_target_to_yojson targets));
         ]
   | Audit.Order_accepted order | Audit.Order_rejected order ->
-      versioned_order_to_yojson ~contract_version order
-  | Audit.Order_triggered order ->
-      versioned_order_to_yojson ~contract_version order
+      order_to_yojson order
+  | Audit.Order_triggered order -> order_to_yojson order
   | Audit.Order_cancelled { order; reason } ->
       `Assoc
         [
-          ("order", versioned_order_to_yojson ~contract_version order);
+          ("order", order_to_yojson order);
           ("reason", string (Audit.cancellation_reason_to_string reason));
         ]
   | Audit.Split_applied { action; previous_quantity; adjusted_quantity } ->
@@ -1082,7 +884,7 @@ let payload_to_yojson ~contract_version = function
   | Audit.Order_adjusted { order; action_id } ->
       `Assoc
         [
-          ("order", versioned_order_to_yojson ~contract_version order);
+          ("order", order_to_yojson order);
           ("action_id", string (Id.Corporate_action.to_string action_id));
         ]
   | Audit.Execution_price_selected
@@ -1097,32 +899,11 @@ let payload_to_yojson ~contract_version = function
           ("impact_adjustment", money attribution.impact_adjustment);
           ("final_price", price attribution.final_price);
         ]
-  | Audit.Fill_applied fill ->
-      if
-        List.mem contract_version
-          [ "16"; "15"; "14"; "13"; "12"; "11"; "10"; "9" ]
-      then fill_to_yojson_v9 fill
-      else fill_to_yojson fill
+  | Audit.Fill_applied fill -> fill_to_yojson fill
   | Audit.Settlement_instruction_created instruction
   | Audit.Settlement_completed instruction
   | Audit.Settlement_failed instruction ->
       settlement_instruction_to_yojson instruction
-  | Audit.Margin_limited
-      {
-        order_id = id;
-        instrument_id = instrument;
-        requested_quantity;
-        permitted_quantity;
-        price = fill_price;
-      } ->
-      `Assoc
-        [
-          ("order_id", order_id id);
-          ("instrument_id", instrument_id instrument);
-          ("requested_quantity", quantity requested_quantity);
-          ("permitted_quantity", quantity permitted_quantity);
-          ("price", price fill_price);
-        ]
   | Audit.Fill_clipped
       {
         order_id = id;
@@ -1147,28 +928,6 @@ let payload_to_yojson ~contract_version = function
           ("proposed_quantity", quantity proposed_quantity);
           ("permitted_quantity", quantity permitted_quantity);
           ("price", price fill_price);
-        ]
-  | Audit.Borrow_fee_applied
-      {
-        instrument_id = instrument;
-        quote_currency;
-        short_quantity;
-        reference_price;
-        borrow_bps;
-        period_start;
-        period_end;
-        fee;
-      } ->
-      `Assoc
-        [
-          ("instrument_id", instrument_id instrument);
-          ("quote_currency", string quote_currency);
-          ("short_quantity", quantity short_quantity);
-          ("reference_price", price reference_price);
-          ("borrow_bps", `Int borrow_bps);
-          ("period_start", timestamp period_start);
-          ("period_end", timestamp period_end);
-          ("fee", money fee);
         ]
   | Audit.Borrow_charge_applied
       {
@@ -1227,26 +986,17 @@ let payload_to_yojson ~contract_version = function
           ("closing_balance", money closing_balance);
         ]
   | Audit.Margin_call_triggered valuation | Audit.Margin_restored valuation ->
-      valuation_to_yojson ~contract_version valuation
+      valuation_to_yojson valuation
   | Audit.Intent_rejected reason -> `Assoc [ ("reason", string reason) ]
-  | Audit.Metric_emitted metric ->
-      if String.equal contract_version "16" then metric_to_yojson metric
-      else
-        let value =
-          match metric.Metric.value with
-          | Metric.String value -> value
-          | Metric.Numeric value -> Metric.numeric_to_string value
-          | Metric.Boolean value -> string_of_bool value
-        in
-        `Assoc [ ("name", string metric.name); ("value", string value) ]
-  | Audit.Valuation valuation -> valuation_to_yojson ~contract_version valuation
+  | Audit.Metric_emitted metric -> metric_to_yojson metric
+  | Audit.Valuation valuation -> valuation_to_yojson valuation
   | Audit.Run_completed
       { scenario_sha256; execution_model; valuation; order_counts } ->
       `Assoc
         [
           ("scenario_sha256", string scenario_sha256);
           ("execution_model", string execution_model);
-          ("valuation", valuation_to_yojson ~contract_version valuation);
+          ("valuation", valuation_to_yojson valuation);
           ("order_counts", order_counts_to_yojson order_counts);
         ]
 
@@ -1264,9 +1014,7 @@ let audit_to_yojson audit =
       ("run_id", string (Id.Run.to_string audit.run_id));
       ("recorded_at", timestamp audit.recorded_at);
       ("event_type", string (Audit.event_name audit.event));
-      ( "payload",
-        payload_to_yojson ~contract_version:audit.contract_version audit.event
-      );
+      ("payload", payload_to_yojson audit.event);
     ]
 
 let audit_to_string audit = Yojson.Safe.to_string (audit_to_yojson audit)

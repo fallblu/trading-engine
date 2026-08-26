@@ -39,8 +39,6 @@ val policy :
   recall_policy:recall_policy ->
   policy
 
-val legacy_policy : policy
-
 val borrow_observation :
   instrument_id:Id.Instrument.t ->
   effective_at:Ptime.t ->

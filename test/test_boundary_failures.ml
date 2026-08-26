@@ -323,15 +323,14 @@ let initialization () =
       metadata = `Assoc [ ("experiment", `String "boundary-failure") ];
       run_id = run_id "boundary-failure";
       base_currency = "USD";
-      initial_cash = [ ("USD", money "10000") ];
-      initial_portfolio = None;
+      initial_portfolio = initial_portfolio ();
       instruments = [ instrument ];
       venue_calendars = [];
       risk = risk ~instruments:[ instrument ] ();
       execution_model = T.Execution_model.find "completed_bar_v1" |> ok;
       execution = execution ();
-      financing = None;
-      settlement = None;
+      financing = financing_policy ();
+      settlement = settlement_policy ();
     }
 
 let process_stages =

@@ -13,8 +13,8 @@ type t = {
   slice_sequence : int64;
 }
 
-let create_internal ~allow_rebate ~fee_components ~id ~order_id ~instrument_id
-    ~quote_currency ~side ~quantity ~price ~fee ~executed_at ~slice_sequence =
+let create ~id ~order_id ~instrument_id ~quote_currency ~side ~quantity ~price
+    ~fee ~fee_components ~executed_at ~slice_sequence =
   if not (Scalar.Quantity.is_positive quantity) then
     Error "fill quantity must be positive"
   else if String.length quote_currency = 0 then
@@ -27,8 +27,6 @@ let create_internal ~allow_rebate ~fee_components ~id ~order_id ~instrument_id
            code >= 0x21 && code <> 0x7f)
          quote_currency)
   then Error "fill quote currency must not contain whitespace"
-  else if (not allow_rebate) && Scalar.Money.compare fee Scalar.Money.zero < 0
-  then Error "fill fee must be nonnegative"
   else if Int64.compare slice_sequence 0L <= 0 then
     Error "fill slice sequence must be positive"
   else
@@ -67,18 +65,6 @@ let create_internal ~allow_rebate ~fee_components ~id ~order_id ~instrument_id
               executed_at;
               slice_sequence;
             }
-
-let create ~id ~order_id ~instrument_id ~quote_currency ~side ~quantity ~price
-    ~fee ~executed_at ~slice_sequence =
-  create_internal ~allow_rebate:false ~fee_components:[] ~id ~order_id
-    ~instrument_id ~quote_currency ~side ~quantity ~price ~fee ~executed_at
-    ~slice_sequence
-
-let create_v9 ~id ~order_id ~instrument_id ~quote_currency ~side ~quantity
-    ~price ~fee ~fee_components ~executed_at ~slice_sequence =
-  create_internal ~allow_rebate:true ~fee_components ~id ~order_id
-    ~instrument_id ~quote_currency ~side ~quantity ~price ~fee ~executed_at
-    ~slice_sequence
 
 let equal left right =
   Id.Fill.equal left.id right.id

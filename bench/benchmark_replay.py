@@ -23,7 +23,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_EXECUTABLE = ROOT / "_build/default/bin/main.exe"
 DEFAULT_BASELINE = ROOT / "bench/baselines/linux-x86_64.json"
-FIXTURE = ROOT / "contracts/v10/fixtures/demo.scenario.json"
+FIXTURE = ROOT / "contracts/v1/fixtures/demo.scenario.json"
 STRATEGY = ROOT / "bench/latency_strategy.py"
 SUMMARY_PATTERN = re.compile(
     r"\baudits=(?P<audits>[0-9]+).*\bactive=(?P<active>[0-9]+)"
@@ -219,7 +219,6 @@ def build_scenario(case: BenchmarkCase) -> dict[str, object]:
             "risk": {
                 "max_gross_exposure": "1000000000",
                 "max_leverage": "1000000",
-                "short_borrow_bps": 0,
                 "instrument_policies": [
                     {
                         "instrument_id": instrument["instrument_id"],
@@ -240,8 +239,26 @@ def build_scenario(case: BenchmarkCase) -> dict[str, object]:
                 "configuration": {
                     "version": "1",
                     "participation_bps": 10000,
-                    "fixed_fee": "0",
-                    "fee_bps": 0,
+                    "fee_schedules": [
+                        {
+                            "schedule_id": f"{instrument['instrument_id']}-fees-v1",
+                            "instrument_id": instrument["instrument_id"],
+                            "settlement_currency": "USD",
+                            "minimum": None,
+                            "maximum": None,
+                            "components": [
+                                {
+                                    "name": "benchmark",
+                                    "currency": "USD",
+                                    "kind": "fixed",
+                                    "value": "0",
+                                    "rounding": "nearest",
+                                    "applies_to": "any",
+                                }
+                            ],
+                        }
+                        for instrument in instruments
+                    ],
                 },
             },
             "max_internal_events": max(1000, case.active_order_count * 4 + 16),
@@ -268,6 +285,7 @@ def stream_records(document: dict[str, object]) -> list[dict[str, object]]:
         "risk",
         "execution",
         "financing",
+        "settlement",
         "max_internal_events",
     )
     records = [

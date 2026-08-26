@@ -19,8 +19,7 @@ class RepositoryMetadataTest(unittest.TestCase):
 
         self.assertEqual(
             profile["description"],
-            "Deterministic event-driven OCaml execution engine with versioned replay contracts "
-            "and causal audit journals",
+            "Deterministic OCaml trading replay engine",
         )
         self.assertEqual(profile["homepage"], "https://fallblu.github.io/trading-engine/")
         self.assertEqual(
@@ -75,13 +74,13 @@ class RepositoryMetadataTest(unittest.TestCase):
         self.assertEqual(len(names), len(set(names)))
         self.assertEqual(
             categories,
-            {"component": 10, "priority": 4, "effort": 3, "contract": 7, "dependency": 3},
+            {"component": 10, "priority": 4, "effort": 3, "contract": 2, "dependency": 3},
         )
         self.assertTrue(all(re.fullmatch(r"[0-9a-f]{6}", label["color"]) for label in labels))
         self.assertTrue(all(label["description"].strip() for label in labels))
         self.assertIn("dependency: persistra", names)
-        self.assertIn("contract: scenario-v4", names)
-        self.assertIn("contract: strategy-v3", names)
+        self.assertIn("contract: scenario-v1", names)
+        self.assertIn("contract: strategy-v1", names)
 
     def test_structured_forms_reference_defined_labels_and_require_evidence(self) -> None:
         template_directory = GITHUB / "ISSUE_TEMPLATE"
@@ -142,9 +141,11 @@ class RepositoryMetadataTest(unittest.TestCase):
         self.assertTrue(all(re.fullmatch(r"[0-9a-f]{40}", revision) for revision in revisions))
 
         compatibility = (REPOSITORY_ROOT / "docs/persistra.md").read_text(encoding="utf-8")
-        for guarantee in ("Engine", "Scenario", "Journal", "Strategy", "Persistra"):
-            self.assertIn(f"**{guarantee}:**", compatibility)
-        self.assertIn("Neither repository silently advances", compatibility)
+        self.assertIn("versioned files and processes", compatibility)
+        self.assertIn("scenario contract v1", compatibility)
+        self.assertIn("explicit pair of repository commits", compatibility)
+        self.assertIn("Neither repository", compatibility)
+        self.assertIn("silently follows a moving branch", compatibility)
 
 
 if __name__ == "__main__":

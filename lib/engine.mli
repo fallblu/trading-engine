@@ -5,88 +5,6 @@ type config
 val config :
   contract_version:string ->
   risk:Risk.t ->
-  execution_model:Execution_model.t ->
-  execution:Execution.t ->
-  max_internal_events:int ->
-  (config, string) result
-
-val config_v8 :
-  contract_version:string ->
-  risk:Risk.t ->
-  venue_calendars:Venue_calendar.t list ->
-  execution_model:Execution_model.t ->
-  execution:Execution.t ->
-  max_internal_events:int ->
-  (config, string) result
-
-val config_v10 :
-  contract_version:string ->
-  risk:Risk.t ->
-  venue_calendars:Venue_calendar.t list ->
-  execution_model:Execution_model.t ->
-  execution:Execution.t ->
-  financing:Financing.policy ->
-  max_internal_events:int ->
-  (config, string) result
-
-val config_v11 :
-  contract_version:string ->
-  risk:Risk.t ->
-  venue_calendars:Venue_calendar.t list ->
-  execution_model:Execution_model.t ->
-  execution:Execution.t ->
-  financing:Financing.policy ->
-  settlement:Settlement.policy ->
-  max_internal_events:int ->
-  (config, string) result
-
-val config_v12 :
-  contract_version:string ->
-  risk:Risk.t ->
-  venue_calendars:Venue_calendar.t list ->
-  execution_model:Execution_model.t ->
-  execution:Execution.t ->
-  financing:Financing.policy ->
-  settlement:Settlement.policy ->
-  max_internal_events:int ->
-  (config, string) result
-
-val config_v13 :
-  contract_version:string ->
-  risk:Risk.t ->
-  venue_calendars:Venue_calendar.t list ->
-  execution_model:Execution_model.t ->
-  execution:Execution.t ->
-  financing:Financing.policy ->
-  settlement:Settlement.policy ->
-  max_internal_events:int ->
-  (config, string) result
-
-val config_v14 :
-  contract_version:string ->
-  risk:Risk.t ->
-  venue_calendars:Venue_calendar.t list ->
-  execution_model:Execution_model.t ->
-  execution:Execution.t ->
-  financing:Financing.policy ->
-  settlement:Settlement.policy ->
-  max_internal_events:int ->
-  (config, string) result
-
-val config_v15 :
-  contract_version:string ->
-  risk:Risk.t ->
-  venue_calendars:Venue_calendar.t list ->
-  execution_model:Execution_model.t ->
-  execution:Execution.t ->
-  financing:Financing.policy ->
-  settlement:Settlement.policy ->
-  max_internal_events:int ->
-  (config, string) result
-
-val config_v16 :
-  contract_version:string ->
-  risk:Risk.t ->
   venue_calendars:Venue_calendar.t list ->
   execution_model:Execution_model.t ->
   execution:Execution.t ->
@@ -100,13 +18,6 @@ module Interactive : sig
   type progress
 
   val create :
-    run_id:Id.Run.t ->
-    scenario_sha256:string ->
-    config:config ->
-    initial_cash:(string * Scalar.Money.t) list ->
-    (t, string) result
-
-  val create_with_portfolio :
     run_id:Id.Run.t ->
     scenario_sha256:string ->
     config:config ->
@@ -127,14 +38,6 @@ module Make (Strategy_impl : Strategy.S) : sig
   type t
 
   val create :
-    run_id:Id.Run.t ->
-    scenario_sha256:string ->
-    config:config ->
-    initial_cash:(string * Scalar.Money.t) list ->
-    strategy_state:Strategy_impl.state ->
-    (t, string) result
-
-  val create_with_portfolio :
     run_id:Id.Run.t ->
     scenario_sha256:string ->
     config:config ->

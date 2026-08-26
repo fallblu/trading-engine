@@ -20,7 +20,7 @@ body:
     id: versions
     attributes:
       label: Affected versions
-      placeholder: current v4; frozen v1-v3 unchanged
+      placeholder: current v1 and proposed change
     validations:
       required: true
   - type: dropdown

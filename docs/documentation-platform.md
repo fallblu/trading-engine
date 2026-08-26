@@ -13,8 +13,8 @@ live in `requirements/docs.lock`; the exact odoc version lives in `trading_engin
 
 The build stages the repository Markdown and entire `contracts/` tree under `_build`, adds the odoc
 HTML tree, and then runs `mkdocs build --strict`. Staging publishes contract README files, schemas,
-and fixtures directly from their source locations. Frozen v1 and v2 pages therefore keep stable
-versioned URLs and cannot diverge from the repository copies.
+and fixtures directly from their source locations, so the v1 pages cannot diverge from the
+repository copies.
 
 `make docs-check` performs the deterministic offline source check. `make docs-build` bootstraps the
 locked documentation tools, builds odoc, runs strict MkDocs, checks every generated local link, and

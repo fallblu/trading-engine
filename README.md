@@ -1,287 +1,76 @@
 # Trading Engine
 
-Trading Engine is a deterministic, event-driven OCaml execution engine. It runs a typed strategy
-through pre-trade risk, order management, synchronized completed-bar execution, exact accounting,
-valuation, and a hash-bound JSON Lines audit journal.
+Trading Engine is a deterministic OCaml engine for replaying trading strategies.
 
-The [documentation site](docs/documentation-platform.md) connects the architecture, execution and
-scenario contracts, stable versioned artifacts, and generated OCaml API reference.
+It accepts a strict scenario, runs strategy decisions through risk, order management, execution,
+financing, settlement, and accounting, then writes a hash-bound JSON Lines audit journal. The same
+reducer supports scheduled intents and supervised external strategy processes.
 
-The engine is replay-first. Its pure kernel and explicit source, strategy, execution, and journal
-layers keep networking, files, and wall-clock state outside the reducer.
+## Highlights
 
-```text
-scenario slices and scheduled or external intents
-                  │
-                  ▼
-        deterministic reducer
-                  │
-       ┌──────────┼──────────┐
-       ▼          ▼          ▼
-   strategy  risk + OMS  slice simulator
-       │          │          │
-       └──────────┴──── fills┘
-                  │
-                  ▼
-        accounting + valuation
-                  │
-                  ▼
-          JSON Lines journal
-```
-
-## Implemented scope
-
-- OCaml 5.5 and Dune 3.24 with a repository-local opam switch
-- Opaque IDs and canonical checked fixed-point prices, weights, money, and quantities
-- Synchronized market slices with one bar per configured instrument
-- Separate market event, availability, receipt, slice, and engine ordering
-- Pure strategy callbacks with causal, immutable context snapshots
-- Pure suspend/resume strategy requests with equivalent scripted and external reducers
-- Explicit immutable reducer phases behind one internal transition contract
-- Portfolio weight and quantity targets covering the complete instrument catalog
-- Current-equity weight sizing at synchronized closing marks with lot rounding
-- Persistent target reconciliation through bounded market-order attempts
-- Direct market and limit orders, cancellations, and metrics
-- Typed strategy metrics with exact numeric, string, and boolean values, bounded dimensions,
-  units, and aggregation metadata
-- Signed long/short position, order, lot, tick, gross-exposure, leverage, and margin risk
-- Deterministic liquidation-first matching, then sell-before-buy and FIFO priority
-- Shared per-instrument volume participation, partial fills, and GTC limits
-- One-slice IOC market orders
-- Risk-aware fractional-lot clipping with structured `fill_clipped` reasons and thresholds
-- Instrument-aware fixed, notional, and per-unit fee schedules with explicit rounding,
-  maker/taker applicability, minimums, caps, rebates, and deterministic FX conversion
-- Explicit multi-currency cash ledgers and complete per-slice FX marks in a base currency
-- Explicit signed initial portfolios with cost basis, P&L and fee history, marks, and FX state
-- Splits, dividends, rights, spin-offs, fractional cash-in-lieu, and exact basis allocation
-- Stable instrument identity with halt/resume, identifier changes, expiration, and delisting
-- Effective-time short locates, availability clipping, borrow-rate accrual, recalls, and
-  deterministic close-out orders
-- Per-currency credit/debit cash rates with explicit day-count and compounding policies
-- Signed average-cost accounting, realized and unrealized P&L, and equity reconciliation
-- Per-currency cash and per-instrument quantity, mark, value, basis, P&L, aggregate fee, and named
-  fee-component attribution
-- Deterministic event IDs, ordered causal references, and order-creation attribution
-- Contract-selected compiled execution modules with versioned model-owned configuration and
-  capability descriptors; v13 adds conservative bar models, v14 adds causal quote/trade replay,
-  and v15 adds bounded level-two order-book replay while freezing `completed_bar_v1`
-- Tick-aligned fixed-spread and participation-impact execution costs with separate reference,
-  spread, impact, and final-price audit attribution
-- Causally ordered quotes and aggressor-classified trades with displayed-liquidity limits,
-  maker/taker attribution, and event-time fills
-- Bounded order-book snapshots and contiguous updates with price-time queue simulation,
-  multi-level depth consumption, partial fills, and locked-book support
-- Strict batch JSON and bounded-memory JSON Lines scenario parsing with JSON Schemas
-- Versioned synchronous JSON Lines strategy processes with per-request timeouts and strict
-  lifecycle supervision
-- Complete bidirectional strategy transcripts with coordinated no-replace journal publication
-- Scenario SHA-256 binding in `run_started` and `run_completed`
-- Exclusive partial artifact creation with optional file and directory synchronization
-- Unit, schema-conformance, scenario, golden-contract, reducer model-property, and protocol-fuzz tests
+- Exact fixed-point prices, quantities, money, weights, and FX rates
+- Completed-bar, conservative-bar, quote/trade, and order-book execution models
+- Market, limit, stop, stop-limit, IOC, GTC, GTD, DAY, and FOK orders
+- Instrument and portfolio risk, margin, short locates, recalls, and liquidation
+- Multi-currency accounting, financing, settlement, fees, and corporate actions
+- Deterministic event IDs, causal references, transcripts, and durable artifact publication
+- Strict v1 JSON Schemas for scenarios, journals, strategy messages, diagnostics, and CLI results
 
 ## Quick start
 
-The project uses a local switch and does not modify the default switch. The complete check also
-uses Python's `jsonschema` package to validate every committed schema and canonical fixture. It
-checks the frozen-artifact hashes and runs the current differential corpus against the OCaml
-parsers.
+The repository uses a local opam switch.
 
 ```sh
-cd ~/trading-engine
 make bootstrap
 make check
 ```
 
-Run the advisory batch, stream, dense-OMS, and external-strategy performance matrix with
-`make benchmark`. See [Performance](docs/performance.md) for workload definitions, reported
-metrics, and the baseline tolerance policy.
-
-Validate the included scenario with an in-memory replay:
+Validate the canonical scenario:
 
 ```sh
 opam exec -- dune exec trading-engine -- \
-  --input contracts/v16/fixtures/demo.scenario.json \
+  --input contracts/v1/fixtures/demo.scenario.json \
   --validate-only
 ```
 
-Run it and create a journal:
+Replay it to a journal:
 
 ```sh
 opam exec -- dune exec trading-engine -- \
-  --input contracts/v16/fixtures/demo.scenario.json \
+  --input contracts/v1/fixtures/demo.scenario.json \
   --journal demo.journal.jsonl
 ```
 
-For larger histories, validate and replay the equivalent stream one slice at a time:
+Use `--input-format jsonl` for bounded-memory stream input. Use `--capabilities` for the
+machine-readable runtime surface and `--output-format json` for structured success and failure
+output.
+
+## External strategies
+
+External strategies exchange one synchronous JSON Lines message at a time:
 
 ```sh
 opam exec -- dune exec trading-engine -- \
-  --input contracts/v16/fixtures/demo.scenario.jsonl \
-  --input-format jsonl \
-  --journal demo.journal.jsonl
-```
-
-Compose a JSON Lines producer and journal consumer without mixing streams:
-
-```sh
-produce-scenario | trading-engine --input - --input-format jsonl --journal - | consume-journal
-```
-
-Standard input is spooled to a private temporary file, limited to 1 GiB, then hashed and validated
-before replay. Standard output contains only journal records. The engine stages and verifies the
-complete journal before copying it to the pipe; its final `run_completed` record and a zero exit
-status signal completion. Pipe output cannot provide exclusive no-replace publication, atomic
-linking, retained partial files, directory synchronization, or restart-durability guarantees.
-`--durable-artifacts` is therefore invalid with `--journal -`.
-
-Run an external strategy against an empty-schedule scenario:
-
-```sh
-opam exec -- dune exec trading-engine -- \
-  --input contracts/strategy/v14/fixtures/external.scenario.json \
+  --input contracts/strategy/v1/fixtures/external.scenario.json \
   --journal external.journal.jsonl \
   --strategy-executable ./my-strategy \
-  --strategy-arg=config.toml \
-  --strategy-timeout 30 \
   --strategy-transcript external.strategy.jsonl
 ```
 
-The engine launches the program directly without a shell. This supervises the child but does not
-sandbox it; run strategy code with the same trust you give the invoking user. Protocol messages
-own the child's standard input and output; strategy diagnostics belong on standard error. Only
-one request is outstanding. Initialization must return `ready`, each event must return `intents`,
-and shutdown must return `stopped`. Wrong versions or sequences, unknown or malformed fields,
-oversized responses, EOF, timeout, extra output, and nonzero exit all fail the replay. The journal
-and transcript remain partial until both are complete. The engine then closes both, publishes the
-complete set without replacement, and removes the partial names. A close or publication failure
-rolls back final names created by the transaction. A cleanup failure leaves the complete final set
-and restores every partial name for diagnosis. The strategy runs in a dedicated process group.
-Failure and cancellation send `SIGTERM` to the complete group, allow one second for graceful exit,
-then send `SIGKILL` and allow five seconds to reap the process tree.
+The child process is supervised but not sandboxed. Protocol output belongs on standard output;
+strategy logs belong on standard error.
 
-Discover the executable version and machine-readable compatibility surface:
+## Documentation
 
-```sh
-opam exec -- dune exec trading-engine -- --version
-opam exec -- dune exec trading-engine -- --capabilities
-```
-
-Clients must confirm that both `scenario_contract_versions` and `journal_contract_versions`
-contain the scenario's `contract_version` before starting a replay. External clients must also
-require their version in `strategy_protocol_versions`. The versioned `resource_limits` object
-publishes inclusive limits for scenario records, strategy messages, reducer feedback, catalogs,
-intent batches, and artifact records. Runtime failures can use the structured
-diagnostic contract identified by each diagnostic's `diagnostic_version`. Human diagnostics remain
-the default. Use `--diagnostic-format json` to receive one JSON diagnostic on standard error with a
-stable code, phase, typed context, and sanitized underlying cause.
-
-Use `--output-format json` for the versioned
-[CLI result contract](contracts/cli/v1/README.md). A success document includes the run identity,
-scenario and artifact hashes, replay counts, normalized current valuation, and artifact locations.
-This option also selects JSON failure diagnostics. For file journals the success document is written
-to standard output. With `--journal -`, the journal owns standard output and the success document
-moves to standard error.
-
-The final and `.partial` journal paths must not already exist. Batch JSON hashes the same complete
-document it parses. JSON Lines input is hashed and validated in a bounded-memory pass before the
-journal is created, then replayed from the same open file and hashed again before publication. The
-CLI binds that exact-byte hash into the journal. It writes to the partial path and publishes the
-requested path only after `run_completed` is fully written and the partial file is closed. An
-error preserves the partial artifact for diagnosis.
-
-A protocol-invalid strategy response is not stored as an accepted transcript exchange. The partial
-transcript instead ends with a versioned rejection record containing its structured diagnostic and
-a hexadecimal prefix of at most 256 raw response bytes. This covers malformed fields and JSON,
-wrong versions or sequences, EOF, and oversized output without retaining the complete rejected
-payload.
-
-Journal and transcript records are limited to 2 MiB each, including the terminating line feed.
-Limit failures use the stable `resource.limit` diagnostic code.
-
-Pass `--durable-artifacts` to synchronize each staged file before publication and synchronize each
-containing directory after final links and partial cleanup. The default buffered mode flushes every
-record but does not make a restart-durability claim.
-
-## Execution summary
-
-An order emitted after slice `n` cannot execute on slice `n`. It first becomes eligible on a later
-slice whose start is not earlier than its creation time.
-
-- Market orders attempt the next eligible open and cancel any remainder after that slice.
-- Persistent portfolio targets submit a new bounded attempt after each miss until reached or
-  superseded.
-- Limit orders use deterministic gap improvement and optimistic intrabar touch rules.
-- Eligible liquidation orders consume capacity before other orders. Within each origin class,
-  sells precede buys and FIFO creation order breaks ties within a side.
-- Corporate actions are applied before matching. Splits adjust positions, persistent targets, and
-  active orders; distributions allocate basis and fractional cash exactly; cash dividends credit
-  longs and debit shorts in the quote-currency ledger.
-- Lifecycle events update symbols and provider mappings without changing instrument identity.
-  Halts and terminal events cancel orders; expiration and delisting follow an explicit hold or
-  cash-out policy.
-- Effective-time borrow observations control short availability and rates. New shorts are rejected
-  or clipped to their locate, recalls reject new shorts or create deterministic close-out orders,
-  and observed borrow charges accrue before matching.
-- Effective-time currency observations credit positive cash and debit negative cash for the slice
-  interval under the configured day-count, compounding, and missing-data policies.
-- Proposed fills are clipped to the largest permitted fractional-lot quantity at the actual fill
-  price and never exceed the maximum order quantity. Increasing exposure must satisfy position,
-  gross-exposure, leverage, and initial-margin limits; exposure-reducing fills remain available.
-- A maintenance-margin breach cancels active orders, clears portfolio targets, and creates
-  deterministic market orders that flatten positions in bounded lots across later slices.
-- The engine emits exactly one valuation after each complete synchronized slice.
-
-Read [Execution model](docs/execution-model.md) for the full phase, price, fee, cash, and accounting
-rules.
-
-## Project boundaries
-
-The current scope omits:
-
-- Broker and streaming-market-data connectors
-- External execution-report ingestion
-- Exchange calendars and time-zone databases
-- Durable reducer snapshots and broker reconciliation
-- Tick, trade, and order-book replay
-
-Artifact publication requires a filesystem that supports exclusive file creation, hard links, and
-atomic unlink. Durable mode additionally requires file and directory synchronization. An
-unsupported synchronization operation returns `artifact.io`, never reports success, and preserves
-or restores partial names for diagnosis. Durable artifacts strengthen publication persistence; they
-do not provide reducer snapshots or restart recovery.
-
-## Architecture and contracts
-
-- [Support and issue guidance](.github/SUPPORT.md)
-- [Security policy](.github/SECURITY.md)
-- [Security maintenance](docs/security-maintenance.md)
-- [Contributing](CONTRIBUTING.md)
 - [Architecture](docs/architecture.md)
-- [Diagnostic contract](docs/diagnostics.md)
-- [CLI result contract](contracts/cli/v1/README.md)
-- [Scenario contract](docs/scenario.md)
-- [Contract conformance corpus](contracts/conformance/README.md)
-- [Current contract v16 and conformance fixtures](contracts/v16/README.md)
-- [Frozen contract v2](contracts/v2/README.md)
-- [Historical contract v1](contracts/v1/README.md)
-- [Scenario JSON Schema](contracts/v16/scenario.schema.json)
-- [Scenario stream record JSON Schema](contracts/v16/scenario-stream.schema.json)
-- [Journal record JSON Schema](contracts/v16/journal.schema.json)
-- [CLI result JSON Schema](contracts/cli/v1/result.schema.json)
-- [External strategy protocol v14](contracts/strategy/v14/README.md)
-- [Historical strategy protocol v3](contracts/strategy/v3/README.md)
-- [Historical strategy protocol v2](contracts/strategy/v2/README.md)
-- [Historical strategy protocol v1](contracts/strategy/v1/README.md)
-- [Persistra compatibility](docs/persistra.md)
-- [Strategy message JSON Schema](contracts/strategy/v14/message.schema.json)
-- [Strategy transcript JSON Schema](contracts/strategy/v14/transcript.schema.json)
 - [Execution model](docs/execution-model.md)
-- [OCaml coverage](docs/coverage.md)
-- [Continuous integration and portability matrix](docs/continuous-integration.md)
-- [Documentation platform and generated API](docs/documentation-platform.md)
-- [Release artifacts and provenance](docs/release-artifacts.md)
-- [Performance](docs/performance.md)
-- [Reducer property testing](docs/reducer-property-testing.md)
-- [Protocol fuzzing](docs/fuzzing.md)
+- [Scenario and journal](docs/scenario.md)
+- [Replay contract v1](contracts/v1/README.md)
+- [Strategy protocol v1](contracts/strategy/v1/README.md)
+- [Diagnostics](docs/diagnostics.md)
 - [Persistra integration](docs/persistra.md)
 - [Contributing](CONTRIBUTING.md)
+- [Security](.github/SECURITY.md)
+
+The complete documentation site is published at
+[fallblu.github.io/trading-engine](https://fallblu.github.io/trading-engine/).

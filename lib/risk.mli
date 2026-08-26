@@ -74,14 +74,10 @@ type fill_check_error = Limit of fill_limit | Invalid of string
 val create :
   base_currency:string ->
   instruments:Instrument.t list ->
-  max_order_quantity:Scalar.Quantity.t ->
-  max_long_position:Scalar.Quantity.t ->
-  max_short_position:Scalar.Quantity.t ->
+  instrument_policies:instrument_policy list ->
+  groups:group list ->
   max_gross_exposure:Scalar.Money.t ->
   max_leverage:Scalar.Ratio.t ->
-  initial_margin_bps:int ->
-  maintenance_margin_bps:int ->
-  short_borrow_bps:int ->
   (t, string) result
 
 val create_instrument_policy :
@@ -110,16 +106,6 @@ val create_group :
   limits:group_limits ->
   (group, string) result
 
-val create_v7 :
-  base_currency:string ->
-  instruments:Instrument.t list ->
-  instrument_policies:instrument_policy list ->
-  groups:group list ->
-  max_gross_exposure:Scalar.Money.t ->
-  max_leverage:Scalar.Ratio.t ->
-  short_borrow_bps:int ->
-  (t, string) result
-
 val base_currency : t -> string
 val instruments : t -> Instrument.t list
 val instrument : t -> Id.Instrument.t -> Instrument.t option
@@ -133,7 +119,6 @@ val max_gross_exposure : t -> Scalar.Money.t
 val max_leverage : t -> Scalar.Ratio.t
 val initial_margin_bps : t -> int
 val maintenance_margin_bps : t -> int
-val short_borrow_bps : t -> int
 val max_order_quantity_for : t -> Id.Instrument.t -> Scalar.Quantity.t option
 val check_position : t -> Scalar.Quantity.t -> (unit, string) result
 
