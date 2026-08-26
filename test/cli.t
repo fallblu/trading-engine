@@ -2,27 +2,27 @@
   1.0.0
 
   $ ../bin/main.exe --capabilities
-  {"engine_version":"1.0.0","scenario_contract_versions":["16","15","14","13","12","11","10","9","8","7","6","5","4","3"],"journal_contract_versions":["16","15","14","13","12","11","10","9","8","7","6","5","4","3"],"scenario_formats":["json","jsonl"],"journal_formats":["jsonl"],"execution_models":["completed_bar_v1","completed_bar_next_open_v1","completed_bar_adverse_touch_v1","quote_trade_v1","order_book_v1"],"execution_model_contracts":[{"name":"completed_bar_v1","configuration_versions":["2","1"],"scenario_contract_versions":["16","15","14","13","12","11","10","9","8","7","6","5","4","3"],"required_fields":["version","participation_bps","fee_schedules"],"configuration_required_fields":{"2":["version","participation_bps","fee_schedules"],"1":["version","participation_bps","fixed_fee","fee_bps"]},"supported_order_types":["market","limit","stop","stop_limit"],"data_requirements":["completed_ohlcv_bars"],"limits":{"participation_bps":{"minimum":0,"maximum":10000},"fee_bps":{"minimum":0,"maximum":10000},"fixed_fee":{"minimum":"0","unit":"money"}}},{"name":"completed_bar_next_open_v1","configuration_versions":["1"],"scenario_contract_versions":["16","15","14","13"],"required_fields":["version","participation_bps","fee_schedules","spread_model","impact_model"],"configuration_required_fields":{"1":["version","participation_bps","fee_schedules","spread_model","impact_model"]},"supported_order_types":["market","limit","stop","stop_limit"],"data_requirements":["completed_ohlcv_bars","bar_volume_for_linear_impact"],"limits":{"participation_bps":{"minimum":0,"maximum":10000},"half_spread_bps":{"minimum":0,"maximum":10000},"impact_coefficient_bps":{"minimum":0,"maximum":10000}}},{"name":"completed_bar_adverse_touch_v1","configuration_versions":["1"],"scenario_contract_versions":["16","15","14","13"],"required_fields":["version","participation_bps","fee_schedules","spread_model","impact_model"],"configuration_required_fields":{"1":["version","participation_bps","fee_schedules","spread_model","impact_model"]},"supported_order_types":["market","limit","stop","stop_limit"],"data_requirements":["completed_ohlcv_bars","bar_volume_for_linear_impact"],"limits":{"participation_bps":{"minimum":0,"maximum":10000},"half_spread_bps":{"minimum":0,"maximum":10000},"impact_coefficient_bps":{"minimum":0,"maximum":10000}}},{"name":"quote_trade_v1","configuration_versions":["1"],"scenario_contract_versions":["16","15","14"],"required_fields":["version","participation_bps","fee_schedules"],"configuration_required_fields":{"1":["version","participation_bps","fee_schedules"]},"supported_order_types":["market","limit","stop","stop_limit"],"data_requirements":["causally_ordered_bid_ask_quotes","aggressor_classified_trades_for_passive_fills","completed_bars_for_valuation"],"limits":{"participation_bps":{"minimum":0,"maximum":10000}}},{"name":"order_book_v1","configuration_versions":["1"],"scenario_contract_versions":["16","15"],"required_fields":["version","participation_bps","fee_schedules","max_depth_levels"],"configuration_required_fields":{"1":["version","participation_bps","fee_schedules","max_depth_levels"]},"supported_order_types":["market","limit","stop","stop_limit"],"data_requirements":["slice_open_level_two_snapshot","contiguous_absolute_level_updates","aggressor_classified_depth_consuming_trades","completed_bars_for_valuation"],"limits":{"participation_bps":{"minimum":0,"maximum":10000},"max_depth_levels":{"minimum":1,"maximum":1024}}}],"strategy_protocol_versions":["14","13","12","11","10","9","8","7","6","5","4","3"],"resource_limits":{"version":"1","scenario_record_bytes":1048576,"strategy_message_bytes":1048576,"internal_events":100000,"catalog_instruments":4096,"intents_per_batch":4096,"artifact_record_bytes":2097152}}
+  {"engine_version":"1.0.0","scenario_contract_versions":["1"],"journal_contract_versions":["1"],"scenario_formats":["json","jsonl"],"journal_formats":["jsonl"],"execution_models":["completed_bar_v1","completed_bar_next_open_v1","completed_bar_adverse_touch_v1","quote_trade_v1","order_book_v1"],"execution_model_contracts":[{"name":"completed_bar_v1","configuration_versions":["1"],"scenario_contract_versions":["1"],"required_fields":["version","participation_bps","fee_schedules"],"configuration_required_fields":{"1":["version","participation_bps","fee_schedules"]},"supported_order_types":["market","limit","stop","stop_limit"],"data_requirements":["completed_ohlcv_bars"],"limits":{"participation_bps":{"minimum":0,"maximum":10000}}},{"name":"completed_bar_next_open_v1","configuration_versions":["1"],"scenario_contract_versions":["1"],"required_fields":["version","participation_bps","fee_schedules","spread_model","impact_model"],"configuration_required_fields":{"1":["version","participation_bps","fee_schedules","spread_model","impact_model"]},"supported_order_types":["market","limit","stop","stop_limit"],"data_requirements":["completed_ohlcv_bars","bar_volume_for_linear_impact"],"limits":{"participation_bps":{"minimum":0,"maximum":10000},"half_spread_bps":{"minimum":0,"maximum":10000},"impact_coefficient_bps":{"minimum":0,"maximum":10000}}},{"name":"completed_bar_adverse_touch_v1","configuration_versions":["1"],"scenario_contract_versions":["1"],"required_fields":["version","participation_bps","fee_schedules","spread_model","impact_model"],"configuration_required_fields":{"1":["version","participation_bps","fee_schedules","spread_model","impact_model"]},"supported_order_types":["market","limit","stop","stop_limit"],"data_requirements":["completed_ohlcv_bars","bar_volume_for_linear_impact"],"limits":{"participation_bps":{"minimum":0,"maximum":10000},"half_spread_bps":{"minimum":0,"maximum":10000},"impact_coefficient_bps":{"minimum":0,"maximum":10000}}},{"name":"quote_trade_v1","configuration_versions":["1"],"scenario_contract_versions":["1"],"required_fields":["version","participation_bps","fee_schedules"],"configuration_required_fields":{"1":["version","participation_bps","fee_schedules"]},"supported_order_types":["market","limit","stop","stop_limit"],"data_requirements":["causally_ordered_bid_ask_quotes","aggressor_classified_trades_for_passive_fills","completed_bars_for_valuation"],"limits":{"participation_bps":{"minimum":0,"maximum":10000}}},{"name":"order_book_v1","configuration_versions":["1"],"scenario_contract_versions":["1"],"required_fields":["version","participation_bps","fee_schedules","max_depth_levels"],"configuration_required_fields":{"1":["version","participation_bps","fee_schedules","max_depth_levels"]},"supported_order_types":["market","limit","stop","stop_limit"],"data_requirements":["slice_open_level_two_snapshot","contiguous_absolute_level_updates","aggressor_classified_depth_consuming_trades","completed_bars_for_valuation"],"limits":{"participation_bps":{"minimum":0,"maximum":10000},"max_depth_levels":{"minimum":1,"maximum":1024}}}],"strategy_protocol_versions":["1"],"resource_limits":{"version":"1","scenario_record_bytes":1048576,"strategy_message_bytes":1048576,"internal_events":100000,"catalog_instruments":4096,"intents_per_batch":4096,"artifact_record_bytes":2097152}}
 
-  $ ../bin/main.exe --validate-only --input ../contracts/v8/fixtures/demo.scenario.json
-  valid run=demo instruments=1 schedule=2 slices=4 scenario_sha256=85f7c99e0666159579c79256b3d0dc5f9c328e1275b79465fe1d4c93883e68f1
+  $ ../bin/main.exe --validate-only --input ../contracts/v1/fixtures/demo.scenario.json
+  valid run=demo instruments=1 schedule=2 slices=4 scenario_sha256=e2227af76072fab8151c3e1bd86f401293d16a736e32040efdaf8761cd397574
 
-  $ ../bin/main.exe --validate-only --input-format jsonl --input ../contracts/v8/fixtures/demo.scenario.jsonl
-  valid run=demo instruments=1 schedule=2 slices=4 scenario_sha256=786f38d8bd10faac03b6b15c7aa8ae0a867eedc609ca6eaa75cfd93ae3ffdcae
+  $ ../bin/main.exe --validate-only --input-format jsonl --input ../contracts/v1/fixtures/demo.scenario.jsonl
+  valid run=demo instruments=1 schedule=2 slices=4 scenario_sha256=cb5cf2c600829b54be763809138137fe53ed61fd41f50c5b4d98cb27ee528eb4
 
-  $ ../bin/main.exe --output-format json --validate-only --input ../contracts/v8/fixtures/demo.scenario.json | python3 -c 'import json, sys; result=json.load(sys.stdin); print(result["result_version"], result["status"], result["operation"], result["run_id"]); print(result["counts"]["instruments"], result["counts"]["slices"], result["counts"]["audits"], result["valuation"]["equity"]); print(result["hashes"]["journal_sha256"], result["artifacts"]["journal"])'
+  $ ../bin/main.exe --output-format json --validate-only --input ../contracts/v1/fixtures/demo.scenario.json | python3 -c 'import json, sys; result=json.load(sys.stdin); print(result["result_version"], result["status"], result["operation"], result["run_id"]); print(result["counts"]["instruments"], result["counts"]["slices"], result["counts"]["audits"], result["valuation"]["equity"]); print(result["hashes"]["journal_sha256"], result["artifacts"]["journal"])'
   1 success validate demo
-  1 4 22 10111.65392
+  1 4 34 10111.979929
   None None
 
-  $ ../bin/main.exe --input-format jsonl --input ../contracts/v8/fixtures/demo.scenario.jsonl --journal streamed.journal.jsonl --durable-artifacts
-  run=demo audits=22 orders=3 active=0 filled=2 rejected=0
-  cash=9846.65392 equity=10111.65392 gross=265 realized=18.965682 unrealized=7.688238 fees=3.16608
+  $ ../bin/main.exe --input-format jsonl --input ../contracts/v1/fixtures/demo.scenario.jsonl --journal streamed.journal.jsonl --durable-artifacts
+  run=demo audits=34 orders=3 active=0 filled=2 rejected=0
+  cash=9846.979929 equity=10111.979929 gross=265 realized=19.134573 unrealized=7.845356 fees=3.157896
   journal=streamed.journal.jsonl
   $ wc -l < streamed.journal.jsonl
-  22
+  34
 
-  $ head -n 5 ../contracts/v8/fixtures/demo.scenario.jsonl > truncated.scenario.jsonl
+  $ head -n 5 ../contracts/v1/fixtures/demo.scenario.jsonl > truncated.scenario.jsonl
   $ ../bin/main.exe --validate-only --input-format jsonl --input truncated.scenario.jsonl
   trading-engine: scenario_end must terminate the scenario stream
   [123]
@@ -43,23 +43,23 @@
   $ ../bin/main.exe --output-format json --validate-only --input missing.scenario.json 2>&1 >/dev/null | python3 -c 'import json, sys; diagnostic=json.load(sys.stdin); print(diagnostic["code"], diagnostic["phase"])'
   input.io input
 
-  $ sed 's/"open": "100"/"open": "100.001"/' ../contracts/v8/fixtures/demo.scenario.json > invalid-tick.json
+  $ sed 's/"open": "100"/"open": "100.001"/' ../contracts/v1/fixtures/demo.scenario.json > invalid-tick.json
   $ ../bin/main.exe --validate-only --input invalid-tick.json
   trading-engine: market prices and volumes must align with instrument increments
   [123]
 
-  $ ../bin/main.exe --input ../contracts/v8/fixtures/demo.scenario.json
+  $ ../bin/main.exe --input ../contracts/v1/fixtures/demo.scenario.json
   trading-engine: --journal is required unless --validate-only is set
   [123]
 
-  $ ../bin/main.exe --validate-only --input ../contracts/v8/fixtures/demo.scenario.json --journal validation.journal.jsonl
+  $ ../bin/main.exe --validate-only --input ../contracts/v1/fixtures/demo.scenario.json --journal validation.journal.jsonl
   trading-engine: --journal cannot be used with --validate-only
   [123]
 
   $ test ! -e validation.journal.jsonl
 
-  $ ../bin/main.exe --input-format jsonl --input ../contracts/v8/fixtures/demo.scenario.jsonl --journal piped-file.journal.jsonl >/dev/null
-  $ cat ../contracts/v8/fixtures/demo.scenario.jsonl | ../bin/main.exe --input-format jsonl --input - --journal - > piped-stdout.journal.jsonl 2> piped-summary.txt
+  $ ../bin/main.exe --input-format jsonl --input ../contracts/v1/fixtures/demo.scenario.jsonl --journal piped-file.journal.jsonl >/dev/null
+  $ cat ../contracts/v1/fixtures/demo.scenario.jsonl | ../bin/main.exe --input-format jsonl --input - --journal - > piped-stdout.journal.jsonl 2> piped-summary.txt
   $ cmp piped-file.journal.jsonl piped-stdout.journal.jsonl
   $ python3 - piped-summary.txt piped-stdout.journal.jsonl <<'PY'
   > import hashlib
@@ -73,9 +73,9 @@
   > print(len(journal_bytes.splitlines()), hashlib.sha256(journal_bytes).hexdigest() == hashlib.sha256(open("piped-file.journal.jsonl", "rb").read()).hexdigest())
   > PY
   True run_completed
-  22 True
+  34 True
 
-  $ ../bin/main.exe --output-format json --input-format jsonl --input ../contracts/v8/fixtures/demo.scenario.jsonl --journal - > piped-json.journal.jsonl 2> piped-json-summary.json
+  $ ../bin/main.exe --output-format json --input-format jsonl --input ../contracts/v1/fixtures/demo.scenario.jsonl --journal - > piped-json.journal.jsonl 2> piped-json-summary.json
   $ python3 -c 'import json; result=json.load(open("piped-json-summary.json")); print(result["result_version"], result["operation"], result["artifacts"]["journal"], result["hashes"]["journal_sha256"] is not None)'
   1 replay stdout True
   $ cmp piped-file.journal.jsonl piped-json.journal.jsonl
@@ -84,43 +84,43 @@
   trading-engine: standard input requires --input-format jsonl; batch JSON is not supported
   [123]
 
-  $ ../bin/main.exe --input-format jsonl --input ../contracts/v8/fixtures/demo.scenario.jsonl --journal - --durable-artifacts
+  $ ../bin/main.exe --input-format jsonl --input ../contracts/v1/fixtures/demo.scenario.jsonl --journal - --durable-artifacts
   trading-engine: --durable-artifacts cannot be used when --journal writes to standard output
   [123]
 
-  $ ../bin/main.exe --validate-only --durable-artifacts --input ../contracts/v8/fixtures/demo.scenario.json
+  $ ../bin/main.exe --validate-only --durable-artifacts --input ../contracts/v1/fixtures/demo.scenario.json
   trading-engine: --durable-artifacts cannot be used with --validate-only
   [123]
 
-  $ ../bin/main.exe --input ../contracts/v8/fixtures/demo.scenario.json --journal ignored.journal.jsonl --strategy-timeout 5
+  $ ../bin/main.exe --input ../contracts/v1/fixtures/demo.scenario.json --journal ignored.journal.jsonl --strategy-timeout 5
   trading-engine: --strategy-arg, --strategy-timeout, and --strategy-transcript require --strategy-executable
   [123]
   $ test ! -e ignored.journal.jsonl
 
   $ mkdir external
-  $ ../bin/main.exe --input ../contracts/strategy/v6/fixtures/external.scenario.json --journal external/run.journal.jsonl --strategy-executable ./fake_strategy.py --strategy-transcript external/run.strategy.jsonl --strategy-timeout 5 --durable-artifacts
-  run=external-demo audits=12 orders=1 active=0 filled=1 rejected=0
+  $ ../bin/main.exe --input ../contracts/strategy/v1/fixtures/external.scenario.json --journal external/run.journal.jsonl --strategy-executable ./fake_strategy.py --strategy-transcript external/run.strategy.jsonl --strategy-timeout 5 --durable-artifacts
+  run=external-demo audits=13 orders=1 active=0 filled=1 rejected=0
   cash=9793.544 equity=10007.544 gross=214 realized=0 unrealized=7.544 fees=0.456
   journal=external/run.journal.jsonl
   strategy_transcript=external/run.strategy.jsonl
 
   $ python3 -c 'from pathlib import Path; print(len(Path("external/run.journal.jsonl").read_text().splitlines()), len(Path("external/run.strategy.jsonl").read_text().splitlines()))'
-  12 14
-  $ diff -u ../contracts/strategy/v6/fixtures/external.strategy.jsonl external/run.strategy.jsonl
+  13 14
+  $ diff -u ../contracts/strategy/v1/fixtures/external.strategy.jsonl external/run.strategy.jsonl
 
   $ mkdir external-json
-  $ ../bin/main.exe --output-format json --input ../contracts/strategy/v6/fixtures/external.scenario.json --journal external-json/run.journal.jsonl --strategy-executable ./fake_strategy.py --strategy-transcript external-json/run.strategy.jsonl --strategy-timeout 5 | python3 -c 'import hashlib, json, sys; result=json.load(sys.stdin); digest=lambda path: hashlib.sha256(open(path, "rb").read()).hexdigest(); print(result["operation"], result["run_id"], result["artifacts"]["strategy_transcript"]); print(result["hashes"]["journal_sha256"] == digest(result["artifacts"]["journal"]), result["hashes"]["strategy_transcript_sha256"] == digest(result["artifacts"]["strategy_transcript"]))'
+  $ ../bin/main.exe --output-format json --input ../contracts/strategy/v1/fixtures/external.scenario.json --journal external-json/run.journal.jsonl --strategy-executable ./fake_strategy.py --strategy-transcript external-json/run.strategy.jsonl --strategy-timeout 5 | python3 -c 'import hashlib, json, sys; result=json.load(sys.stdin); digest=lambda path: hashlib.sha256(open(path, "rb").read()).hexdigest(); print(result["operation"], result["run_id"], result["artifacts"]["strategy_transcript"]); print(result["hashes"]["journal_sha256"] == digest(result["artifacts"]["journal"]), result["hashes"]["strategy_transcript_sha256"] == digest(result["artifacts"]["strategy_transcript"]))'
   replay external-demo external-json/run.strategy.jsonl
   True True
 
-  $ ../bin/main.exe --input ../contracts/strategy/v6/fixtures/external.scenario.json --journal ignored-stdout.journal.jsonl --strategy-executable ./fake_strategy.py --strategy-transcript -
+  $ ../bin/main.exe --input ../contracts/strategy/v1/fixtures/external.scenario.json --journal ignored-stdout.journal.jsonl --strategy-executable ./fake_strategy.py --strategy-transcript -
   trading-engine: --strategy-transcript does not support standard output; choose a file path
   [123]
   $ test ! -e ignored-stdout.journal.jsonl
 
   $ mkdir callback-ordering
-  $ ../bin/main.exe --input ../contracts/strategy/v6/fixtures/external.scenario.json --journal callback-ordering/run.journal.jsonl --strategy-executable ./fake_strategy.py --strategy-arg cancel-next --strategy-transcript callback-ordering/run.strategy.jsonl --strategy-timeout 5
-  run=external-demo audits=12 orders=2 active=0 filled=1 rejected=0
+  $ ../bin/main.exe --input ../contracts/strategy/v1/fixtures/external.scenario.json --journal callback-ordering/run.journal.jsonl --strategy-executable ./fake_strategy.py --strategy-arg cancel-next --strategy-transcript callback-ordering/run.strategy.jsonl --strategy-timeout 5
+  run=external-demo audits=13 orders=2 active=0 filled=1 rejected=0
   cash=9896.647 equity=10003.647 gross=107 realized=0 unrealized=3.647 fees=0.353
   journal=callback-ordering/run.journal.jsonl
   strategy_transcript=callback-ordering/run.strategy.jsonl
@@ -130,7 +130,7 @@
   107 107
 
   $ mkdir failed-external
-  $ ../bin/main.exe --input ../contracts/strategy/v6/fixtures/external.scenario.json --journal failed-external/run.journal.jsonl --strategy-executable ./fake_strategy.py --strategy-arg stall --strategy-transcript failed-external/run.strategy.jsonl --strategy-timeout 0.01
+  $ ../bin/main.exe --input ../contracts/strategy/v1/fixtures/external.scenario.json --journal failed-external/run.journal.jsonl --strategy-executable ./fake_strategy.py --strategy-arg stall --strategy-transcript failed-external/run.strategy.jsonl --strategy-timeout 0.01
   trading-engine: strategy initialization: external strategy timed out
   [123]
   $ test ! -e failed-external/run.journal.jsonl
@@ -143,7 +143,7 @@
   >   expected="$2"
   >   directory="fault-$mode"
   >   mkdir "$directory"
-  >   output=$(../bin/main.exe --input ../contracts/strategy/v6/fixtures/external.scenario.json --journal "$directory/run.journal.jsonl" --strategy-executable ./fake_strategy.py --strategy-arg "$mode" --strategy-transcript "$directory/run.strategy.jsonl" --strategy-timeout 5 2>&1)
+  >   output=$(../bin/main.exe --input ../contracts/strategy/v1/fixtures/external.scenario.json --journal "$directory/run.journal.jsonl" --strategy-executable ./fake_strategy.py --strategy-arg "$mode" --strategy-transcript "$directory/run.strategy.jsonl" --strategy-timeout 5 2>&1)
   >   status=$?
   >   test "$status" -eq 123 || return 1
   >   case "$output" in *"$expected"*) ;; *) return 1 ;; esac
@@ -188,7 +188,7 @@
   >     if mode == "bad-sequence":
   >         assert response["strategy_sequence"] == "999"
   >     elif mode == "wrong-version":
-  >         assert response["strategy_protocol_version"] == "1"
+  >         assert response["strategy_protocol_version"] == "2"
   >     elif mode == "unknown-field":
   >         assert response["unexpected"] is True
   > PY
@@ -220,7 +220,7 @@
   >   directory="process-tree-$mode"
   >   mkdir "$directory"
   >   pid_path="$directory/grandchild.pid"
-  >   output=$(../bin/main.exe --input ../contracts/strategy/v6/fixtures/external.scenario.json --journal "$directory/run.journal.jsonl" --strategy-executable ./fake_strategy.py --strategy-arg "$mode" --strategy-arg "$pid_path" --strategy-transcript "$directory/run.strategy.jsonl" --strategy-timeout 0.2 2>&1)
+  >   output=$(../bin/main.exe --input ../contracts/strategy/v1/fixtures/external.scenario.json --journal "$directory/run.journal.jsonl" --strategy-executable ./fake_strategy.py --strategy-arg "$mode" --strategy-arg "$pid_path" --strategy-transcript "$directory/run.strategy.jsonl" --strategy-timeout 0.2 2>&1)
   >   status=$?
   >   test "$status" -eq 123 || return 1
   >   case "$output" in *"$expected"*) ;; *) return 1 ;; esac
@@ -249,8 +249,8 @@
   grandchild-malformed: process tree reaped
 
   $ mkdir external-stream
-  $ ../bin/main.exe --input-format jsonl --input ../contracts/strategy/v6/fixtures/external.scenario.jsonl --journal external-stream/run.journal.jsonl --strategy-executable ./fake_strategy.py --strategy-transcript external-stream/run.strategy.jsonl --strategy-timeout 5
-  run=external-demo audits=12 orders=1 active=0 filled=1 rejected=0
+  $ ../bin/main.exe --input-format jsonl --input ../contracts/strategy/v1/fixtures/external.scenario.jsonl --journal external-stream/run.journal.jsonl --strategy-executable ./fake_strategy.py --strategy-transcript external-stream/run.strategy.jsonl --strategy-timeout 5
+  run=external-demo audits=13 orders=1 active=0 filled=1 rejected=0
   cash=9793.544 equity=10007.544 gross=214 realized=0 unrealized=7.544 fees=0.456
   journal=external-stream/run.journal.jsonl
   strategy_transcript=external-stream/run.strategy.jsonl

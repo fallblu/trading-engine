@@ -45,18 +45,8 @@ let validate_venue_calendars ~root catalog venue_calendars =
         "venue calendars must cover every configured instrument exactly once"
     else Ok ()
 
-let header ~root ~contract_version ~base_currency ~initial_cash ~instruments
-    ~venue_calendars ~max_internal_events =
-  let* () =
-    if
-      List.mem contract_version
-        [ "16"; "15"; "14"; "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6" ]
-    then Ok ()
-    else
-      Account.create ~base_currency ~initial_cash
-      |> Result.map (fun _ -> ())
-      |> at (child root "initial_cash")
-  in
+let header ~root ~base_currency ~initial_cash ~instruments ~venue_calendars
+    ~max_internal_events =
   if instruments = [] then
     fail ~json_path:(child root "instruments")
       "scenario must define at least one instrument"
@@ -68,15 +58,7 @@ let header ~root ~contract_version ~base_currency ~initial_cash ~instruments
     if Id.Instrument.Set.cardinal catalog <> List.length instruments then
       fail ~json_path:(child root "instruments") "instrument IDs must be unique"
     else
-      let* () =
-        if
-          List.mem contract_version
-            [
-              "16"; "15"; "14"; "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6"; "5";
-            ]
-        then validate_venue_calendars ~root catalog venue_calendars
-        else Ok ()
-      in
+      let* () = validate_venue_calendars ~root catalog venue_calendars in
       let currencies =
         base_currency
         :: List.map
@@ -89,25 +71,7 @@ let header ~root ~contract_version ~base_currency ~initial_cash ~instruments
       in
       if cash_currencies <> currencies then
         fail
-          ~json_path:
-            (child root
-               (if
-                  List.mem contract_version
-                    [
-                      "16";
-                      "15";
-                      "14";
-                      "13";
-                      "12";
-                      "11";
-                      "10";
-                      "9";
-                      "8";
-                      "7";
-                      "6";
-                    ]
-                then "initial_portfolio.cash"
-                else "initial_cash"))
+          ~json_path:(child root "initial_portfolio.cash")
           "initial cash must contain every scenario currency exactly once"
       else if max_internal_events <= 0 then
         fail

@@ -21,10 +21,8 @@ type t
 
 type configuration_contract = private {
   version : string;
-  previous_versions : string list;
   scenario_contract_versions : string list;
   required_fields : string list;
-  legacy_required_fields : string list;
   supported_order_types : string list;
   data_requirements : string list;
   limits : Yojson.Safe.t;

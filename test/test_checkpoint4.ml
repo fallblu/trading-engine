@@ -2,37 +2,6 @@ open Test_support
 module T = Trading_engine
 module Runner = T.Engine.Make (T.Scripted_strategy)
 
-module Margin_observing_strategy = struct
-  type state = { saw_liquidation_update : bool }
-
-  let name = "margin-observer"
-  let initial = { saw_liquidation_update = false }
-
-  let on_event state _context event =
-    match event with
-    | T.Strategy.Market_slice_closed market_slice
-      when Int64.equal market_slice.T.Market_slice.slice_sequence 1L ->
-        ( state,
-          [
-            T.Strategy.Target_quantities
-              [
-                T.Strategy.
-                  {
-                    instrument_id = instrument_id "test-equity";
-                    quantity = quantity "15";
-                  };
-              ];
-          ] )
-    | T.Strategy.Order_updated order
-      when order.T.Order.request.origin = T.Order.Margin_liquidation ->
-        ({ saw_liquidation_update = true }, [])
-    | T.Strategy.Market_slice_closed _ | T.Strategy.Fill_received _
-    | T.Strategy.Order_updated _ | T.Strategy.Intent_rejected _ ->
-        (state, [])
-end
-
-module Margin_runner = T.Engine.Make (Margin_observing_strategy)
-
 let euro_instrument () =
   instrument ~id:"euro-equity" ~symbol:"EURO" ~currency:"EUR" ~lot_size:"0.001"
     ()
@@ -51,6 +20,7 @@ let multi_currency_fractional_accounting () =
     T.Fill.create ~id:(fill_id "euro-fill") ~order_id:order.id
       ~instrument_id:euro.id ~quote_currency:"EUR" ~side:T.Order.Buy
       ~quantity:(quantity "1.5") ~price:(price "20") ~fee:(money "0.5")
+      ~fee_components:[]
       ~executed_at:(timestamp "2026-01-03T14:30:00Z")
       ~slice_sequence:2L
     |> ok
@@ -146,7 +116,7 @@ let split_adjusts_working_order () =
   let config = engine_config () in
   let state =
     Runner.create ~run_id:(run_id "split-order") ~scenario_sha256 ~config
-      ~initial_cash:[ ("USD", money "10000") ]
+      ~initial_portfolio:(initial_portfolio ~cash:[ ("USD", money "10000") ] ())
       ~strategy_state
     |> ok
   in
@@ -190,7 +160,7 @@ let split_caps_adjusted_market_fill () =
     Runner.create
       ~run_id:(run_id "split-market-cap")
       ~scenario_sha256 ~config
-      ~initial_cash:[ ("USD", money "10000") ]
+      ~initial_portfolio:(initial_portfolio ~cash:[ ("USD", money "10000") ] ())
       ~strategy_state
     |> ok
   in
@@ -262,7 +232,7 @@ let split_caps_partially_filled_limit_remainder () =
     Runner.create
       ~run_id:(run_id "split-partial-limit")
       ~scenario_sha256 ~config
-      ~initial_cash:[ ("USD", money "10000") ]
+      ~initial_portfolio:(initial_portfolio ~cash:[ ("USD", money "10000") ] ())
       ~strategy_state
     |> ok
   in
@@ -348,7 +318,7 @@ let reverse_split_restores_order_below_maximum () =
     Runner.create
       ~run_id:(run_id "reverse-split-order")
       ~scenario_sha256 ~config
-      ~initial_cash:[ ("USD", money "10000") ]
+      ~initial_portfolio:(initial_portfolio ~cash:[ ("USD", money "10000") ] ())
       ~strategy_state
     |> ok
   in
@@ -389,98 +359,6 @@ let reverse_split_restores_order_below_maximum () =
          | T.Audit.Fill_clipped _ -> true
          | _ -> false)
        events)
-
-let margin_call_forces_deterministic_liquidation () =
-  let config = engine_config () in
-  let state =
-    Margin_runner.create ~run_id:(run_id "margin-call") ~scenario_sha256 ~config
-      ~initial_cash:[ ("USD", money "1000") ]
-      ~strategy_state:Margin_observing_strategy.initial
-    |> ok
-  in
-  let state, _ = Margin_runner.process_slice state (market_slice 1L) |> ok in
-  let stressed_bar =
-    bar ~open_price:"100" ~high_price:"100" ~low_price:"40" ~close_price:"40" 2L
-  in
-  let state, call_events =
-    Margin_runner.process_slice state (market_slice ~bars:[ stressed_bar ] 2L)
-    |> ok
-  in
-  Alcotest.(check bool)
-    "margin call emitted" true
-    (List.exists
-       (fun event ->
-         String.equal (T.Audit.event_name event.T.Audit.event) "margin_call")
-       call_events);
-  let liquidation =
-    T.Oms.active_orders (Margin_runner.oms state)
-    |> List.find (fun order ->
-        order.T.Order.request.origin = T.Order.Margin_liquidation)
-  in
-  Alcotest.(check string)
-    "forced sell" "sell"
-    (T.Order.side_to_string liquidation.request.side);
-  Alcotest.(check bool)
-    "strategy observes liquidation order updates" true
-    (Margin_runner.strategy_state state).saw_liquidation_update;
-  let liquidation_bar =
-    bar ~open_price:"40" ~high_price:"40" ~low_price:"40" ~close_price:"40" 3L
-  in
-  let state, restored_events =
-    Margin_runner.process_slice state
-      (market_slice ~bars:[ liquidation_bar ] 3L)
-    |> ok
-  in
-  Alcotest.check quantity_testable "position flattened" T.Scalar.Quantity.zero
-    (T.Account.position_quantity
-       (Margin_runner.account state)
-       (instrument_id "test-equity"));
-  Alcotest.(check bool)
-    "margin restored emitted" true
-    (List.exists
-       (fun event ->
-         String.equal (T.Audit.event_name event.T.Audit.event) "margin_restored")
-       restored_events)
-
-let short_borrow_accrues_before_matching () =
-  let target =
-    T.Strategy.Target_quantities
-      [
-        T.Strategy.
-          {
-            instrument_id = instrument_id "test-equity";
-            quantity = quantity "-10";
-          };
-      ]
-  in
-  let strategy_state = T.Scripted_strategy.create [ (1L, [ target ]) ] |> ok in
-  let config = engine_config ~risk:(risk ~short_borrow_bps:3650 ()) () in
-  let state =
-    Runner.create ~run_id:(run_id "short-borrow") ~scenario_sha256 ~config
-      ~initial_cash:[ ("USD", money "1000") ]
-      ~strategy_state
-    |> ok
-  in
-  let state, _ = Runner.process_slice state (market_slice 1L) |> ok in
-  let state, _ = Runner.process_slice state (market_slice 2L) |> ok in
-  let state, events = Runner.process_slice state (market_slice 3L) |> ok in
-  let borrow =
-    List.find_map
-      (fun event ->
-        match event.T.Audit.event with
-        | T.Audit.Borrow_fee_applied { fee; _ } -> Some fee
-        | _ -> None)
-      events
-    |> Option.get
-  in
-  Alcotest.(check bool)
-    "positive borrow fee" true
-    (T.Scalar.Money.compare borrow (money "0") > 0);
-  let position =
-    T.Account.position (Runner.account state) (instrument_id "test-equity")
-  in
-  Alcotest.check money_testable "borrow fee attributed" borrow
-    position.borrow_fees
 
 let risk_allows_reducing_an_out_of_limit_position () =
   let configured_risk = risk ~max_long:"10" () in
@@ -571,7 +449,8 @@ let engine_requires_complete_currency_ledgers () =
     "missing EUR ledger rejected" true
     (Result.is_error
        (Runner.create ~run_id:(run_id "missing-ledger") ~scenario_sha256 ~config
-          ~initial_cash:[ ("USD", money "1000") ]
+          ~initial_portfolio:
+            (initial_portfolio ~cash:[ ("USD", money "1000") ] ())
           ~strategy_state))
 
 let tests =
@@ -588,10 +467,6 @@ let tests =
       split_caps_partially_filled_limit_remainder;
     Alcotest.test_case "reverse split restores order below maximum" `Quick
       reverse_split_restores_order_below_maximum;
-    Alcotest.test_case "margin call forces liquidation" `Quick
-      margin_call_forces_deterministic_liquidation;
-    Alcotest.test_case "short borrow accrues" `Quick
-      short_borrow_accrues_before_matching;
     Alcotest.test_case "risk allows reduction above position cap" `Quick
       risk_allows_reducing_an_out_of_limit_position;
     Alcotest.test_case "fill clipping reason taxonomy is stable" `Quick

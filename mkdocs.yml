@@ -1,5 +1,5 @@
 site_name: Trading Engine
-site_description: Deterministic execution, replay contracts, and OCaml API reference
+site_description: Deterministic OCaml trading replay engine
 site_url: https://fallblu.github.io/trading-engine/
 repo_url: https://github.com/fallblu/trading-engine
 repo_name: fallblu/trading-engine
@@ -31,18 +31,9 @@ nav:
       - Diagnostics:
           - Current v1: contracts/diagnostic/v1/README.md
       - Scenario and journal:
-          - Current v16: contracts/v16/README.md
-          - Transitional v5: contracts/v5/README.md
-          - Transitional v4: contracts/v4/README.md
-          - Transitional v3: contracts/v3/README.md
-          - Frozen v2: contracts/v2/README.md
-          - Historical v1: contracts/v1/README.md
+          - Current v1: contracts/v1/README.md
       - External strategy:
-          - Current v14: contracts/strategy/v14/README.md
-          - Historical v13: contracts/strategy/v13/README.md
-          - Historical v3: contracts/strategy/v3/README.md
-          - Historical v2: contracts/strategy/v2/README.md
-          - Historical v1: contracts/strategy/v1/README.md
+          - Current v1: contracts/strategy/v1/README.md
   - API reference: docs/api-reference.md
   - Engineering:
       - Continuous integration: docs/continuous-integration.md

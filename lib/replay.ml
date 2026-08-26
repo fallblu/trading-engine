@@ -70,35 +70,8 @@ let add_audit_count count events =
 
 let engine_config ~contract_version ~risk ~venue_calendars ~execution_model
     ~execution ~financing ~settlement ~max_internal_events =
-  match (financing, settlement) with
-  | None, None ->
-      Engine.config_v8 ~contract_version ~risk ~venue_calendars ~execution_model
-        ~execution ~max_internal_events
-  | Some financing, None ->
-      Engine.config_v10 ~contract_version ~risk ~venue_calendars
-        ~execution_model ~execution ~financing ~max_internal_events
-  | Some financing, Some settlement ->
-      if List.mem contract_version [ "16"; "15" ] then
-        Engine.config_v16 ~contract_version ~risk ~venue_calendars
-          ~execution_model ~execution ~financing ~settlement
-          ~max_internal_events
-      else if String.equal contract_version "14" then
-        Engine.config_v14 ~contract_version ~risk ~venue_calendars
-          ~execution_model ~execution ~financing ~settlement
-          ~max_internal_events
-      else if String.equal contract_version "13" then
-        Engine.config_v13 ~contract_version ~risk ~venue_calendars
-          ~execution_model ~execution ~financing ~settlement
-          ~max_internal_events
-      else if String.equal contract_version "12" then
-        Engine.config_v12 ~contract_version ~risk ~venue_calendars
-          ~execution_model ~execution ~financing ~settlement
-          ~max_internal_events
-      else
-        Engine.config_v11 ~contract_version ~risk ~venue_calendars
-          ~execution_model ~execution ~financing ~settlement
-          ~max_internal_events
-  | None, Some _ -> Error "settlement requires financing configuration"
+  Engine.config ~contract_version ~risk ~venue_calendars ~execution_model
+    ~execution ~financing ~settlement ~max_internal_events
 
 let run ~scenario_sha256 ?journal_path ?(durability = Artifact_writer.Buffered)
     scenario =
@@ -114,13 +87,8 @@ let run ~scenario_sha256 ?journal_path ?(durability = Artifact_writer.Buffered)
     |> reducer_result
   in
   let* initial =
-    (match scenario.initial_portfolio with
-      | None ->
-          Runner.create ~run_id:scenario.run_id ~scenario_sha256 ~config
-            ~initial_cash:scenario.initial_cash ~strategy_state
-      | Some initial_portfolio ->
-          Runner.create_with_portfolio ~run_id:scenario.run_id ~scenario_sha256
-            ~config ~initial_portfolio ~strategy_state)
+    Runner.create ~run_id:scenario.run_id ~scenario_sha256 ~config
+      ~initial_portfolio:scenario.initial_portfolio ~strategy_state
     |> reducer_result
   in
   let journal_result =
@@ -197,15 +165,8 @@ let run_stream_pass ~scenario_sha256 ~journal channel =
           | Error _ as error -> error
           | Ok config -> (
               match
-                (match header.initial_portfolio with
-                  | None ->
-                      Runner.create ~run_id:header.run_id ~scenario_sha256
-                        ~config ~initial_cash:header.initial_cash
-                        ~strategy_state
-                  | Some initial_portfolio ->
-                      Runner.create_with_portfolio ~run_id:header.run_id
-                        ~scenario_sha256 ~config ~initial_portfolio
-                        ~strategy_state)
+                Runner.create ~run_id:header.run_id ~scenario_sha256 ~config
+                  ~initial_portfolio:header.initial_portfolio ~strategy_state
                 |> reducer_result
               with
               | Error _ as error -> error

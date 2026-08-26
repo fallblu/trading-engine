@@ -1,7 +1,3 @@
-type fee_configuration =
-  | Legacy of { fixed_fee : Scalar.Money.t; fee_bps : int }
-  | Schedules of Fee_schedule.t Id.Instrument.Map.t
-
 type missing_volume_policy = Reject_missing_volume | Zero_impact
 
 type cost_model = {
@@ -12,7 +8,7 @@ type cost_model = {
 
 type t = {
   participation_bps : int;
-  fee_configuration : fee_configuration;
+  fee_schedules : Fee_schedule.t Id.Instrument.Map.t;
   cost_model : cost_model option;
   book_depth_limit : int option;
 }
@@ -55,23 +51,7 @@ let ( let* ) result function_ =
 
 let cursor next = Cursor (fun oms -> next ~oms)
 
-let create ~participation_bps ~fixed_fee ~fee_bps =
-  if participation_bps < 0 || participation_bps > 10_000 then
-    Error "participation basis points must be between 0 and 10000"
-  else if Scalar.Money.compare fixed_fee Scalar.Money.zero < 0 then
-    Error "fixed fee must be nonnegative"
-  else if fee_bps < 0 || fee_bps > 10_000 then
-    Error "fee basis points must be between 0 and 10000"
-  else
-    Ok
-      {
-        participation_bps;
-        fee_configuration = Legacy { fixed_fee; fee_bps };
-        cost_model = None;
-        book_depth_limit = None;
-      }
-
-let create_v2 ~participation_bps ~fee_schedules =
+let create ~participation_bps ~fee_schedules =
   if participation_bps < 0 || participation_bps > 10_000 then
     Error "participation basis points must be between 0 and 10000"
   else
@@ -91,7 +71,7 @@ let create_v2 ~participation_bps ~fee_schedules =
       (fun schedules ->
         {
           participation_bps;
-          fee_configuration = Schedules schedules;
+          fee_schedules = schedules;
           cost_model = None;
           book_depth_limit = None;
         })
@@ -112,7 +92,7 @@ let create_conservative ~participation_bps ~fee_schedules ~half_spread_bps
             Some
               { half_spread_bps; impact_coefficient_bps; missing_volume_policy };
         })
-      (create_v2 ~participation_bps ~fee_schedules)
+      (create ~participation_bps ~fee_schedules)
 
 let create_order_book ~participation_bps ~fee_schedules ~max_depth_levels =
   if max_depth_levels <= 0 || max_depth_levels > 1024 then
@@ -120,45 +100,24 @@ let create_order_book ~participation_bps ~fee_schedules ~max_depth_levels =
   else
     Result.map
       (fun state -> { state with book_depth_limit = Some max_depth_levels })
-      (create_v2 ~participation_bps ~fee_schedules)
+      (create ~participation_bps ~fee_schedules)
 
 let participation_bps state = state.participation_bps
 let book_depth_limit state = state.book_depth_limit
 
-let fixed_fee state =
-  match state.fee_configuration with
-  | Legacy { fixed_fee; _ } -> fixed_fee
-  | Schedules _ -> Scalar.Money.zero
-
-let fee_bps state =
-  match state.fee_configuration with
-  | Legacy { fee_bps; _ } -> fee_bps
-  | Schedules _ -> 0
-
 let fee_schedules state =
-  match state.fee_configuration with
-  | Legacy _ -> []
-  | Schedules schedules -> Id.Instrument.Map.bindings schedules |> List.map snd
+  Id.Instrument.Map.bindings state.fee_schedules |> List.map snd
 
 let cost_model state = state.cost_model
 
 let calculate_fee state ~instrument ~notional ~quantity ~liquidity ~fx_rates =
-  match state.fee_configuration with
-  | Legacy { fixed_fee; fee_bps } ->
-      let ( let* ) result function_ =
-        match result with
-        | Ok value -> function_ value
-        | Error _ as error -> error
-      in
-      let* fee = Scalar.Money.fee ~fixed:fixed_fee ~bps:fee_bps ~notional in
-      Ok ([], fee)
-  | Schedules schedules -> (
-      match Id.Instrument.Map.find_opt instrument.Instrument.id schedules with
-      | None -> Error "execution instrument has no configured fee schedule"
-      | Some schedule ->
-          Fee_schedule.calculate schedule
-            ~quote_currency:instrument.quote_currency ~notional ~quantity
-            ~liquidity ~fx_rates)
+  match
+    Id.Instrument.Map.find_opt instrument.Instrument.id state.fee_schedules
+  with
+  | None -> Error "execution instrument has no configured fee schedule"
+  | Some schedule ->
+      Fee_schedule.calculate schedule ~quote_currency:instrument.quote_currency
+        ~notional ~quantity ~liquidity ~fx_rates
 
 type limit_fill_policy = Optimistic_touch | Next_open_only | Adverse_touch
 

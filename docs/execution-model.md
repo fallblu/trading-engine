@@ -1,283 +1,74 @@
 # Execution model
 
-The engine selects a compiled execution module by the scenario's stable `execution.model` name.
-Contract v16 advertises `completed_bar_v1`, `completed_bar_next_open_v1`,
-`completed_bar_adverse_touch_v1`, `quote_trade_v1`, and `order_book_v1`; embedders can inject another module through
-the typed engine configuration without introducing runtime shared-library loading. The selected
-name is repeated in both terminal audit records.
+The scenario selects one compiled model by `execution.model`. Each model uses strict configuration
+version `"1"`, declares its required fields through `--capabilities`, and shares the same order,
+risk, fee, settlement, accounting, and audit pipeline.
 
-Each compiled model owns a strict configuration contract. The v16 envelope separates selection from
-model-specific parameters:
+## Available models
 
-```json
-{
-  "execution": {
-    "model": "completed_bar_v1",
-    "configuration": {
-      "version": "2",
-      "participation_bps": 5000,
-      "fee_schedules": [
-        {
-          "schedule_id": "acme-fees-v1",
-          "instrument_id": "acme",
-          "settlement_currency": "USD",
-          "minimum": "0.3",
-          "maximum": "5",
-          "components": [
-            { "name": "broker", "currency": "USD", "kind": "fixed", "value": "0.25", "rounding": "up", "applies_to": "any" },
-            { "name": "exchange", "currency": "USD", "kind": "notional_bps", "value": 10, "rounding": "up", "applies_to": "taker" }
-          ]
-        }
-      ]
-    }
-  }
-}
-```
+| Model | Market evidence |
+| --- | --- |
+| `completed_bar_v1` | Next eligible open and optimistic intrabar limit touch |
+| `completed_bar_next_open_v1` | Later marketable opens with explicit spread and impact |
+| `completed_bar_adverse_touch_v1` | Opens or one-tick adverse trade-through with costs |
+| `quote_trade_v1` | Displayed quotes and aggressor-classified trades |
+| `order_book_v1` | Bounded level-two snapshots and contiguous updates |
 
-The model and configuration version are validated before replay. Unknown models, unsupported
-model/version pairs, missing fields, and fields from another model are rejected. Contracts v3 and
-v4 retain their frozen flat execution object; v8 and earlier configured envelopes remain frozen.
+Completed bars remain mandatory for synchronized valuation. Conservative models require fixed
+half-spread and linear participation-impact policies. Quote/trade and order-book models use causal
+availability, receipt, and ingest ordering and never infer hidden liquidity.
 
-`--capabilities` preserves the `execution_models` name list and publishes one deterministic
-descriptor per model under `execution_model_contracts`: supported scenario and configuration
-versions, required fields, order types, market-data requirements, and numeric limits. Clients can
-therefore reject incompatible scenarios without guessing from a shared execution object.
+## Eligibility and order lifetime
 
-The completed-bar model consumes synchronized slices of OHLCV bars. Every slice contains exactly
-one bar for each configured instrument and produces one matching batch and one closing valuation.
-
-The conservative models use strict configuration version `"1"`. Both require `spread_model` with
-`model: "fixed_half_spread_v1"` and `half_spread_bps`, plus `impact_model` with
-`model: "linear_participation_v1"`, `coefficient_bps`, and `missing_volume_policy`. The latter is
-either `reject` or `zero_impact`; no ambient spread or volume data is inferred.
-
-The quote/trade model also uses configuration version `"1"`, with `participation_bps` and the same
-fee-schedule catalog. It consumes each slice's events in `(available_at, received_at,
-ingest_sequence)` order. Market orders and marketable limits consume only the displayed quote size
-on their side. Passive buys consume only sell-aggressor trades at or below their limit; passive
-sells consume only buy-aggressor trades at or above it. An `unknown` aggressor never supplies a
-passive fill. Each event has independent, lot-rounded capacity, and its `event_at` is the fill's
-economic timestamp. Completed bars remain required solely for synchronized valuation.
-
-The order-book model uses configuration version `"1"`, adding `max_depth_levels` from 1 through
-1,024. Each instrument's slice-local bundle begins with a full bid/ask snapshot and uses contiguous
-absolute set, delete, and trade updates. Crossed states, gaps, missing deletes, and states beyond
-the depth limit fail replay; a locked best bid and ask is accepted. Each later slice starts from a
-fresh snapshot, so no unbounded or hidden book state survives a slice boundary.
-
-Marketable orders walk observable opposite-side levels in price order. Passive limits start behind
-the displayed quantity at their price and behind earlier engine orders. Reductions decrease queue
-ahead, additions join behind, and an aggressor-qualified trade consumes queue ahead before filling
-the order. This model has its own liquidity state and does not reuse completed-bar or quote/trade
-fill semantics. Bars remain mandatory only for valuation.
-
-## Eligibility
-
-An order records the slice after which it is eligible. The matcher requires:
+An order becomes eligible only when both conditions hold:
 
 ```text
 eligible_after_slice_sequence < current slice_sequence
 created_at <= current slice start_at
 ```
 
-This prevents an order emitted from a completed slice from filling inside that slice or at an open
-that predates the order. The parser also requires scheduled order-changing intents to arrive by
-the next slice start.
+Market orders attempt the next eligible evidence and cancel any IOC remainder. Limit orders use
+their configured time in force. Stop orders activate when their trigger is observed. FOK requires
+the full quantity to pass liquidity and risk checks before any fill is applied.
 
-## Portfolio targets
+Persistent portfolio targets are reconciled in lot-aligned, maximum-order-sized attempts until the
+target is reached or replaced. A sign change flattens before opening the opposite side.
 
-`target_weights` and `target_quantities` contain one target for every configured instrument. A
-weight request:
+## Capacity, priority, and callbacks
 
-1. Values the current account at all synchronized slice closes.
-2. Multiplies that equity by each exact weight.
-3. Divides by the corresponding closing price.
-4. Rounds down to the instrument lot.
+Completed-bar capacity is volume multiplied by `participation_bps`, rounded down to the instrument
+lot. Quote and book models use only displayed or causally consumed liquidity. Liquidation orders
+run first; within an origin class sells precede buys, followed by FIFO creation order.
 
-Weights and quantities are signed. Gross absolute weight must stay within `max_leverage`, quantity
-targets must align with their lots, and every desired quantity must stay within the configured long
-or short position limit. A target that changes sign is reached causally: flatten first, then open
-the opposite side on a later attempt.
+After each fill, the reducer applies the strategy callback response before examining the next
+eligible order. A cancellation can therefore remove a later same-slice order. Newly submitted
+orders wait for another slice.
 
-The computed desired quantities persist. After each slice, the engine compares them with actual
-positions and submits at most one market order per instrument. Each order is capped at
-`max_order_quantity` and rounded down to a lot, so large targets advance in bounded chunks. A
-market remainder is IOC, but the desired target is retried after a later slice until reached or
-superseded.
+## Risk and fees
 
-## Working-order risk
+Admission reserves every active order's remaining quantity. Fill-time checks use the actual price
+and search for the largest permitted lot-aligned quantity under instrument position/notional,
+portfolio gross exposure/leverage, margin, locate, and maximum-order limits. Exposure-reducing
+fills remain available. A clipped proposal emits a typed `fill_clipped` reason.
 
-Pre-trade risk reserves each active order's unfilled quantity by side. For every instrument, it
-values both the position after all reserved buys and the position after all reserved sells, then
-uses the larger absolute endpoint for portfolio exposure. Opposing orders therefore cannot hide
-risk by netting before either execution path is known.
+Each instrument has exactly one fee schedule. Components may be fixed, notional basis points, or
+per-unit; use explicit currency, rounding, and maker/taker applicability; and may include schedule
+minimums, maximums, or rebates. FX conversion and every adjustment are retained in attribution.
 
-A new order is rejected while an active opposite-side order exists for the same instrument. This
-self-cross rule applies to direct and target-generated orders. Same-side orders may coexist, and
-their remaining quantities share the applicable long or short position limit. Risk-reducing orders
-remain permitted when an actual position is already outside a limit, but one order may not cross
-that position through zero. Fill-time position, exposure, leverage, and margin checks remain the
-final defense against price and account changes after acceptance.
+## Financing, settlement, and lifecycle
 
-## Market and limit prices
+Effective-time observations drive short availability, borrow charges, recalls, and per-currency
+credit or debit interest. Settlement instructions use explicit business calendars and lags, with
+configured settled or total cash and position availability.
 
-A market order executes at the open of its first eligible slice.
-
-For a buy limit `L`:
-
-1. If `open <= L`, fill at `open`.
-2. Otherwise, if `low <= L`, fill at `L`.
-3. Otherwise, do not fill.
-
-Sell limits use the symmetric open/high rule. Limit remainders remain GTC. The open rule gives
-deterministic gap improvement. The frozen `completed_bar_v1` touch rule is optimistic because completed bars contain no
-queue, path, or available-size evidence at the limit.
-
-`completed_bar_next_open_v1` fills a limit only at a later marketable open.
-`completed_bar_adverse_touch_v1` additionally permits maker fills after the completed bar trades
-through the limit by at least one instrument tick. Its pre-cost reference is that one-tick adverse
-price. A mere touch does not fill.
-
-For both conservative models, fixed half-spread and participation-linear impact are rounded away
-from the reference price to whole instrument ticks. Buy adjustments add and sell adjustments
-subtract. A cost-adjusted price that would violate a limit is ineligible. Before each fill the
-engine emits `execution_price_selected`, attributing reference price, spread adjustment, impact
-adjustment, and final executable price; the fill causally references that event.
-
-## Capacity and priority
-
-Missing volume means unlimited simulated capacity. Otherwise:
-
-```text
-raw capacity = floor(volume × participation_bps / 10,000)
-capacity = raw capacity rounded down to the instrument lot size
-```
-
-Eligible liquidation orders are ordered before all other orders across the slice. Within the
-liquidation and ordinary origin classes, sells precede buys; orders within a side then use
-ascending creation sequence and order ID. Each instrument has its own shared capacity, so the
-higher-priority order consumes that instrument's capacity first.
-
-## Callback boundaries
-
-The matcher fixes the eligible-order sequence at the slice boundary and advances it with an
-immutable cursor. After each fill, the engine pauses matching and applies the strategy response
-before examining the next order. The cursor then reads that order from the current OMS, skips it
-if an earlier response made it terminal, and preserves any capacity that was not consumed. Orders
-submitted by a callback are not part of the cursor and remain ineligible until a later slice.
-
-## Corporate actions and borrow
-
-Corporate actions are ordered by action ID and applied before matching. A split scales the signed
-position, persistent quantity target, and each active order by its exact numerator/denominator
-ratio. It inversely scales limit prices and preserves total position basis. If the adjusted order
-cannot satisfy the configured lot or tick, the slice fails instead of silently rounding. Each
-changed order emits `order_adjusted` with causal links to both the original order and split.
-Unit-based risk limits do not scale with a split. Adjusted positions and persistent targets are
-grandfathered: fills may reduce an out-of-limit absolute position but may not increase it, and
-reconciliation orders remain bounded by the configured maximum order quantity. An adjusted active
-order may exceed that maximum, but no individual fill may do so.
-
-A cash dividend multiplies the pre-match signed position by its per-unit amount. It credits a long
-or debits a short in the instrument's quote-currency ledger and records realized dividend P&L.
-Stock dividends, rights, and spin-offs deliver a lot-aligned exact-ratio entitlement. Their payload
-allocates basis explicitly and either rejects fractions or converts them at a declared
-quote-currency price. Stock dividends also scale persistent targets and eligible working orders.
-
-Lifecycle events follow corporate actions and precede matching. Identifier changes preserve the
-stable instrument ID while updating the symbol and named provider mapping. Halts and terminal
-events cancel active orders. Expiration and delisting use an explicit hold or cash-out policy and
-cannot be resumed.
-Contract v10 replaces the fixed legacy rate with effective-time borrow observations. Each
-observation names an instrument, available quantity, annual rate in basis points, and recall state.
-Observations become active no later than the slice start and remain active until superseded. A new
-short either clips to the available locate or is rejected according to `locate_policy`; existing
-short quantity consumes availability. A recall rejects further shorts and, under `close_out`,
-cancels active sells and submits a priority IOC buy until the short is flat. `reject_new_shorts`
-retains the position but prevents it from increasing.
-
-Before matching, each open short accrues its observed quote-currency charge from the slice open
-mark and exact `start_at`/`end_at` duration. Missing observations follow `borrow_missing_data`:
-`reject` fails the slice and `zero` applies no charge while still preventing an unlocated new short.
-Signed rates support rebates. Charges use the scenario's explicit `actual_365` or `actual_360`
-day-count and `simple` or `daily` compounding policy.
-
-Cash financing uses effective-time observations per currency with separate annual credit and debit
-rates. Positive balances receive the credit rate; negative balances receive the debit rate. The
-same explicit interval, day-count, compounding, and deterministic micro-unit rounding rules apply.
-`cash_missing_data` either rejects a nonzero balance without an observation or treats its rate as
-zero. Interest updates the native cash ledger and is reported separately and within aggregate
-realized P&L; debit interest can therefore produce or deepen negative equity.
-
-## Risk-limited fills and fees
-
-Contract v10 selects exactly one fee schedule per instrument. A schedule composes named `fixed`,
-`notional_bps`, and `per_unit` components. Each component declares its currency, `up`, `down`, or
-`nearest` rounding, and `any`, `maker`, or `taker` applicability. A limit filled at its intrabar
-touch is maker liquidity; market orders and limits marketable at the open are takers.
-
-Component amounts are calculated in their declared currencies. Slice FX rates convert quote
-notional into the component currency and each result back into the fill's quote currency. The
-schedule then applies its optional minimum and maximum in the settlement currency. Any difference
-is retained as a named `minimum_adjustment` or `maximum_adjustment`, so the component list always
-sums exactly to the signed aggregate fill fee. Negative components are rebates.
-
-Liquidation proposals are processed first, followed by sells and then buys within each origin
-class. For each proposal, the engine searches for the largest lot-aligned quantity whose signed
-post-fill position is within the long/short cap and whose fill quantity is no greater than the
-maximum order quantity.
-When absolute exposure increases, the projected account must also satisfy maximum gross exposure,
-maximum leverage, and initial margin. Reductions in absolute exposure are permitted without a new
-initial-margin test. A clipped proposal emits `fill_clipped`; a zero permitted quantity produces
-no fill. The event records reason taxonomy version `1`, the limiting policy, its typed threshold,
-and both the proposed and permitted quantities. Only the applied quantity consumes shared slice
-capacity. Candidate arithmetic, accounting, mark, and FX failures abort replay instead of being
-misreported as policy clipping.
-
-This bounded-fill policy preserves split-adjusted GTC limit orders: an oversized remainder may
-fill over multiple slices. Market orders remain IOC, so they fill at most one bounded quantity and
-cancel any remainder after their eligible slice.
-
-The complete schedule, including minimum and maximum, is evaluated independently for every partial
-fill, so fragmentation can change total cost. Contract v8 configuration v1 retains its frozen
-`fixed_fee + ceil(notional × fee_bps / 10,000)` rule.
-
-## Exact values
-
-Prices, weights, quantities, FX rates, and money use six decimal places stored in checked `int64`
-values. Signed quantities are used for positions and targets; submitted orders and fills retain a
-positive quantity plus a side. Scenario strings use the canonical shortest representation: `1`,
-`1.25`, `-0.5`, and `0.000001` are valid; `01`, `1.0`, excess precision, and negative zero are not.
-
-Orders align with lot size. Limit prices and executable OHLC values align with tick size.
+Corporate actions run before matching. Splits adjust positions, targets, and working orders;
+distributions allocate basis and fractional treatment explicitly. Lifecycle events preserve stable
+instrument identity across symbol changes and deterministically cancel or cash out terminal assets.
 
 ## Accounting and valuation
 
-For a buy that opens or increases a long with notional `N` and fee `F`:
-
-```text
-cash       -= N + F
-quantity   += fill quantity
-cost basis += N + F
-```
-
-For a sell that reduces a long:
-
-```text
-cash          += N - F
-removed basis  = proportional average cost
-realized P&L  += N - F - removed basis
-```
-
-Opening a short credits `N - F` to cash and records its cost basis as the negative net proceeds.
-Covering a short debits `N + F`; realized P&L is the removed negative basis minus that cover cost.
-One fill may reduce a position to zero but may not cross through zero. Closing a position removes
-its exact remaining basis. A partial close uses proportional average basis and leaves the exact
-remainder open.
-
-The account maintains a signed cash ledger for every scenario currency. Each slice supplies a
-complete currency-to-base FX vector, with base rate one. Valuation converts native cash, market
-value, basis, P&L, and fees into the base reporting currency using the current marks:
+The engine uses signed average-cost accounting in native quote currencies and converts every cash,
+position, basis, P&L, and fee attribution to the scenario base currency. The core identities are:
 
 ```text
 net market value = sum(base FX × mark × signed quantity)
@@ -286,18 +77,5 @@ unrealized P&L   = net market value - remaining base cost basis
 equity           = base cash + net market value
 ```
 
-Each valuation also emits one deterministic attribution row per marked instrument or retained
-account position. A nonzero position requires a mark. A flat retained position does not; when its
-mark is omitted, the row uses the canonical mark one because every mark produces zero market value
-for zero quantity. Row market value, basis, realized P&L, dividend P&L, execution fees, and borrow
-fees is present in both native and base values and sums exactly to the corresponding account totals.
-A separate row attributes each currency ledger. Closed instruments retain cumulative realized P&L
-and fees with zero quantity and basis.
-
-The valuation includes initial and maintenance requirements and excesses. After strategy and
-target processing, negative maintenance excess triggers one `margin_call`, cancels all active
-orders, clears the persistent target, and submits deterministic `margin_liquidation` market orders
-in instrument-ID order. Strategies receive the resulting cancellation and liquidation-order
-updates before the slice valuation. Each attempt is capped by `max_order_quantity` and lot aligned.
-The engine continues on later slices until every position is flat, then emits `margin_restored`
-when the maintenance condition is no longer breached.
+Valuations include initial and maintenance margin. A maintenance breach cancels working orders,
+clears targets, and creates bounded liquidation orders until positions are flat.

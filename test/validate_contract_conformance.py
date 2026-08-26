@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import copy
-import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -394,54 +393,11 @@ def verify_top_level_branches(
             )
 
 
-def verify_frozen_integrity() -> None:
-    ledger_path = CONFORMANCE / "frozen.sha256"
-    expected: dict[str, str] = {}
-    for line_number, line in enumerate(
-        ledger_path.read_text(encoding="utf-8").splitlines(), start=1
-    ):
-        try:
-            digest, relative = line.split("  ", maxsplit=1)
-        except ValueError as error:
-            raise AssertionError(
-                f"{ledger_path.relative_to(ROOT)}:{line_number} is malformed"
-            ) from error
-        if relative in expected:
-            raise AssertionError(f"duplicate frozen artifact {relative}")
-        expected[relative] = digest
-    frozen_roots = [
-        CONTRACTS / "v1",
-        CONTRACTS / "v2",
-        CONTRACTS / "strategy" / "v1",
-        CONTRACTS / "strategy" / "v2",
-    ]
-    discovered = {
-        str(path.relative_to(ROOT))
-        for root in frozen_roots
-        for path in root.rglob("*")
-        if path.is_file()
-        and (path.name.endswith(".schema.json") or "fixtures" in path.parts)
-    }
-    if set(expected) != discovered:
-        raise AssertionError(
-            "frozen integrity ledger differs from archived artifacts: "
-            f"ledger={sorted(expected)} archived={sorted(discovered)}"
-        )
-    for relative, digest in expected.items():
-        actual = hashlib.sha256((ROOT / relative).read_bytes()).hexdigest()
-        if actual != digest:
-            raise AssertionError(
-                f"frozen artifact changed: {relative}; "
-                "update frozen.sha256 only for an intentional contract revision"
-            )
-
-
 def main() -> None:
     schemas, registry = schema_registry()
     artifacts, _ = verify_manifest(schemas, registry)
     accepted_cases = verify_cases(artifacts, schemas, registry)
     verify_top_level_branches(artifacts, schemas, registry, accepted_cases)
-    verify_frozen_integrity()
 
 
 if __name__ == "__main__":

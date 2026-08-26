@@ -3,15 +3,14 @@ type t = {
   metadata : Yojson.Safe.t;
   run_id : Id.Run.t;
   base_currency : string;
-  initial_cash : (string * Scalar.Money.t) list;
-  initial_portfolio : Initial_portfolio.t option;
+  initial_portfolio : Initial_portfolio.t;
   instruments : Instrument.t list;
   venue_calendars : Venue_calendar.t list;
   risk : Risk.t;
   execution_model : Execution_model.t;
   execution : Execution.t;
-  financing : Financing.policy option;
-  settlement : Settlement.policy option;
+  financing : Financing.policy;
+  settlement : Settlement.policy;
   max_internal_events : int;
   schedule : (int64 * Strategy.intent list) list;
   slices : Market_slice.t list;
@@ -22,15 +21,14 @@ type stream_header = {
   metadata : Yojson.Safe.t;
   run_id : Id.Run.t;
   base_currency : string;
-  initial_cash : (string * Scalar.Money.t) list;
-  initial_portfolio : Initial_portfolio.t option;
+  initial_portfolio : Initial_portfolio.t;
   instruments : Instrument.t list;
   venue_calendars : Venue_calendar.t list;
   risk : Risk.t;
   execution_model : Execution_model.t;
   execution : Execution.t;
-  financing : Financing.policy option;
-  settlement : Settlement.policy option;
+  financing : Financing.policy;
+  settlement : Settlement.policy;
   max_internal_events : int;
 }
 
@@ -327,48 +325,6 @@ let parse_instrument json =
   let* lot_size = parse_quantity ~name:"lot_size" lot_json in
   Instrument.create ~id ~symbol ~quote_currency ~tick_size ~lot_size
 
-let parse_legacy_risk base_currency instruments json =
-  let* fields =
-    object_fields ~name:"risk"
-      ~expected:
-        [
-          "max_order_quantity";
-          "max_long_position";
-          "max_short_position";
-          "max_gross_exposure";
-          "max_leverage";
-          "initial_margin_bps";
-          "maintenance_margin_bps";
-          "short_borrow_bps";
-        ]
-      json
-  in
-  let* order_json = field fields "max_order_quantity" in
-  let* max_order_quantity =
-    parse_quantity ~name:"max_order_quantity" order_json
-  in
-  let* long_json = field fields "max_long_position" in
-  let* max_long_position = parse_quantity ~name:"max_long_position" long_json in
-  let* short_json = field fields "max_short_position" in
-  let* max_short_position =
-    parse_quantity ~name:"max_short_position" short_json
-  in
-  let* gross_json = field fields "max_gross_exposure" in
-  let* max_gross_exposure = parse_money ~name:"max_gross_exposure" gross_json in
-  let* leverage_json = field fields "max_leverage" in
-  let* max_leverage = parse_ratio ~name:"max_leverage" leverage_json in
-  let* initial_json = field fields "initial_margin_bps" in
-  let* initial_margin_bps = integer ~name:"initial_margin_bps" initial_json in
-  let* maintenance_json = field fields "maintenance_margin_bps" in
-  let* maintenance_margin_bps =
-    integer ~name:"maintenance_margin_bps" maintenance_json
-  in
-  let* borrow_json = field fields "short_borrow_bps" in
-  let* short_borrow_bps = integer ~name:"short_borrow_bps" borrow_json in
-  Risk.create ~base_currency ~instruments ~max_order_quantity ~max_long_position
-    ~max_short_position ~max_gross_exposure ~max_leverage ~initial_margin_bps
-    ~maintenance_margin_bps ~short_borrow_bps
-
 let parse_nullable parse ~name = function
   | `Null -> Ok None
   | json -> parse ~name json |> Result.map Option.some
@@ -507,16 +463,12 @@ let parse_group json =
   in
   Risk.create_group ~group_id ~group_kind ~instrument_ids ~limits
 
-let parse_v7_risk base_currency instruments json =
+let parse_risk base_currency instruments json =
   let* fields =
     object_fields ~name:"risk"
       ~expected:
         [
-          "max_gross_exposure";
-          "max_leverage";
-          "short_borrow_bps";
-          "instrument_policies";
-          "groups";
+          "max_gross_exposure"; "max_leverage"; "instrument_policies"; "groups";
         ]
       json
   in
@@ -546,30 +498,8 @@ let parse_v7_risk base_currency instruments json =
     field fields "max_leverage" |> fun result ->
     Result.bind result (parse_ratio ~name:"max_leverage")
   in
-  let* short_borrow_bps =
-    field fields "short_borrow_bps" |> fun result ->
-    Result.bind result (integer ~name:"short_borrow_bps")
-  in
-  Risk.create_v7 ~base_currency ~instruments ~instrument_policies ~groups
-    ~max_gross_exposure ~max_leverage ~short_borrow_bps
-
-let parse_risk ~contract_version base_currency instruments json =
-  if
-    List.mem contract_version
-      [ "16"; "15"; "14"; "13"; "12"; "11"; "10"; "9"; "8"; "7" ]
-  then parse_v7_risk base_currency instruments json
-  else parse_legacy_risk base_currency instruments json
-
-let parse_execution_values fields =
-  let* participation_json = field fields "participation_bps" in
-  let* participation_bps =
-    integer ~name:"participation_bps" participation_json
-  in
-  let* fixed_json = field fields "fixed_fee" in
-  let* fixed_fee = parse_money ~name:"fixed_fee" fixed_json in
-  let* fee_json = field fields "fee_bps" in
-  let* fee_bps = integer ~name:"fee_bps" fee_json in
-  Execution.create ~participation_bps ~fixed_fee ~fee_bps
+  Risk.create ~base_currency ~instruments ~instrument_policies ~groups
+    ~max_gross_exposure ~max_leverage
 
 let parse_fee_component json =
   let* fields =
@@ -683,11 +613,11 @@ let parse_execution_common instruments fields =
   in
   Ok (participation_bps, schedules)
 
-let parse_execution_v2 instruments fields =
+let parse_scheduled_execution instruments fields =
   let* participation_bps, schedules =
     parse_execution_common instruments fields
   in
-  Execution.create_v2 ~participation_bps ~fee_schedules:schedules
+  Execution.create ~participation_bps ~fee_schedules:schedules
 
 let parse_order_book_execution instruments fields =
   let* participation_bps, fee_schedules =
@@ -755,28 +685,7 @@ let parse_conservative_execution instruments fields =
   Execution.create_conservative ~participation_bps ~fee_schedules
     ~half_spread_bps ~impact_coefficient_bps ~missing_volume_policy
 
-let parse_legacy_execution ~contract_version json =
-  let* fields =
-    object_fields ~name:"execution"
-      ~expected:[ "model"; "participation_bps"; "fixed_fee"; "fee_bps" ]
-      json
-  in
-  let* model_json = field fields "model" in
-  let* model_name = string ~name:"execution model" model_json in
-  let* execution_model = Execution_model.find model_name in
-  let* () =
-    if Execution_model.supports_contract execution_model contract_version then
-      Ok ()
-    else
-      Error
-        (Printf.sprintf
-           "execution model %S does not support scenario contract %S" model_name
-           contract_version)
-  in
-  let* execution = parse_execution_values fields in
-  Ok (execution_model, execution)
-
-let parse_versioned_execution ~contract_version ~instruments json =
+let parse_execution ~contract_version ~instruments json =
   let* fields =
     object_fields ~name:"execution" ~expected:[ "model"; "configuration" ] json
   in
@@ -819,19 +728,9 @@ let parse_versioned_execution ~contract_version ~instruments json =
       then parse_conservative_execution instruments configuration
       else if String.equal model_name "order_book_v1" then
         parse_order_book_execution instruments configuration
-      else if
-        String.equal model_name "quote_trade_v1" || String.equal version "2"
-      then parse_execution_v2 instruments configuration
-      else parse_execution_values configuration
+      else parse_scheduled_execution instruments configuration
     in
     Ok (execution_model, execution)
-
-let parse_execution ~contract_version ~instruments json =
-  if
-    List.mem contract_version
-      [ "16"; "15"; "14"; "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6"; "5" ]
-  then parse_versioned_execution ~contract_version ~instruments json
-  else parse_legacy_execution ~contract_version json
 
 let parse_side json =
   let* value = string ~name:"side" json in
@@ -877,37 +776,23 @@ let parse_portfolio_intent ~name ~parse_target make json =
   let* targets = map_list parse_target targets_json in
   Ok (make targets)
 
-let parse_submit_intent ~contract_version json =
-  let versioned =
-    List.mem contract_version
-      [ "16"; "15"; "14"; "13"; "12"; "11"; "10"; "9"; "8" ]
-  in
+let parse_submit_intent json =
   let* fields =
     object_fields ~name:"submit_order intent"
       ~expected:
-        (if versioned then
-           [
-             "type";
-             "instrument_id";
-             "side";
-             "quantity";
-             "order_kind";
-             "trigger_price";
-             "limit_price";
-             "time_in_force";
-             "venue_id";
-             "calendar_id";
-             "expires_at";
-           ]
-         else
-           [
-             "type";
-             "instrument_id";
-             "side";
-             "quantity";
-             "order_kind";
-             "limit_price";
-           ])
+        [
+          "type";
+          "instrument_id";
+          "side";
+          "quantity";
+          "order_kind";
+          "trigger_price";
+          "limit_price";
+          "time_in_force";
+          "venue_id";
+          "calendar_id";
+          "expires_at";
+        ]
       json
   in
   let* instrument_json = field fields "instrument_id" in
@@ -921,19 +806,17 @@ let parse_submit_intent ~contract_version json =
   let* kind_json = field fields "order_kind" in
   let* kind_name = string ~name:"order_kind" kind_json in
   let* limit_json = field fields "limit_price" in
-  let* trigger_json =
-    if versioned then field fields "trigger_price" else Ok `Null
-  in
+  let* trigger_json = field fields "trigger_price" in
   let* kind =
     match (kind_name, trigger_json, limit_json) with
     | "market", `Null, `Null -> Ok Order.Market
     | "limit", `Null, value ->
         let* limit = parse_price ~name:"limit_price" value in
         Ok (Order.Limit limit)
-    | "stop", trigger, `Null when versioned ->
+    | "stop", trigger, `Null ->
         let* trigger = parse_price ~name:"trigger_price" trigger in
         Ok (Order.Stop trigger)
-    | "stop_limit", trigger, limit when versioned ->
+    | "stop_limit", trigger, limit ->
         let* trigger_price = parse_price ~name:"trigger_price" trigger in
         let* limit_price = parse_price ~name:"limit_price" limit in
         Ok (Order.Stop_limit { trigger_price; limit_price })
@@ -941,32 +824,30 @@ let parse_submit_intent ~contract_version json =
         Error "market order trigger_price and limit_price must be null"
     | _ -> Error "invalid order_kind"
   in
+  let* tif_json = field fields "time_in_force" in
+  let* tif = string ~name:"time_in_force" tif_json in
+  let* venue_json = field fields "venue_id" in
+  let* calendar_json = field fields "calendar_id" in
+  let* expires_json = field fields "expires_at" in
   let* time_in_force =
-    if not versioned then Ok (Order.compatibility_time_in_force kind)
-    else
-      let* tif_json = field fields "time_in_force" in
-      let* tif = string ~name:"time_in_force" tif_json in
-      let* venue_json = field fields "venue_id" in
-      let* calendar_json = field fields "calendar_id" in
-      let* expires_json = field fields "expires_at" in
-      match (tif, venue_json, calendar_json, expires_json) with
-      | "gtc", `Null, `Null, `Null -> Ok Order.Gtc
-      | "ioc", `Null, `Null, `Null -> Ok Order.Ioc
-      | "fok", `Null, `Null, `Null -> Ok Order.Fok
-      | "day", venue, calendar, `Null ->
-          let* venue_id = parse_id Id.Venue.of_string ~name:"venue_id" venue in
-          let* calendar_id =
-            parse_id Id.Venue_calendar.of_string ~name:"calendar_id" calendar
-          in
-          Ok (Order.Day { venue_id; calendar_id })
-      | "gtd", `Null, `Null, expires ->
-          let* value = string ~name:"expires_at" expires in
-          let* expires_at = Codec.ptime_of_string value in
-          Ok (Order.Gtd expires_at)
-      | _ -> Error "time_in_force companion fields are inconsistent"
+    match (tif, venue_json, calendar_json, expires_json) with
+    | "gtc", `Null, `Null, `Null -> Ok Order.Gtc
+    | "ioc", `Null, `Null, `Null -> Ok Order.Ioc
+    | "fok", `Null, `Null, `Null -> Ok Order.Fok
+    | "day", venue, calendar, `Null ->
+        let* venue_id = parse_id Id.Venue.of_string ~name:"venue_id" venue in
+        let* calendar_id =
+          parse_id Id.Venue_calendar.of_string ~name:"calendar_id" calendar
+        in
+        Ok (Order.Day { venue_id; calendar_id })
+    | "gtd", `Null, `Null, expires ->
+        let* value = string ~name:"expires_at" expires in
+        let* expires_at = Codec.ptime_of_string value in
+        Ok (Order.Gtd expires_at)
+    | _ -> Error "time_in_force companion fields are inconsistent"
   in
   let* request =
-    Order.request_v8 ~instrument_id ~side ~quantity ~kind ~time_in_force
+    Order.request ~instrument_id ~side ~quantity ~kind ~time_in_force
       ~origin:Order.Direct
   in
   Ok (Strategy.Submit_order request)
@@ -980,88 +861,73 @@ let parse_cancel_intent json =
   let* order_id = parse_id Id.Order.of_string ~name:"order_id" order_json in
   Ok (Strategy.Cancel_order order_id)
 
-let parse_metric_intent ~contract_version json =
-  if not (String.equal contract_version "16") then
-    let* fields =
-      object_fields ~name:"emit_metric intent"
-        ~expected:[ "type"; "name"; "value" ]
-        json
+let parse_metric_intent json =
+  let* fields =
+    match json with
+    | `Assoc fields ->
+        let names = List.map fst fields in
+        let unique = List.sort_uniq String.compare names in
+        let allowed =
+          [ "aggregation"; "dimensions"; "name"; "type"; "unit"; "value" ]
+        in
+        if List.length names <> List.length unique then
+          Error "emit_metric intent must not contain duplicate fields"
+        else if
+          not
+            (List.for_all (fun name -> List.mem name allowed) unique
+            && List.for_all
+                 (fun name -> List.mem name unique)
+                 [ "type"; "name"; "value" ])
+        then Error "emit_metric intent has unknown or missing fields"
+        else Ok fields
+    | _ -> Error "emit_metric intent must be a JSON object"
+  in
+  let* name_json = field fields "name" in
+  let* name = string ~name:"metric name" name_json in
+  let* value =
+    let* json = field fields "value" in
+    let* value_fields =
+      object_fields ~name:"metric value" ~expected:[ "type"; "value" ] json
     in
-    let* name_json = field fields "name" in
-    let* name = string ~name:"metric name" name_json in
-    let* value_json = field fields "value" in
-    let* value = string ~name:"metric value" value_json in
-    let* metric = Metric.create ~name ~value:(Metric.String value) () in
-    Ok (Strategy.Emit_metric metric)
-  else
-    let* fields =
-      match json with
-      | `Assoc fields ->
-          let names = List.map fst fields in
-          let unique = List.sort_uniq String.compare names in
-          let allowed =
-            [ "aggregation"; "dimensions"; "name"; "type"; "unit"; "value" ]
-          in
-          if List.length names <> List.length unique then
-            Error "emit_metric intent must not contain duplicate fields"
-          else if
-            not
-              (List.for_all (fun name -> List.mem name allowed) unique
-              && List.for_all
-                   (fun name -> List.mem name unique)
-                   [ "type"; "name"; "value" ])
-          then Error "emit_metric intent has unknown or missing fields"
-          else Ok fields
-      | _ -> Error "emit_metric intent must be a JSON object"
-    in
-    let* name_json = field fields "name" in
-    let* name = string ~name:"metric name" name_json in
-    let* value =
-      let* json = field fields "value" in
-      let* value_fields =
-        object_fields ~name:"metric value" ~expected:[ "type"; "value" ] json
-      in
-      let* type_json = field value_fields "type" in
-      let* value_type = string ~name:"metric value type" type_json in
-      let* value_json = field value_fields "value" in
-      match (value_type, value_json) with
-      | "numeric", `String value ->
-          Metric.numeric_of_string value
-          |> Result.map (fun value -> Metric.Numeric value)
-      | "string", `String value -> Ok (Metric.String value)
-      | "boolean", `Bool value -> Ok (Metric.Boolean value)
-      | _ -> Error "metric value does not match its declared type"
-    in
-    let* unit_ =
-      match List.assoc_opt "unit" fields with
-      | None -> Ok None
-      | Some json -> string ~name:"metric unit" json |> Result.map Option.some
-    in
-    let* dimensions =
-      match List.assoc_opt "dimensions" fields with
-      | None -> Ok []
-      | Some (`Assoc dimensions) ->
-          List.fold_left
-            (fun result (key, json) ->
-              let* values = result in
-              let* value = string ~name:"metric dimension value" json in
-              Ok ((key, value) :: values))
-            (Ok []) dimensions
-      | Some _ -> Error "metric dimensions must be an object"
-    in
-    let* aggregation =
-      match List.assoc_opt "aggregation" fields with
-      | None -> Ok None
-      | Some json ->
-          let* value = string ~name:"metric aggregation" json in
-          Metric.aggregation_of_string value |> Result.map Option.some
-    in
-    let* metric =
-      Metric.create ~name ~value ?unit_ ~dimensions ?aggregation ()
-    in
-    Ok (Strategy.Emit_metric metric)
+    let* type_json = field value_fields "type" in
+    let* value_type = string ~name:"metric value type" type_json in
+    let* value_json = field value_fields "value" in
+    match (value_type, value_json) with
+    | "numeric", `String value ->
+        Metric.numeric_of_string value
+        |> Result.map (fun value -> Metric.Numeric value)
+    | "string", `String value -> Ok (Metric.String value)
+    | "boolean", `Bool value -> Ok (Metric.Boolean value)
+    | _ -> Error "metric value does not match its declared type"
+  in
+  let* unit_ =
+    match List.assoc_opt "unit" fields with
+    | None -> Ok None
+    | Some json -> string ~name:"metric unit" json |> Result.map Option.some
+  in
+  let* dimensions =
+    match List.assoc_opt "dimensions" fields with
+    | None -> Ok []
+    | Some (`Assoc dimensions) ->
+        List.fold_left
+          (fun result (key, json) ->
+            let* values = result in
+            let* value = string ~name:"metric dimension value" json in
+            Ok ((key, value) :: values))
+          (Ok []) dimensions
+    | Some _ -> Error "metric dimensions must be an object"
+  in
+  let* aggregation =
+    match List.assoc_opt "aggregation" fields with
+    | None -> Ok None
+    | Some json ->
+        let* value = string ~name:"metric aggregation" json in
+        Metric.aggregation_of_string value |> Result.map Option.some
+  in
+  let* metric = Metric.create ~name ~value ?unit_ ~dimensions ?aggregation () in
+  Ok (Strategy.Emit_metric metric)
 
-let parse_intent ~contract_version json =
+let parse_intent json =
   match json with
   | `Assoc fields -> (
       match List.assoc_opt "type" fields with
@@ -1075,22 +941,20 @@ let parse_intent ~contract_version json =
             ~parse_target:parse_quantity_target
             (fun targets -> Strategy.Target_quantities targets)
             json
-      | Some (`String "submit_order") ->
-          parse_submit_intent ~contract_version json
+      | Some (`String "submit_order") -> parse_submit_intent json
       | Some (`String "cancel_order") -> parse_cancel_intent json
-      | Some (`String "emit_metric") ->
-          parse_metric_intent ~contract_version json
+      | Some (`String "emit_metric") -> parse_metric_intent json
       | Some _ -> Error "unsupported intent type"
       | None -> Error "intent is missing type")
   | _ -> Error "intent must be a JSON object"
 
-let intent_of_yojson ?(contract_version = Contract.previous_version) json =
-  parse_intent ~contract_version json
+let intent_of_yojson json =
+  parse_intent json
   |> Result.map_error (fun message ->
       Diagnostic.make ~code:Diagnostic.Scenario_invalid
         ~phase:Diagnostic.Validation ~json_path:"$" message)
 
-let parse_schedule_item ~contract_version json =
+let parse_schedule_item json =
   let* fields =
     object_fields ~name:"schedule item"
       ~expected:[ "after_slice_sequence"; "intents" ]
@@ -1105,7 +969,7 @@ let parse_schedule_item ~contract_version json =
       (Printf.sprintf "intent count is %d; limit is %d"
          (List.length intents_json) Resource_limits.intents_per_batch)
   else
-    let* intents = map_list (parse_intent ~contract_version) intents_json in
+    let* intents = map_list parse_intent intents_json in
     Ok (sequence, intents)
 
 let parse_volume = function
@@ -1919,45 +1783,26 @@ let parse_order_book_event json =
         ~ingest_sequence ~book_sequence ~price ~quantity ~aggressor_side
   | _ -> assert false
 
-let parse_slice ~contract_version json =
-  let financing_fields =
-    if List.mem contract_version [ "16"; "15"; "14"; "13"; "12"; "11"; "10" ]
-    then [ "borrow_observations"; "cash_rate_observations" ]
-    else []
-  in
-  let settlement_fields =
-    if List.mem contract_version [ "16"; "15"; "14"; "13"; "12"; "11" ] then
-      [ "settlement_failures" ]
-    else []
-  in
-  let lifecycle_fields =
-    if List.mem contract_version [ "16"; "15"; "14"; "13"; "12" ] then
-      [ "lifecycle_events" ]
-    else []
-  in
-  let market_event_fields =
-    if List.mem contract_version [ "16"; "15"; "14" ] then [ "market_events" ]
-    else []
-  in
-  let order_book_event_fields =
-    if List.mem contract_version [ "16"; "15" ] then [ "order_book_events" ]
-    else []
-  in
+let parse_slice json =
   let* fields =
     object_fields ~name:"market slice"
       ~expected:
-        ([
-           "slice_sequence";
-           "start_at";
-           "end_at";
-           "available_at";
-           "received_at";
-           "bars";
-           "fx_rates";
-           "corporate_actions";
-         ]
-        @ financing_fields @ settlement_fields @ lifecycle_fields
-        @ market_event_fields @ order_book_event_fields)
+        [
+          "slice_sequence";
+          "start_at";
+          "end_at";
+          "available_at";
+          "received_at";
+          "bars";
+          "fx_rates";
+          "corporate_actions";
+          "borrow_observations";
+          "cash_rate_observations";
+          "settlement_failures";
+          "lifecycle_events";
+          "market_events";
+          "order_book_events";
+        ]
       json
   in
   let* sequence_json = field fields "slice_sequence" in
@@ -1979,81 +1824,46 @@ let parse_slice ~contract_version json =
   let* actions_json = field fields "corporate_actions" in
   let* actions_json = list ~name:"corporate_actions" actions_json in
   let* corporate_actions = map_list parse_corporate_action actions_json in
-  if List.mem contract_version [ "16"; "15"; "14"; "13"; "12"; "11"; "10" ] then
-    let* borrow_json =
-      Result.bind
-        (field fields "borrow_observations")
-        (list ~name:"borrow_observations")
-    in
-    let* borrow_observations = map_list parse_borrow_observation borrow_json in
-    let* cash_json =
-      Result.bind
-        (field fields "cash_rate_observations")
-        (list ~name:"cash_rate_observations")
-    in
-    let* cash_rate_observations =
-      map_list parse_cash_rate_observation cash_json
-    in
-    if List.mem contract_version [ "16"; "15"; "14"; "13"; "12"; "11" ] then
-      let* failures_json =
-        Result.bind
-          (field fields "settlement_failures")
-          (list ~name:"settlement_failures")
-      in
-      let* settlement_failures =
-        map_list parse_settlement_failure failures_json
-      in
-      if List.mem contract_version [ "16"; "15"; "14"; "13"; "12" ] then
-        let* lifecycle_json =
-          Result.bind
-            (field fields "lifecycle_events")
-            (list ~name:"lifecycle_events")
-        in
-        let* lifecycle_events = map_list parse_lifecycle_event lifecycle_json in
-        if List.mem contract_version [ "16"; "15"; "14" ] then
-          let* events_json =
-            Result.bind
-              (field fields "market_events")
-              (list ~name:"market_events")
-          in
-          let* market_events = map_list parse_market_event events_json in
-          if List.mem contract_version [ "16"; "15" ] then
-            let* book_events_json =
-              Result.bind
-                (field fields "order_book_events")
-                (list ~name:"order_book_events")
-            in
-            let* order_book_events =
-              map_list parse_order_book_event book_events_json
-            in
-            Market_slice.create_v15 ~slice_sequence ~start_at ~end_at
-              ~available_at ~received_at ~bars ~fx_rates ~corporate_actions
-              ~borrow_observations ~cash_rate_observations ~settlement_failures
-              ~lifecycle_events ~market_events ~order_book_events
-          else
-            Market_slice.create_v14 ~slice_sequence ~start_at ~end_at
-              ~available_at ~received_at ~bars ~fx_rates ~corporate_actions
-              ~borrow_observations ~cash_rate_observations ~settlement_failures
-              ~lifecycle_events ~market_events
-        else
-          let create =
-            if String.equal contract_version "13" then Market_slice.create_v13
-            else Market_slice.create_v12
-          in
-          create ~slice_sequence ~start_at ~end_at ~available_at ~received_at
-            ~bars ~fx_rates ~corporate_actions ~borrow_observations
-            ~cash_rate_observations ~settlement_failures ~lifecycle_events
-      else
-        Market_slice.create_v11 ~slice_sequence ~start_at ~end_at ~available_at
-          ~received_at ~bars ~fx_rates ~corporate_actions ~borrow_observations
-          ~cash_rate_observations ~settlement_failures
-    else
-      Market_slice.create_v10 ~slice_sequence ~start_at ~end_at ~available_at
-        ~received_at ~bars ~fx_rates ~corporate_actions ~borrow_observations
-        ~cash_rate_observations
-  else
-    Market_slice.create ~slice_sequence ~start_at ~end_at ~available_at
-      ~received_at ~bars ~fx_rates ~corporate_actions
+  let* borrow_json =
+    Result.bind
+      (field fields "borrow_observations")
+      (list ~name:"borrow_observations")
+  in
+  let* borrow_observations = map_list parse_borrow_observation borrow_json in
+  let* cash_json =
+    Result.bind
+      (field fields "cash_rate_observations")
+      (list ~name:"cash_rate_observations")
+  in
+  let* cash_rate_observations =
+    map_list parse_cash_rate_observation cash_json
+  in
+  let* failures_json =
+    Result.bind
+      (field fields "settlement_failures")
+      (list ~name:"settlement_failures")
+  in
+  let* settlement_failures = map_list parse_settlement_failure failures_json in
+  let* lifecycle_json =
+    Result.bind
+      (field fields "lifecycle_events")
+      (list ~name:"lifecycle_events")
+  in
+  let* lifecycle_events = map_list parse_lifecycle_event lifecycle_json in
+  let* events_json =
+    Result.bind (field fields "market_events") (list ~name:"market_events")
+  in
+  let* market_events = map_list parse_market_event events_json in
+  let* book_events_json =
+    Result.bind
+      (field fields "order_book_events")
+      (list ~name:"order_book_events")
+  in
+  let* order_book_events = map_list parse_order_book_event book_events_json in
+  Market_slice.create ~slice_sequence ~start_at ~end_at ~available_at
+    ~received_at ~bars ~fx_rates ~corporate_actions ~borrow_observations
+    ~cash_rate_observations ~settlement_failures ~lifecycle_events
+    ~market_events ~order_book_events
 
 let child root field = root ^ "." ^ field
 
@@ -2085,28 +1895,11 @@ let construct_header ~root ~contract_path ~contract_version
       string ~name:"base_currency" shape.base_currency
       |> at (child root "base_currency")
     in
-    let* initial_cash, initial_portfolio =
-      if
-        List.mem contract_version
-          [ "16"; "15"; "14"; "13"; "12"; "11"; "10"; "9"; "8"; "7"; "6" ]
-      then
-        let* portfolio =
-          parse_initial_portfolio ~base_currency shape.initial_state
-          |> at (child root "initial_portfolio")
-        in
-        Ok (portfolio.Initial_portfolio.cash, Some portfolio)
-      else
-        let* initial_cash_json =
-          list ~name:"initial_cash" shape.initial_state
-          |> at (child root "initial_cash")
-        in
-        let* initial_cash =
-          map_list_at
-            (child root "initial_cash")
-            parse_cash_balance initial_cash_json
-        in
-        Ok (initial_cash, None)
+    let* initial_portfolio =
+      parse_initial_portfolio ~base_currency shape.initial_state
+      |> at (child root "initial_portfolio")
     in
+    let initial_cash = initial_portfolio.Initial_portfolio.cash in
     let* instruments_json =
       list ~name:"instruments" shape.instruments
       |> at (child root "instruments")
@@ -2116,7 +1909,8 @@ let construct_header ~root ~contract_path ~contract_version
     in
     let* venue_calendars =
       match shape.venue_calendars with
-      | None -> Ok []
+      | None ->
+          Error "missing venue calendars" |> at (child root "venue_calendars")
       | Some calendars_json ->
           let* calendars_json =
             list ~name:"venue_calendars" calendars_json
@@ -2131,45 +1925,30 @@ let construct_header ~root ~contract_path ~contract_version
       |> at (child root "max_internal_events")
     in
     let* currencies, catalog =
-      Scenario_validation.header ~root ~contract_version ~base_currency
-        ~initial_cash ~instruments ~venue_calendars ~max_internal_events
+      Scenario_validation.header ~root ~base_currency ~initial_cash ~instruments
+        ~venue_calendars ~max_internal_events
     in
     let* risk =
-      parse_risk ~contract_version base_currency instruments shape.risk
-      |> at (child root "risk")
+      parse_risk base_currency instruments shape.risk |> at (child root "risk")
     in
     let* () =
-      match initial_portfolio with
-      | None -> Ok ()
-      | Some portfolio ->
-          Scenario_validation.initial_portfolio ~root ~currencies ~catalog
-            ~instruments ~risk portfolio
+      Scenario_validation.initial_portfolio ~root ~currencies ~catalog
+        ~instruments ~risk initial_portfolio
     in
     let* execution_model, execution =
       parse_execution ~contract_version ~instruments shape.execution
       |> at (child root "execution")
     in
     let* financing =
-      match (contract_version, shape.financing) with
-      | ("12" | "11" | "10"), Some json ->
-          parse_financing json |> at (child root "financing")
-      | ("12" | "11" | "10"), None ->
-          Error "missing financing policy" |> at (child root "financing")
-      | _, _ -> Ok Financing.legacy_policy
-    in
-    let financing =
-      if List.mem contract_version [ "16"; "15"; "14"; "13"; "12"; "11"; "10" ]
-      then Some financing
-      else None
+      match shape.financing with
+      | Some json -> parse_financing json |> at (child root "financing")
+      | None -> Error "missing financing policy" |> at (child root "financing")
     in
     let* settlement =
-      match (contract_version, shape.settlement) with
-      | ("12" | "11"), Some json ->
-          let* policy = parse_settlement json |> at (child root "settlement") in
-          Ok (Some policy)
-      | ("12" | "11"), None ->
+      match shape.settlement with
+      | Some json -> parse_settlement json |> at (child root "settlement")
+      | None ->
           Error "missing settlement policy" |> at (child root "settlement")
-      | _, _ -> Ok None
     in
     let header : stream_header =
       {
@@ -2177,7 +1956,6 @@ let construct_header ~root ~contract_path ~contract_version
         metadata;
         run_id;
         base_currency;
-        initial_cash;
         initial_portfolio;
         instruments;
         venue_calendars;
@@ -2203,15 +1981,9 @@ let construct_batch (shape : Scenario_shape.batch) =
   let* schedule_json =
     list ~name:"schedule" shape.schedule |> at "$.schedule"
   in
-  let* schedule =
-    map_list_at "$.schedule"
-      (parse_schedule_item ~contract_version)
-      schedule_json
-  in
+  let* schedule = map_list_at "$.schedule" parse_schedule_item schedule_json in
   let* slices_json = list ~name:"slices" shape.slices |> at "$.slices" in
-  let* slices =
-    map_list_at "$.slices" (parse_slice ~contract_version) slices_json
-  in
+  let* slices = map_list_at "$.slices" parse_slice slices_json in
   let* () =
     Scenario_validation.batch ~root ~base_currency:header.base_currency
       ~currencies ~instruments:header.instruments ~risk:header.risk ~catalog
@@ -2223,7 +1995,6 @@ let construct_batch (shape : Scenario_shape.batch) =
       metadata = header.metadata;
       run_id = header.run_id;
       base_currency = header.base_currency;
-      initial_cash = header.initial_cash;
       initial_portfolio = header.initial_portfolio;
       instruments = header.instruments;
       venue_calendars = header.venue_calendars;
@@ -2291,8 +2062,7 @@ let stream_header_of_yojson ~contract_version json =
   in
   let* () = check_stream_header_limits json in
   let* shape =
-    Scenario_shape.stream_header ~contract_version json
-    |> Result.map_error (diagnostic code)
+    Scenario_shape.stream_header json |> Result.map_error (diagnostic code)
   in
   construct_header ~root:"$.payload" ~contract_path:"$.contract_version"
     ~contract_version shape
@@ -2306,7 +2076,7 @@ let stream_item_of_yojson header ~previous json =
     Scenario_shape.stream_item json |> Result.map_error (diagnostic code)
   in
   let* market_slice =
-    parse_slice ~contract_version:header.contract_version shape.market_slice
+    parse_slice shape.market_slice
     |> at "$.payload.market_slice"
     |> Result.map_error (diagnostic code)
   in
@@ -2316,9 +2086,7 @@ let stream_item_of_yojson header ~previous json =
     |> Result.map_error (diagnostic code)
   in
   let* intents =
-    map_list_at "$.payload.intents"
-      (parse_intent ~contract_version:header.contract_version)
-      intents_json
+    map_list_at "$.payload.intents" parse_intent intents_json
     |> Result.map_error (diagnostic code)
   in
   let previous_slice, previous_intents, prior_action_ids =

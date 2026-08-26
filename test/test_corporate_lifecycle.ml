@@ -320,7 +320,7 @@ let policy_and_transition_boundaries () =
 let lifecycle_slice ?(corporate_actions = []) ?(lifecycle_events = []) sequence
     =
   let date = Int64.to_int sequence + 1 in
-  T.Market_slice.create_v12 ~slice_sequence:sequence
+  T.Market_slice.create ~slice_sequence:sequence
     ~start_at:(timestamp (Printf.sprintf "2026-03-%02dT14:30:00Z" date))
     ~end_at:(timestamp (Printf.sprintf "2026-03-%02dT21:00:00Z" date))
     ~available_at:(timestamp (Printf.sprintf "2026-03-%02dT21:00:01Z" date))
@@ -328,14 +328,15 @@ let lifecycle_slice ?(corporate_actions = []) ?(lifecycle_events = []) sequence
     ~bars:[ bar sequence ]
     ~fx_rates:[ fx_mark () ]
     ~corporate_actions ~borrow_observations:[] ~cash_rate_observations:[]
-    ~settlement_failures:[] ~lifecycle_events
+    ~settlement_failures:[] ~lifecycle_events ~market_events:[]
+    ~order_book_events:[]
   |> ok
 
 let lifecycle_runner schedule run =
-  let config = engine_config ~contract_version:"12" () in
+  let config = engine_config ~contract_version:"1" () in
   let strategy_state = T.Scripted_strategy.create schedule |> ok in
   Runner.create ~run_id:(run_id run) ~scenario_sha256 ~config
-    ~initial_cash:[ ("USD", money "10000") ]
+    ~initial_portfolio:(initial_portfolio ~cash:[ ("USD", money "10000") ] ())
     ~strategy_state
   |> ok
 

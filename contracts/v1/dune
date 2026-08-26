@@ -7,4 +7,28 @@
   (scenario.schema.json as contracts/v1/scenario.schema.json)
   (fixtures/demo.journal.jsonl as contracts/v1/fixtures/demo.journal.jsonl)
   (fixtures/demo.scenario.json as contracts/v1/fixtures/demo.scenario.json)
-  (fixtures/demo.scenario.jsonl as contracts/v1/fixtures/demo.scenario.jsonl)))
+  (fixtures/demo.scenario.jsonl as contracts/v1/fixtures/demo.scenario.jsonl)
+  (fixtures/fill-clipped.journal.jsonl
+   as
+   contracts/v1/fixtures/fill-clipped.journal.jsonl)
+  (fixtures/fill-clipped.scenario.json
+   as
+   contracts/v1/fixtures/fill-clipped.scenario.json)
+  (fixtures/quote-trade.journal.jsonl
+   as
+   contracts/v1/fixtures/quote-trade.journal.jsonl)
+  (fixtures/quote-trade.scenario.json
+   as
+   contracts/v1/fixtures/quote-trade.scenario.json)
+  (fixtures/quote-trade.scenario.jsonl
+   as
+   contracts/v1/fixtures/quote-trade.scenario.jsonl)
+  (fixtures/order-book.journal.jsonl
+   as
+   contracts/v1/fixtures/order-book.journal.jsonl)
+  (fixtures/order-book.scenario.json
+   as
+   contracts/v1/fixtures/order-book.scenario.json)
+  (fixtures/order-book.scenario.jsonl
+   as
+   contracts/v1/fixtures/order-book.scenario.jsonl)))

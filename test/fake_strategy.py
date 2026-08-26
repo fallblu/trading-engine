@@ -98,7 +98,10 @@ def response(request: dict[str, object]) -> dict[str, object]:
                         {
                             "type": "emit_metric",
                             "name": "fixture_signal",
-                            "value": "2",
+                            "value": {"type": "numeric", "value": "2"},
+                            "unit": "score",
+                            "dimensions": {"source": "fixture"},
+                            "aggregation": "last",
                         },
                     ]
                 }
@@ -151,7 +154,7 @@ for line in sys.stdin:
     if MODE == "bad-sequence":
         message["strategy_sequence"] = "999"
     if MODE == "wrong-version":
-        message["strategy_protocol_version"] = "1"
+        message["strategy_protocol_version"] = "2"
     if MODE == "unknown-field":
         message["unexpected"] = True
     if MODE == "error" and request["message_type"] == "event":

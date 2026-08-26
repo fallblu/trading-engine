@@ -27,8 +27,5 @@ type stream_item = { market_slice : Yojson.Safe.t; intents : Yojson.Safe.t }
 
 val error : json_path:string -> string -> error
 val batch : Yojson.Safe.t -> (batch, error) result
-
-val stream_header :
-  contract_version:string -> Yojson.Safe.t -> (common, error) result
-
+val stream_header : Yojson.Safe.t -> (common, error) result
 val stream_item : Yojson.Safe.t -> (stream_item, error) result

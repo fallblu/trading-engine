@@ -19,13 +19,8 @@
   {"category": "effort", "name": "effort: medium", "color": "fef2c0", "description": "Multi-file change with moderate design or testing work"},
   {"category": "effort", "name": "effort: large", "color": "f9d0c4", "description": "Broad change that should be split into reviewed increments"},
 
-  {"category": "contract", "name": "contract: scenario-v1", "color": "5319e7", "description": "Frozen scenario and journal contract version 1"},
-  {"category": "contract", "name": "contract: scenario-v2", "color": "5319e7", "description": "Frozen scenario and journal contract version 2"},
-  {"category": "contract", "name": "contract: scenario-v3", "color": "5319e7", "description": "Transitional scenario and journal contract version 3"},
-  {"category": "contract", "name": "contract: scenario-v4", "color": "5319e7", "description": "Current scenario and journal contract version 4"},
-  {"category": "contract", "name": "contract: strategy-v1", "color": "7057ff", "description": "Historical external strategy protocol version 1"},
-  {"category": "contract", "name": "contract: strategy-v2", "color": "7057ff", "description": "Historical external strategy protocol version 2"},
-  {"category": "contract", "name": "contract: strategy-v3", "color": "7057ff", "description": "Current external strategy protocol version 3"},
+  {"category": "contract", "name": "contract: scenario-v1", "color": "5319e7", "description": "Current scenario and journal contract"},
+  {"category": "contract", "name": "contract: strategy-v1", "color": "7057ff", "description": "Current external strategy protocol"},
 
   {"category": "dependency", "name": "dependency: persistra", "color": "006b75", "description": "Requires coordinated behavior or validation in Persistra"},
   {"category": "dependency", "name": "dependency: upstream", "color": "006b75", "description": "Depends on an external project or toolchain"},

@@ -1,35 +1,21 @@
 # Continuous integration
 
-CI tests a small, explicit environment matrix instead of an accidental Cartesian product. The
-public package bounds in `trading_engine.opam` define supported dependencies. The repository lock
-defines the reproducible development baseline.
+CI tests the supported OCaml and dependency range without creating a Cartesian product.
 
-| Cell | Operating system | OCaml | Dependencies | Gate | Status |
-| --- | --- | --- | --- | --- | --- |
-| `check` | Ubuntu latest | 5.5.0 | Exact lock | Full `make check` | Required |
-| `lowest-ubuntu` | Ubuntu latest | 5.5.0 | Oldest solver-valid versions inside declared bounds | Full dependency-band check | Required |
-| `highest-ubuntu` | Ubuntu latest | 5.5.0 | Newest solver-valid versions inside declared bounds | Full dependency-band check | Required |
-| `highest-macos` | macOS 15 | 5.5.0 | Newest solver-valid versions inside declared bounds | Build and exact journal comparison | Informational |
+| Cell | Platform | Dependencies | Gate |
+| --- | --- | --- | --- |
+| `check` | Ubuntu | Repository lock | Full `make check` |
+| `lowest-ubuntu` | Ubuntu | Oldest declared versions | Dependency-band check |
+| `highest-ubuntu` | Ubuntu | Newest declared versions | Dependency-band check |
+| `highest-macos` | macOS | Newest declared versions | Build and journal comparison |
 
-The lower and upper cells resolve against the current opam repository. They deliberately test the
-range declared by the package rather than pretending to be reproducible locks. A failure in either
-required Ubuntu cell means the declared support bounds or the implementation must change. The
-macOS cell is an early portability signal while Ubuntu remains the supported build platform.
+Required Ubuntu jobs validate contract v1 schemas and fixtures, OCaml tests, protocol fuzzing,
+deterministic journals, metadata, documentation, and benchmark smoke workloads. Coverage runs once
+against the locked environment.
 
-Every runtime cell replays the frozen v3 demo, v5 demo, and v5 risk-limited fill scenarios under
-`TZ=UTC` and the C locale. It compares the resulting journal files byte for byte with their
-canonical fixtures. Standard output and standard error are captured separately because human
-diagnostics may contain platform-specific paths or process details and are not part of the journal
-contract.
-The full test suite additionally validates and replays the current v16 batch, stream, journal, and
-strategy-v12 fixtures, including quote/trade causality and the reconciled first valuation.
+The required Persistra job uses a full pinned commit. A manually dispatched moving-head job is
+informational and may fail without changing the supported revision pair.
 
-Coverage runs once in the exact locked Ubuntu environment. The required Persistra job also runs
-once against its full pinned commit; it is not repeated across dependency or operating-system
-cells. The manually dispatched Persistra moving-head job remains informational.
-
-Feature-branch pushes do not start CI; the pull-request event owns that validation and avoids a
-duplicate check set. Pull requests cancel superseded commits. Push validation runs only on
-`develop` and tags, where it is never cancelled, so durable integration evidence is not discarded.
-The concurrency key combines the source repository and source branch without colliding with a fork
-or another branch.
+Pull requests own feature-branch validation and cancel superseded runs. Push validation runs on
+`develop` and release tags without cancellation so integration and publication evidence is
+retained.

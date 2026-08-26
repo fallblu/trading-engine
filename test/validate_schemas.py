@@ -78,7 +78,6 @@ def main() -> None:
     )
 
     scenario = load(scenario_path)
-    contract_version = scenario["contract_version"]
     unsupported_version = "unsupported"
     scenario_validator.validate(scenario)
     stream_records = [
@@ -116,31 +115,25 @@ def main() -> None:
     unsupported_execution_model = copy.deepcopy(scenario)
     unsupported_execution_model["execution"]["model"] = "future_model"
     expect_invalid(scenario_validator, unsupported_execution_model)
-    if contract_version in {"5", "6"}:
-        missing_configuration_version = copy.deepcopy(scenario)
-        del missing_configuration_version["execution"]["configuration"][
-            "version"
-        ]
-        expect_invalid(scenario_validator, missing_configuration_version)
-        unsupported_configuration_version = copy.deepcopy(scenario)
-        unsupported_configuration_version["execution"]["configuration"][
-            "version"
-        ] = "2"
-        expect_invalid(scenario_validator, unsupported_configuration_version)
-        unknown_configuration_field = copy.deepcopy(scenario)
-        unknown_configuration_field["execution"]["configuration"]["future"] = True
-        expect_invalid(scenario_validator, unknown_configuration_field)
-    if contract_version in {"3", "4", "5", "6"}:
-        excessive_feedback_cap = copy.deepcopy(scenario)
-        excessive_feedback_cap["max_internal_events"] = 100001
-        expect_invalid(scenario_validator, excessive_feedback_cap)
-        excessive_catalog = copy.deepcopy(scenario)
-        excessive_catalog["instruments"] = [scenario["instruments"][0]] * 4097
-        expect_invalid(scenario_validator, excessive_catalog)
-        excessive_intents = copy.deepcopy(scenario)
-        intent = scenario["schedule"][0]["intents"][0]
-        excessive_intents["schedule"][0]["intents"] = [intent] * 4097
-        expect_invalid(scenario_validator, excessive_intents)
+    missing_configuration_version = copy.deepcopy(scenario)
+    del missing_configuration_version["execution"]["configuration"]["version"]
+    expect_invalid(scenario_validator, missing_configuration_version)
+    unsupported_configuration_version = copy.deepcopy(scenario)
+    unsupported_configuration_version["execution"]["configuration"]["version"] = "2"
+    expect_invalid(scenario_validator, unsupported_configuration_version)
+    unknown_configuration_field = copy.deepcopy(scenario)
+    unknown_configuration_field["execution"]["configuration"]["future"] = True
+    expect_invalid(scenario_validator, unknown_configuration_field)
+    excessive_feedback_cap = copy.deepcopy(scenario)
+    excessive_feedback_cap["max_internal_events"] = 100001
+    expect_invalid(scenario_validator, excessive_feedback_cap)
+    excessive_catalog = copy.deepcopy(scenario)
+    excessive_catalog["instruments"] = [scenario["instruments"][0]] * 4097
+    expect_invalid(scenario_validator, excessive_catalog)
+    excessive_intents = copy.deepcopy(scenario)
+    intent = scenario["schedule"][0]["intents"][0]
+    excessive_intents["schedule"][0]["intents"] = [intent] * 4097
+    expect_invalid(scenario_validator, excessive_intents)
     unversioned_stream_record = copy.deepcopy(stream_records[0])
     del unversioned_stream_record["contract_version"]
     expect_invalid(stream_validator, unversioned_stream_record)
@@ -150,23 +143,17 @@ def main() -> None:
     malformed_stream_slice = copy.deepcopy(stream_records[1])
     malformed_stream_slice["payload"]["market_slice"]["unexpected"] = True
     expect_invalid(stream_validator, malformed_stream_slice)
-    if contract_version in {"3", "4", "5", "6"}:
-        excessive_stream_catalog = copy.deepcopy(stream_records[0])
-        excessive_stream_catalog["payload"]["instruments"] = (
-            [stream_records[0]["payload"]["instruments"][0]] * 4097
-        )
-        expect_invalid(stream_validator, excessive_stream_catalog)
-        excessive_stream_intents = copy.deepcopy(stream_records[1])
-        intent = scenario["schedule"][0]["intents"][0]
-        excessive_stream_intents["payload"]["intents"] = [intent] * 4097
-        expect_invalid(stream_validator, excessive_stream_intents)
+    excessive_stream_catalog = copy.deepcopy(stream_records[0])
+    excessive_stream_catalog["payload"]["instruments"] = (
+        [stream_records[0]["payload"]["instruments"][0]] * 4097
+    )
+    expect_invalid(stream_validator, excessive_stream_catalog)
+    excessive_stream_intents = copy.deepcopy(stream_records[1])
+    intent = scenario["schedule"][0]["intents"][0]
+    excessive_stream_intents["payload"]["intents"] = [intent] * 4097
+    expect_invalid(stream_validator, excessive_stream_intents)
     noncanonical = copy.deepcopy(scenario)
-    if contract_version in {"3", "4"}:
-        noncanonical["initial_cash"][0]["amount"] = "10000.0"
-    elif contract_version == "6":
-        noncanonical["initial_portfolio"]["cash"][0]["amount"] = "10000.0"
-    else:
-        noncanonical["initial_cash"] = "10000.0"
+    noncanonical["initial_portfolio"]["cash"][0]["amount"] = "10000.0"
     expect_invalid(scenario_validator, noncanonical)
     first_journal_record = json.loads(
         journal_path.read_text(encoding="utf-8").splitlines()[0]
@@ -187,31 +174,30 @@ def main() -> None:
         json.loads(line)
         for line in journal_path.read_text(encoding="utf-8").splitlines()
     ]
-    if contract_version == "4":
-        fill_clipped = copy.deepcopy(first_journal_record)
-        fill_clipped["event_type"] = "fill_clipped"
-        fill_clipped["payload"] = {
-            "reason": {
-                "version": "1",
-                "policy": "max_leverage",
-                "threshold": {"unit": "ratio", "value": "2"},
-            },
-            "order_id": "fixture-order",
-            "instrument_id": "fixture-instrument",
-            "proposed_quantity": "10",
-            "permitted_quantity": "5",
-            "price": "100",
-        }
-        journal_validator.validate(fill_clipped)
-        mismatched_threshold = copy.deepcopy(fill_clipped)
-        mismatched_threshold["payload"]["reason"]["threshold"] = {
-            "unit": "money",
-            "value": "2",
-        }
-        expect_invalid(journal_validator, mismatched_threshold)
-        unknown_policy = copy.deepcopy(fill_clipped)
-        unknown_policy["payload"]["reason"]["policy"] = "future_policy"
-        expect_invalid(journal_validator, unknown_policy)
+    fill_clipped = copy.deepcopy(first_journal_record)
+    fill_clipped["event_type"] = "fill_clipped"
+    fill_clipped["payload"] = {
+        "reason": {
+            "version": "1",
+            "policy": "max_leverage",
+            "threshold": {"unit": "ratio", "value": "2"},
+        },
+        "order_id": "fixture-order",
+        "instrument_id": "fixture-instrument",
+        "proposed_quantity": "10",
+        "permitted_quantity": "5",
+        "price": "100",
+    }
+    journal_validator.validate(fill_clipped)
+    mismatched_threshold = copy.deepcopy(fill_clipped)
+    mismatched_threshold["payload"]["reason"]["threshold"] = {
+        "unit": "money",
+        "value": "2",
+    }
+    expect_invalid(journal_validator, mismatched_threshold)
+    unknown_policy = copy.deepcopy(fill_clipped)
+    unknown_policy["payload"]["reason"]["policy"] = "future_policy"
+    expect_invalid(journal_validator, unknown_policy)
     order_record = next(
         record for record in journal_records if record["event_type"] == "order_accepted"
     )
