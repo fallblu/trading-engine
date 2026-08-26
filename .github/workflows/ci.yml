@@ -108,7 +108,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      PERSISTRA_COMPAT_REVISION: 6874e175098519eef9904edf0bb9f27b244982e4
+      PERSISTRA_COMPAT_REVISION: 2f8beeaab87f4c456f7040f327314afe67306a54
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
