@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [1.1.1] - 2026-09-04
+
 - Make development bootstrap repair a stale globally registered coverage repository URL before
   selecting it for the repository-local switch.
 
