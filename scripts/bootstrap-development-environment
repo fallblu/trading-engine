@@ -35,10 +35,19 @@ if [ ! -f "$repository_root/_opam/.opam-switch/switch-config" ]; then
 fi
 
 printf '%s\n' "Registering the checksummed OCaml coverage package..."
-opam repository add "$coverage_repository_name" "$coverage_repository" \
-  --rank 1 \
-  --switch "$repository_root" \
-  --yes
+if opam repository list --all --short --color never 2>/dev/null \
+  | grep -Fqx "$coverage_repository_name"; then
+  opam repository set-url "$coverage_repository_name" "$coverage_repository" --yes
+  opam repository add "$coverage_repository_name" \
+    --rank 1 \
+    --switch "$repository_root" \
+    --yes
+else
+  opam repository add "$coverage_repository_name" "$coverage_repository" \
+    --rank 1 \
+    --switch "$repository_root" \
+    --yes
+fi
 
 if opam pin list --switch "$repository_root" --short | grep -Fqx "bisect_ppx"; then
   opam pin remove bisect_ppx \
