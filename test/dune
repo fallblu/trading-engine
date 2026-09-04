@@ -117,6 +117,7 @@
  (alias runtest)
  (deps
   test_development_environment.py
+  ../scripts/bootstrap-development-environment
   ../scripts/check-schema-environment.py)
  (action
   (run python3 %{dep:test_development_environment.py})))

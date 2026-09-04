@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Make development bootstrap repair a stale globally registered coverage repository URL before
+  selecting it for the repository-local switch.
+
 ## [1.1.0] - 2026-08-26
 
 - Reset the scenario, journal, strategy, execution-configuration, CLI, and diagnostic contracts to
