@@ -27,7 +27,7 @@ body:
     id: version
     attributes:
       label: Engine revision or version
-      placeholder: v1.0.0 or a full commit SHA
+      placeholder: v1.1.1 or a full commit SHA
     validations:
       required: true
   - type: input

@@ -2,7 +2,7 @@ let version = "1"
 let supported_versions = [ version ]
 let is_supported version = List.mem version supported_versions
 let strategy_protocol_version = "1"
-let engine_version = "1.0.0"
+let engine_version = "1.1.1"
 let strings values = `List (List.map (fun value -> `String value) values)
 
 let capabilities_to_yojson () =
